@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+echo "Running pre-commit checks..."
+
+make fmt-check
+make frontend-format-check
+make clippy
+make frontend-lint
+make frontend-typecheck
+make test
+make frontend-test
+make perf-check

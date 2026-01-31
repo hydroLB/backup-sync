@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+
+# Rust
+/target/
+**/target/
+
+# Node
+/node_modules/
+**/node_modules/
+crates/gui/frontend/dist/
+crates/gui/frontend/.eslintcache
+crates/gui/frontend/.vite/
+
+# Logs
+*.log
+
+# Env files
+.env
+.env.*
+
+# Coverage
+coverage/
+
+# Tauri
+crates/gui/src-tauri/target/

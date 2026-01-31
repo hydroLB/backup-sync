@@ -1,0 +1,43 @@
+{
+  "package": {
+    "productName": "Backup Sync",
+    "version": "0.1.0"
+  },
+  "build": {
+    "beforeDevCommand": "cd ../frontend && npm run dev",
+    "beforeBuildCommand": "cd ../frontend && npm run build",
+    "devPath": "http://localhost:5173",
+    "distDir": "../frontend/dist"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "dialog": {
+        "all": true
+      },
+      "path": {
+        "all": true
+      }
+    },
+    "bundle": {
+      "identifier": "com.example.backup_sync",
+      "icon": [
+        "src-tauri/icons/icon.png",
+        "src-tauri/icons/icon-512.png",
+        "src-tauri/icons/icon-256.png",
+        "src-tauri/icons/icon-128.png"
+      ]
+    },
+    "systemTray": {
+      "iconPath": "src-tauri/icons/tray.png",
+      "menuOnLeftClick": true
+    },
+    "windows": [
+      {
+        "title": "Backup Sync",
+        "width": 1000,
+        "height": 720
+      }
+    ]
+  }
+}
