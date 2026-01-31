@@ -1,0 +1,65 @@
+use anyhow::{Context, Result};
+use backup_core::platform::paths;
+use std::path::PathBuf;
+
+/// Purpose: Snapshot of resolved daemon paths after environment validation.
+///
+/// Inputs: resolved from platform specific path helpers.
+/// Outputs: a set of resolved filesystem paths.
+/// Ties to: daemon startup diagnostics.
+/// Side effects: None.
+/// Why: keep path resolution centralized and reusable.
+#[derive(Debug, Clone)]
+pub struct EnvironmentSnapshot {
+    pub config_path: PathBuf,
+    pub state_path: PathBuf,
+    pub log_path: PathBuf,
+}
+
+/// Purpose: Validates that required directories are available and writable.
+///
+/// Inputs: none.
+/// Outputs: an `EnvironmentSnapshot` with resolved paths.
+/// Ties to: daemon startup checks before loading config or state.
+/// Side effects: Creates parent directories required for daemon persistence.
+/// Why: fail fast when the environment cannot persist required files.
+pub fn validate_environment() -> Result<EnvironmentSnapshot> {
+    let config_path = paths::config_file_path()
+        .context("daemon::init::validate_environment failed to resolve config path")?;
+    let state_path = paths::state_file_path()
+        .context("daemon::init::validate_environment failed to resolve state path")?;
+    let log_path = paths::log_file_path()
+        .context("daemon::init::validate_environment failed to resolve log path")?;
+    ensure_parent_dir(&config_path, "config")?;
+    ensure_parent_dir(&state_path, "state")?;
+    ensure_parent_dir(&log_path, "log")?;
+    Ok(EnvironmentSnapshot {
+        config_path,
+        state_path,
+        log_path,
+    })
+}
+
+/// Purpose: Ensures the parent directory for a file path exists.
+///
+/// Inputs: the file path and a label used in error messages.
+/// Outputs: `Ok(())` when the directory exists or is created.
+/// Ties to: environment validation for daemon persistence paths.
+/// Side effects: Creates parent directories on disk when missing.
+/// Why: guarantee directories are ready before IO begins.
+pub fn ensure_parent_dir(path: &PathBuf, label: &str) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        anyhow::anyhow!(
+            "daemon::init::ensure_parent_dir missing parent directory for {} path {:?}",
+            label,
+            path
+        )
+    })?;
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "daemon::init::ensure_parent_dir failed to create {} parent directory {:?}",
+            label, parent
+        )
+    })?;
+    Ok(())
+}

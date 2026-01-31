@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+echo "[pre-push] Running Rust tests"
+cargo test -p backup_core -p daemon -p cli
+
+echo "[pre-push] Running frontend tests"
+( cd crates/gui/frontend && npm test )
+
+echo "[pre-push] Checking performance baseline"
+./scripts/perf/check_baseline.sh

@@ -1,0 +1,45 @@
+{
+  "package": {
+    "productName": "Local Backup Manager",
+    "version": "0.1.0"
+  },
+  "build": {
+    "beforeDevCommand": "cd ../frontend && npm run build",
+    "beforeBuildCommand": "cd ../frontend && npm run build",
+    "devPath": "../frontend/dist",
+    "distDir": "../frontend/dist"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "dialog": {
+        "all": true
+      },
+      "path": {
+        "all": true
+      }
+    },
+    "bundle": {
+      "identifier": "com.example.backup_sync",
+      "icon": [
+        "src-tauri/icons/icon.png",
+        "src-tauri/icons/icon-512.png",
+        "src-tauri/icons/icon-256.png",
+        "src-tauri/icons/icon-128.png"
+      ]
+    },
+    "systemTray": {
+      "iconPath": "icons/tray.png",
+      "menuOnLeftClick": true
+    },
+    "windows": [
+      {
+        "title": "Local Backup Manager",
+        "width": 1000,
+        "height": 720,
+        "visible": true,
+        "focus": true
+      }
+    ]
+  }
+}
