@@ -6,8 +6,8 @@
   "build": {
     "beforeDevCommand": "cd ../frontend && npm run build",
     "beforeBuildCommand": "cd ../frontend && npm run build",
-    "devPath": "../frontend/dist",
-    "distDir": "../frontend/dist"
+    "devPath": "frontend/dist",
+    "distDir": "frontend/dist"
   },
   "tauri": {
     "allowlist": {
@@ -29,7 +29,7 @@
       ]
     },
     "systemTray": {
-      "iconPath": "icons/tray.png",
+      "iconPath": "src-tauri/icons/tray.png",
       "menuOnLeftClick": true
     },
     "windows": [

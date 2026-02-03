@@ -27,7 +27,7 @@ export function useValidation() {
           ? next.destinations
           : [{ id: "default", path: next.backup_root, label: "Primary", max_backups_per_file: null }];
       if (!destinations.length) return "Add at least one backup destination.";
-      const primary = destinations[0].path;
+      const primary = destinations[0]?.path ?? "";
       if (!next.watched || next.watched.length === 0) return "Add at least one folder or file to back up.";
       if (next.watched.length > 500) return "Too many watched entries; trim to 500 or fewer.";
       if (!primary || primary.trim().length === 0) return "Pick a backup destination.";

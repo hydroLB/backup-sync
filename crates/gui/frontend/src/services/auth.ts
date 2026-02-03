@@ -1,5 +1,5 @@
 import { correlationId } from "./correlation";
-import { safeInvoke } from "./ipc";
+import { safeInvoke, wrapError } from "./ipc";
 
 export type AuthStatus = { unlocked: boolean; seconds_left: number | null };
 
@@ -21,8 +21,7 @@ export async function unlockSession(passcode: string): Promise<string> {
       correlationId: correlationId("auth"),
     });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[unlockSession] Failed to unlock session: ${reason}`);
+    throw wrapError("[unlockSession] Failed to unlock session", error);
   }
 }
 
@@ -30,17 +29,16 @@ export async function unlockSession(passcode: string): Promise<string> {
  * Purpose: Lock the session immediately.
  *
  * Inputs: None.
- * Outputs: A backend status message string.
+ * Outputs: Resolves when the lock completes.
  * Ties to: GUI lock flows and backend auth commands.
  * Side effects: Invokes IPC calls that update auth state.
  * Why: Allows users to revoke privileged access on demand.
  */
-export async function lockSession(): Promise<string> {
+export async function lockSession(): Promise<void> {
   try {
-    return await safeInvoke<string>("lock_session_cmd");
+    return await safeInvoke<void>("lock_session_cmd");
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[lockSession] Failed to lock session: ${reason}`);
+    throw wrapError("[lockSession] Failed to lock session", error);
   }
 }
 
@@ -58,7 +56,6 @@ export async function authStatus(): Promise<AuthStatus> {
     const [unlocked, seconds_left] = await safeInvoke<AuthStatusResponse>("auth_status_cmd");
     return { unlocked, seconds_left };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[authStatus] Failed to fetch auth status: ${reason}`);
+    throw wrapError("[authStatus] Failed to fetch auth status", error);
   }
 }

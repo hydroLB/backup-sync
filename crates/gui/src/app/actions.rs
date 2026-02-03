@@ -13,6 +13,7 @@ use tauri::{Manager, SystemTrayEvent, WindowEvent};
 /// Why: provide a consistent way to surface the UI.
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }

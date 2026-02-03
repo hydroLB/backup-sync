@@ -27,7 +27,6 @@ type Props = {
   onUseDesktopDest: () => void;
   onUseDocumentsDest: () => void;
   onUseDownloadsDest: () => void;
-  onSetPreset: (preset: "quiet" | "balanced" | "fast") => void;
   onStartOnLogin: () => void;
   onTestBackup: () => void;
   onNext: () => void;
@@ -63,7 +62,6 @@ const OnboardingOverlay: React.FC<Props> = ({
   onUseDesktopDest,
   onUseDocumentsDest,
   onUseDownloadsDest,
-  onSetPreset,
   onStartOnLogin,
   onTestBackup,
   onNext,

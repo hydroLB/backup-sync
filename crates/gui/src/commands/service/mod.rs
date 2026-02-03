@@ -1,6 +1,7 @@
 use crate::commands::error::ErrorEnvelope;
 use crate::commands::status::get_status;
 use crate::commands::{auth::SessionAuth, security};
+use backup_core::{load_config, validate};
 use tauri::State;
 
 mod common;
@@ -21,6 +22,28 @@ pub async fn install_service_cmd(
     auth_state: State<'_, SessionAuth>,
 ) -> Result<String, ErrorEnvelope> {
     security::ensure_unlocked(&auth_state, correlation_id.clone())?;
+
+    // Installing a service that immediately crash-loops due to missing/invalid config is noisy
+    // and makes it harder to diagnose first-run issues.
+    let cfg = load_config().map_err(|e| {
+        ErrorEnvelope::new(
+            "CONFIG_INVALID",
+            format!(
+                "service::install_service_cmd failed to load config; complete setup first: {}",
+                e
+            ),
+        )
+    })?;
+    validate(&cfg).map_err(|e| {
+        ErrorEnvelope::new(
+            "CONFIG_INVALID",
+            format!(
+                "service::install_service_cmd config validation failed; fix config first: {}",
+                e
+            ),
+        )
+    })?;
+
     let (exec, log_path) = common::load_exec_and_log()?;
     let log_path = log_path.as_deref();
     #[cfg(target_os = "macos")]

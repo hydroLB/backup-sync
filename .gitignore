@@ -8,6 +8,7 @@
 # Node
 /node_modules/
 **/node_modules/
+.npm-cache/
 crates/gui/frontend/dist/
 crates/gui/frontend/.eslintcache
 crates/gui/frontend/.vite/

@@ -13,7 +13,7 @@ import PlanModal from "./PlanModal";
 import LowSpaceGuard from "./LowSpaceGuard";
 import { StatusDto, ServiceStatusDto, VerifyResult } from "../../services/types";
 import { getLogTail } from "../../services/logs";
-import { tauriAvailable } from "../../services/ipc";
+import { IpcError, tauriAvailable } from "../../services/ipc";
 import { UI_TUNING } from "../../config/uiTuning";
 
 type Props = { onEvent?: (msg: string, kind?: ActionLogEntry["kind"]) => void; onSafeMode?: (v: boolean) => void };
@@ -30,6 +30,31 @@ type Props = { onEvent?: (msg: string, kind?: ActionLogEntry["kind"]) => void; o
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   return String(error);
+};
+
+/**
+ * Purpose: Convert known IPC error codes into a user-facing message.
+ *
+ * Inputs: IPC error or unknown error payload.
+ * Outputs: A user friendly message string.
+ * Ties to: Status refresh and offline banners.
+ * Side effects: None.
+ * Why: Keep UI messages actionable without leaking internal stack context.
+ */
+const displayError = (error: unknown): string => {
+  if (error instanceof IpcError) {
+    if (error.code === "DAEMON_OFFLINE") {
+      return "Not connected yet. Finish setup, or enable Start on login to keep the daemon running.";
+    }
+    if (error.code === "IPC_TIMEOUT") {
+      return "Daemon did not respond in time. If this persists, restart the daemon or check logs.";
+    }
+    if (error.code === "TAURI_UNAVAILABLE") {
+      return "IPC unavailable. Launch the desktop app (./start) instead of a browser.";
+    }
+    return error.message;
+  }
+  return errorMessage(error);
 };
 
 /**
@@ -119,7 +144,7 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       })
       .catch((e) => {
         console.error(e);
-        setError(`[StatusCard::refresh] ${errorMessage(e)}`);
+        setError(displayError(e));
         setStatus(null);
         setActionMsg("");
       })
@@ -341,9 +366,9 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
         <ServiceBanner
           message={serviceStatus.message}
           reachable={serviceStatus.reachable}
-          fixCommand={serviceStatus.fix_command}
-          uptimeSecs={serviceStatus.uptime_secs}
-          lastIpcTs={serviceStatus.last_ipc_ts}
+          fixCommand={serviceStatus.fix_command ?? ""}
+          uptimeSecs={serviceStatus.uptime_secs ?? null}
+          lastIpcTs={serviceStatus.last_ipc_ts ?? null}
           onFix={() => runAction(installService, "Start on login")}
         />
       )}
@@ -360,7 +385,7 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
         version={status.version}
         uptime_secs={status.uptime_secs}
         free_bytes={status.free_bytes}
-        safe_mode={status.safe_mode}
+        safe_mode={status.safe_mode ?? false}
       />
       <LowSpaceGuard
         freeBytes={status.free_bytes}

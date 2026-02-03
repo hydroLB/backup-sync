@@ -87,13 +87,20 @@ use crate::commands::error::ErrorEnvelope;
 /// Side effects: Performs an IPC request to the daemon.
 /// Why: provide the UI with up to date daemon health information.
 pub async fn get_status() -> Result<StatusDto, ErrorEnvelope> {
-    status_api::fetch_status()
-        .await
-        .map(StatusDto::from)
-        .map_err(|e| {
-            ErrorEnvelope::new(
+    match status_api::fetch_status().await {
+        Ok(s) => Ok(StatusDto::from(s)),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("daemon IPC socket not found") {
+                return Err(ErrorEnvelope::new(
+                    "DAEMON_OFFLINE",
+                    "Daemon not running yet. Finish setup, then enable Start on login to keep it running in the background.",
+                ));
+            }
+            Err(ErrorEnvelope::new(
                 "STATUS_UNAVAILABLE",
                 format!("status::get_status failed to fetch status: {}", e),
-            )
-        })
+            ))
+        }
+    }
 }

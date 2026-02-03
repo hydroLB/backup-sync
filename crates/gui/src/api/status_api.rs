@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
+use std::time::Duration;
+use tokio::time::timeout;
 
 #[derive(Deserialize, Debug, Clone)]
 /// Purpose: Status payload returned by the daemon IPC server.
@@ -40,6 +42,98 @@ pub struct DestinationStatus {
     pub free_bytes: Option<u64>,
 }
 
+const DEFAULT_IPC_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_IPC_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+const STATUS_REQUEST_BYTES: &[u8] = br#"{"type":"Status"}"#;
+
+/// Purpose: Resolve the IPC timeout used for status calls.
+///
+/// Inputs: Reads config if available.
+/// Outputs: A timeout duration for IPC operations.
+/// Ties to: `fetch_status` connection and read/write time bounds.
+/// Side effects: May read configuration from disk.
+/// Why: Keep IPC calls bounded even when the daemon or filesystem misbehaves.
+fn resolve_ipc_timeout() -> Duration {
+    match backup_core::load_config() {
+        Ok(cfg) => Duration::from_secs(cfg.runtime.ipc_timeout_seconds.max(1)),
+        Err(_) => DEFAULT_IPC_TIMEOUT,
+    }
+}
+
+/// Purpose: Read an IPC response to EOF with a hard size cap.
+///
+/// Inputs: A readable stream and maximum byte limit.
+/// Outputs: The collected bytes.
+/// Ties to: `fetch_status_over_stream` response parsing.
+/// Side effects: Reads from the IPC stream until EOF or error.
+/// Why: Avoid unbounded memory growth on malformed or hostile IPC peers.
+async fn read_bounded_to_end<R>(
+    reader: &mut R,
+    max_bytes: usize,
+    op_timeout: Duration,
+) -> Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = timeout(op_timeout, reader.read(&mut chunk))
+            .await
+            .context("status_api::read_bounded_to_end timed out while reading")?
+            .context("status_api::read_bounded_to_end failed while reading")?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > max_bytes {
+            return Err(anyhow!(
+                "status_api::read_bounded_to_end response exceeded {} bytes",
+                max_bytes
+            ));
+        }
+    }
+    Ok(buf)
+}
+
+/// Purpose: Perform the status request/response exchange on an established IPC stream.
+///
+/// Inputs: A connected stream and an operation timeout.
+/// Outputs: A deserialized `Status` value.
+/// Ties to: `fetch_status` and the daemon's IPC server implementation.
+/// Side effects: Writes a JSON request, half-closes the write side, then reads a JSON reply.
+/// Why: Keep the on-the-wire protocol consistent and testable, and prevent request deadlocks.
+async fn fetch_status_over_stream<S>(mut stream: S, op_timeout: Duration) -> Result<Status>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    timeout(op_timeout, stream.write_all(STATUS_REQUEST_BYTES))
+        .await
+        .context("status_api::fetch_status_over_stream timed out writing status request")?
+        .context("status_api::fetch_status_over_stream failed to write status request")?;
+
+    // The daemon reads the request using `read_to_end`, so the client must signal EOF on the write
+    // half to avoid both sides waiting indefinitely.
+    timeout(op_timeout, stream.shutdown())
+        .await
+        .context("status_api::fetch_status_over_stream timed out shutting down write half")?
+        .ok();
+
+    let buf = read_bounded_to_end(&mut stream, MAX_IPC_RESPONSE_BYTES, op_timeout).await?;
+    if buf.is_empty() {
+        return Err(anyhow!(
+            "status_api::fetch_status_over_stream empty status response from daemon"
+        ));
+    }
+    let raw = String::from_utf8_lossy(&buf);
+    Ok(serde_json::from_slice(&buf).with_context(|| {
+        format!(
+            "status_api::fetch_status_over_stream failed to parse response: {}",
+            raw
+        )
+    })?)
+}
+
 #[cfg(windows)]
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -61,27 +155,23 @@ use tokio::{
 /// Why: provide up to date daemon status to the UI.
 pub async fn fetch_status() -> Result<Status> {
     let socket = super::socket_path()?;
-    let mut stream = UnixStream::connect(&socket)
-        .await
-        .with_context(|| format!("status_api::fetch_status failed to connect to {:?}", socket))?;
-    let req = serde_json::json!({ "type": "Status" });
-    stream
-        .write_all(req.to_string().as_bytes())
-        .await
-        .context("status_api::fetch_status failed to write status request")?;
-    let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .await
-        .context("status_api::fetch_status failed to read status response")?;
-    if buf.is_empty() {
+    if !socket.exists() {
         return Err(anyhow!(
-            "status_api::fetch_status empty status response from daemon"
+            "status_api::fetch_status daemon IPC socket not found at {:?}",
+            socket
         ));
     }
-    let raw = String::from_utf8_lossy(&buf);
-    Ok(serde_json::from_slice(&buf)
-        .with_context(|| format!("status_api::fetch_status failed to parse response: {}", raw))?)
+    let op_timeout = resolve_ipc_timeout();
+    let stream = timeout(op_timeout, UnixStream::connect(&socket))
+        .await
+        .with_context(|| {
+            format!(
+                "status_api::fetch_status timed out connecting to daemon socket {:?}",
+                socket
+            )
+        })?
+        .with_context(|| format!("status_api::fetch_status failed to connect to {:?}", socket))?;
+    fetch_status_over_stream(stream, op_timeout).await
 }
 
 #[cfg(windows)]
@@ -93,27 +183,38 @@ pub async fn fetch_status() -> Result<Status> {
 /// Side effects: Performs IPC over a Windows named pipe.
 /// Why: provide up to date daemon status to the UI.
 pub async fn fetch_status() -> Result<Status> {
+    let op_timeout = resolve_ipc_timeout();
     let mut stream = ClientOptions::new()
         .open(r"\\.\pipe\backup_sync_ipc")
         .with_context(|| {
             "status_api::fetch_status failed to connect to named pipe \\\\.\\pipe\\backup_sync_ipc"
         })?;
-    let req = serde_json::json!({ "type": "Status" });
-    stream
-        .write_all(req.to_string().as_bytes())
-        .await
-        .context("status_api::fetch_status failed to write status request")?;
-    let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .await
-        .context("status_api::fetch_status failed to read status response")?;
-    if buf.is_empty() {
-        return Err(anyhow!(
-            "status_api::fetch_status empty status response from daemon"
-        ));
+    // Windows named pipes implement AsyncRead/AsyncWrite; reuse the shared protocol handler.
+    fetch_status_over_stream(&mut stream, op_timeout).await
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn fetch_status_over_stream_signals_eof_to_avoid_deadlock() {
+        let (mut client, mut server) = tokio::net::UnixStream::pair().unwrap();
+        let server_task = tokio::spawn(async move {
+            // Simulate the daemon behavior: read to EOF before responding.
+            let mut req = Vec::new();
+            server.read_to_end(&mut req).await.unwrap();
+            assert_eq!(req, STATUS_REQUEST_BYTES);
+            let reply = br#"{"last_run_ts":null,"last_files_backed_up":0,"last_error":null,"last_dirty_count":0,"uptime_secs":null,"version":null,"free_bytes":null,"last_verify_ts":null,"last_verify_status":null,"last_verify_issues":null,"recent_activity":[],"safe_mode":false,"destinations":[]}"#;
+            server.write_all(reply).await.unwrap();
+            server.shutdown().await.ok();
+        });
+
+        let st = fetch_status_over_stream(&mut client, Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert_eq!(st.last_files_backed_up, 0);
+        server_task.await.unwrap();
     }
-    let raw = String::from_utf8_lossy(&buf);
-    Ok(serde_json::from_slice(&buf)
-        .with_context(|| format!("status_api::fetch_status failed to parse response: {}", raw))?)
 }

@@ -55,6 +55,20 @@ fn load_passphrase() -> Result<String, ErrorEnvelope> {
     Ok(passphrase)
 }
 
+/// Purpose: Indicates whether passphrase-based auth is enabled for this process.
+///
+/// Inputs: none.
+/// Outputs: `true` when a non-empty passphrase is present in the environment.
+/// Ties to: `auth_status_cmd`, `unlock_session_cmd`, and guarded command enforcement.
+/// Side effects: Reads process environment variables.
+/// Why: Allow auth to be opt-in while still enforcing it when configured.
+pub(crate) fn auth_enabled() -> bool {
+    match env::var(AUTH_PASSPHRASE_ENV) {
+        Ok(v) => !v.trim().is_empty(),
+        Err(_) => false,
+    }
+}
+
 /// Purpose: Ensures the passphrase is configured for auth.
 ///
 /// Inputs: none.
@@ -63,6 +77,9 @@ fn load_passphrase() -> Result<String, ErrorEnvelope> {
 /// Side effects: Reads process environment variables.
 /// Why: prevent silent auth bypass when no passphrase is set.
 pub(crate) fn ensure_passphrase_configured() -> Result<(), ErrorEnvelope> {
+    if !auth_enabled() {
+        return Ok(());
+    }
     load_passphrase().map(|_| ())
 }
 
@@ -188,6 +205,10 @@ impl SessionAuth {
 /// Side effects: Reads shared auth state.
 /// Why: allow the UI to show lock status.
 pub fn auth_status_cmd(_state: State<SessionAuth>) -> Result<(bool, Option<u64>), ErrorEnvelope> {
+    if !auth_enabled() {
+        // When the passphrase is not configured, treat auth as disabled and allow UI actions.
+        return Ok((true, None));
+    }
     ensure_passphrase_configured()?;
     Ok((_state.is_unlocked(), _state.seconds_left()))
 }
@@ -205,6 +226,12 @@ pub fn unlock_session_cmd(
     correlation_id: Option<String>,
     state: State<SessionAuth>,
 ) -> Result<String, ErrorEnvelope> {
+    if !auth_enabled() {
+        return Ok(format!(
+            "Session auth is disabled because {} is not set.",
+            AUTH_PASSPHRASE_ENV
+        ));
+    }
     let expected = load_passphrase()?;
     if !constant_time_eq(&_passcode, &expected) {
         let cid = crate::commands::correlation::cid("auth", correlation_id);
@@ -233,6 +260,9 @@ pub fn unlock_session_cmd(
 /// Side effects: Mutates shared auth state to lock the session.
 /// Why: allow the UI to revoke privileged access.
 pub fn lock_session_cmd(state: State<SessionAuth>) -> Result<(), ErrorEnvelope> {
+    if !auth_enabled() {
+        return Ok(());
+    }
     ensure_passphrase_configured()?;
     state.lock();
     Ok(())

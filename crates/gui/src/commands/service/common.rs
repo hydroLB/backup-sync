@@ -7,6 +7,8 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
+const DAEMON_EXEC_ENV: &str = "BACKUP_SYNC_DAEMON_EXEC";
+
 /// Purpose: Loads runtime tuning for service command execution.
 ///
 /// Inputs: none.
@@ -27,6 +29,88 @@ fn resolve_runtime_tuning() -> RuntimeTuning {
     }
 }
 
+/// Purpose: Resolve the daemon executable path for service installation.
+///
+/// Inputs: the current executable location and optional override environment variable.
+/// Outputs: the canonical daemon executable path.
+/// Ties to: `load_exec_and_log` and service manifest generation.
+/// Side effects: Reads environment variables and filesystem metadata.
+/// Why: Services must execute the daemon binary, not the GUI or CLI wrapper.
+fn resolve_daemon_exec() -> Result<PathBuf, ErrorEnvelope> {
+    if let Ok(v) = std::env::var(DAEMON_EXEC_ENV) {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            let p = p.canonicalize().map_err(|e| {
+                ErrorEnvelope::new(
+                    "SERVICE_EXEC",
+                    format!(
+                        "service::resolve_daemon_exec failed to canonicalize {} override {:?}: {}",
+                        DAEMON_EXEC_ENV, p, e
+                    ),
+                )
+            })?;
+            if !p.is_file() {
+                return Err(ErrorEnvelope::new(
+                    "SERVICE_EXEC",
+                    format!(
+                        "service::resolve_daemon_exec {} override is not a file: {:?}",
+                        DAEMON_EXEC_ENV, p
+                    ),
+                ));
+            }
+            return Ok(p);
+        }
+    }
+
+    let current = std::env::current_exe().map_err(|e| {
+        ErrorEnvelope::new(
+            "SERVICE_EXEC",
+            format!(
+                "service::resolve_daemon_exec failed to find current executable: {}",
+                e
+            ),
+        )
+    })?;
+    let parent = current.parent().ok_or_else(|| {
+        ErrorEnvelope::new(
+            "SERVICE_EXEC",
+            format!(
+                "service::resolve_daemon_exec current executable has no parent directory: {:?}",
+                current
+            ),
+        )
+    })?;
+
+    #[cfg(windows)]
+    let candidate = parent.join("daemon.exe");
+    #[cfg(not(windows))]
+    let candidate = parent.join("daemon");
+
+    if candidate.exists() {
+        let p = candidate.canonicalize().map_err(|e| {
+            ErrorEnvelope::new(
+                "SERVICE_EXEC",
+                format!(
+                    "service::resolve_daemon_exec failed to canonicalize daemon candidate {:?}: {}",
+                    candidate, e
+                ),
+            )
+        })?;
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+
+    Err(ErrorEnvelope::new(
+        "SERVICE_EXEC",
+        format!(
+            "service::resolve_daemon_exec could not locate daemon binary. Set {} to an explicit path or build the daemon (for dev: `cargo build -p daemon`). Current exe: {:?}",
+            DAEMON_EXEC_ENV, current
+        ),
+    ))
+}
+
 /// Purpose: Loads the current executable path and optional log path.
 ///
 /// Inputs: the current process environment and platform log path resolver.
@@ -35,24 +119,7 @@ fn resolve_runtime_tuning() -> RuntimeTuning {
 /// Side effects: Reads environment and filesystem metadata for executable resolution.
 /// Why: ensure service manifests reference the correct binary.
 pub fn load_exec_and_log() -> Result<(PathBuf, Option<PathBuf>), ErrorEnvelope> {
-    let exec = std::env::current_exe().map_err(|e| {
-        ErrorEnvelope::new(
-            "SERVICE_EXEC",
-            format!(
-                "service::load_exec_and_log failed to find executable: {}",
-                e
-            ),
-        )
-    })?;
-    let exec = exec.canonicalize().map_err(|e| {
-        ErrorEnvelope::new(
-            "SERVICE_EXEC",
-            format!(
-                "service::load_exec_and_log failed to canonicalize executable: {}",
-                e
-            ),
-        )
-    })?;
+    let exec = resolve_daemon_exec()?;
     let log_path = backup_core::platform::paths::log_file_path().ok();
     Ok((exec, log_path.map(PathBuf::from)))
 }

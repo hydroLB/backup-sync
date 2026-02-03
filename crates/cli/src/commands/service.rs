@@ -7,6 +7,65 @@ use daemon::integration::systemd;
 use daemon::integration::windows_service;
 use std::path::PathBuf;
 
+const DAEMON_EXEC_ENV: &str = "BACKUP_SYNC_DAEMON_EXEC";
+
+/// Purpose: Resolve the daemon executable path for service installation.
+///
+/// Inputs: Optional override environment variable and current executable location.
+/// Outputs: A canonicalized daemon executable path.
+/// Ties to: `install_service` manifest generation for launchd/systemd/schtasks.
+/// Side effects: Reads environment variables and filesystem metadata.
+/// Why: The service must execute the daemon binary, not the CLI wrapper.
+fn resolve_daemon_exec() -> Result<PathBuf> {
+    if let Ok(v) = std::env::var(DAEMON_EXEC_ENV) {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed).canonicalize().with_context(|| {
+                format!(
+                    "cli::resolve_daemon_exec failed to canonicalize {DAEMON_EXEC_ENV} override"
+                )
+            })?;
+            if !p.is_file() {
+                bail!(
+                    "cli::resolve_daemon_exec {DAEMON_EXEC_ENV} override is not a file: {:?}",
+                    p
+                );
+            }
+            return Ok(p);
+        }
+    }
+
+    let current = std::env::current_exe()
+        .context("cli::resolve_daemon_exec failed to determine current executable path")?
+        .canonicalize()
+        .context("cli::resolve_daemon_exec failed to canonicalize current executable path")?;
+    let parent = current.parent().ok_or_else(|| {
+        anyhow!(
+            "cli::resolve_daemon_exec current executable has no parent: {:?}",
+            current
+        )
+    })?;
+
+    #[cfg(windows)]
+    let candidate = parent.join("daemon.exe");
+    #[cfg(not(windows))]
+    let candidate = parent.join("daemon");
+
+    if candidate.exists() {
+        let p = candidate
+            .canonicalize()
+            .context("cli::resolve_daemon_exec failed to canonicalize daemon candidate")?;
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+
+    bail!(
+        "cli::resolve_daemon_exec could not locate daemon binary. Set {DAEMON_EXEC_ENV} or build/install the daemon. Current exe: {:?}",
+        current
+    );
+}
+
 /// Purpose: Installs or prints the background service definition for the platform.
 ///
 /// Inputs: service options including user scope, output path, and enable flags.
@@ -26,10 +85,8 @@ pub fn install_service(
     let user = user; // keep signature consistent; unused on non-Linux
     #[cfg(not(target_os = "linux"))]
     let _ = user;
-    let exec = std::env::current_exe()
-        .context("cli::install_service failed to determine current executable path")?
-        .canonicalize()
-        .context("cli::install_service failed to canonicalize executable path")?;
+    let exec = resolve_daemon_exec()
+        .context("cli::install_service failed to resolve daemon executable")?;
     let default_log = backup_core::platform::paths::log_file_path().ok();
     let log_path = log_path.or(default_log);
     if dry_run && print {
