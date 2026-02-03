@@ -1,4 +1,4 @@
-const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 const BYTE_BASE = 1024;
 const BYTE_SMALL_UNIT_DECIMALS = 2;
 const BYTE_LARGE_UNIT_DECIMALS = 1;
@@ -15,7 +15,7 @@ const BYTE_LARGE_UNIT_DECIMALS = 1;
 export function formatBytes(n?: number | null): string {
   try {
     if (n === undefined || n === null) {
-      return "n/a";
+      return 'n/a';
     }
     let val = n;
     let i = 0;
@@ -52,7 +52,7 @@ const MINUTES_PER_HOUR = 60;
 export function formatDuration(secs?: number | null): string {
   try {
     if (!secs || secs < 0) {
-      return "n/a";
+      return 'n/a';
     }
     const h = Math.floor(secs / SECONDS_PER_HOUR);
     const m = Math.floor((secs % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
@@ -78,7 +78,7 @@ export function formatDuration(secs?: number | null): string {
 export function formatDateTime(ts?: number | null): string {
   try {
     if (!ts) {
-      return "Never";
+      return 'Never';
     }
     return new Date(ts * 1000).toLocaleString();
   } catch (error) {
@@ -99,7 +99,7 @@ export function formatDateTime(ts?: number | null): string {
 export function formatSince(ts?: number | null): string {
   try {
     if (!ts) {
-      return "never";
+      return 'never';
     }
     const now = Date.now() / 1000;
     const delta = Math.max(0, now - ts);

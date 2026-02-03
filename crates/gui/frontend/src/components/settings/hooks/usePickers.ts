@@ -1,5 +1,5 @@
-import { open } from "@tauri-apps/api/dialog";
-import { tauriAvailable } from "../../../services/ipc";
+import { open } from '@tauri-apps/api/dialog';
+import { tauriAvailable } from '../../../services/ipc';
 
 /**
  * Purpose: Provide picker helpers for settings actions.
@@ -22,24 +22,24 @@ export function usePickers(popup: (msg: string) => void) {
    */
   const pickPathForDest = async (
     destId: string,
-    kind: "File" | "Directory",
-    addWatched: (path: string, kind: "File" | "Directory", destId?: string) => void
+    kind: 'File' | 'Directory',
+    addWatched: (path: string, kind: 'File' | 'Directory', destId?: string) => void,
   ) => {
     try {
       if (!tauriAvailable()) {
-        popup("Picker unavailable (IPC). Launch the app build to select paths.");
+        popup('Picker unavailable (IPC). Launch the app build to select paths.');
         return;
       }
       const selection = await open({
-        directory: kind === "Directory",
+        directory: kind === 'Directory',
         multiple: false,
-        title: kind === "Directory" ? "Choose folder to protect" : "Choose file to protect",
+        title: kind === 'Directory' ? 'Choose folder to protect' : 'Choose file to protect',
       });
-      if (typeof selection === "string") {
+      if (typeof selection === 'string') {
         addWatched(selection, kind, destId);
         popup(`Added ${selection}`);
       } else {
-        popup("No selection made or picker was closed.");
+        popup('No selection made or picker was closed.');
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -59,19 +59,19 @@ export function usePickers(popup: (msg: string) => void) {
   const pickDestination = async (onChosen: (path: string) => void) => {
     try {
       if (!tauriAvailable()) {
-        popup("Picker unavailable (IPC). Launch the app build to choose destination.");
+        popup('Picker unavailable (IPC). Launch the app build to choose destination.');
         return;
       }
       const selection = await open({
         directory: true,
         multiple: false,
-        title: "Choose a backup destination",
+        title: 'Choose a backup destination',
       });
-      if (typeof selection === "string") {
+      if (typeof selection === 'string') {
         onChosen(selection);
         popup(`Destination set to ${selection}`);
       } else {
-        popup("No destination selected or picker was closed.");
+        popup('No destination selected or picker was closed.');
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

@@ -1,12 +1,7 @@
 use crate::commands::error::ErrorEnvelope;
 use crate::commands::{auth::SessionAuth, security};
 use backup_core::{
-    backup::{execution::BackupExecutor, planning},
-    fs::scanning::collect_targets,
-    load_config,
-    platform::paths,
-    state::store::StateStore,
-    validate,
+    backup::versioned, load_config, platform::paths, state::store::StateStore, validate,
 };
 use fs2::free_space;
 use serde::Serialize;
@@ -40,29 +35,23 @@ fn load_and_validate_config(cid: &str) -> Result<backup_core::Config, ErrorEnvel
     Ok(cfg)
 }
 
-/// Purpose: Builds a backup plan and loads state and store for execution.
+/// Purpose: Loads the persisted daemon state store for GUI actions.
 ///
 /// Inputs: the config and correlation id string.
-/// Outputs: a tuple of plan, state store, and loaded state.
-/// Ties to: run and simulate commands and state persistence.
-/// Side effects: Reads state from disk and scans filesystem metadata.
-/// Why: centralize plan creation and related state loading.
-fn build_plan(
+/// Outputs: a tuple of state store and loaded state.
+/// Side effects: Reads state from disk.
+/// Error handling: Wraps IO failures with a correlation-id tagged envelope.
+/// Ties to other methods: Used by `run_now_cmd` for state persistence.
+/// Why this exists: centralize state loading and ensure safe-mode stays in sync with config.
+fn load_state_store(
     cfg: &backup_core::Config,
     cid: &str,
-) -> Result<
-    (
-        planning::BackupPlan,
-        StateStore,
-        backup_core::state::StoredState,
-    ),
-    ErrorEnvelope,
-> {
+) -> Result<(StateStore, backup_core::state::StoredState), ErrorEnvelope> {
     let state_path = paths::state_file_path().map_err(|e| {
         ErrorEnvelope::new(
             "STATE_PATH",
             format!(
-                "[cid={}] build_plan failed to resolve state path: {}",
+                "[cid={}] load_state_store failed to resolve state path: {}",
                 cid, e
             ),
         )
@@ -70,57 +59,11 @@ fn build_plan(
     let (mut state, store) = StateStore::load_or_default(state_path).map_err(|e| {
         ErrorEnvelope::new(
             "STATE_LOAD",
-            format!("[cid={}] build_plan failed to load state: {}", cid, e),
+            format!("[cid={}] load_state_store failed to load state: {}", cid, e),
         )
     })?;
-    let targets = collect_targets(cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "SCAN_FAILED",
-            format!(
-                "[cid={}] build_plan failed to scan watched paths: {}",
-                cid, e
-            ),
-        )
-    })?;
-    let plan = planning::plan(targets, &mut state, &cfg.planning, &cfg.hashing).map_err(|e| {
-        ErrorEnvelope::new(
-            "PLAN_FAILED",
-            format!(
-                "[cid={}] build_plan failed to build backup plan: {}",
-                cid, e
-            ),
-        )
-    })?;
-    if let Err(e) = planning::enforce_plan_limits(&plan, &cfg.planning) {
-        return Err(ErrorEnvelope::new(
-            "PLAN_TOO_LARGE",
-            format!("[cid={}] build_plan plan too large: {}", cid, e),
-        ));
-    }
-    Ok((plan, store, state))
-}
-
-/// Purpose: Executes a prepared plan and updates state with results.
-///
-/// Inputs: the config, plan, mutable state, and correlation id.
-/// Outputs: `Ok(())` when execution completes.
-/// Ties to: run command execution.
-/// Side effects: Performs filesystem IO and mutates stored state.
-/// Why: centralize execution error handling for the run command.
-fn execute_plan(
-    cfg: &backup_core::Config,
-    plan: &[planning::PlannedItem],
-    state: &mut backup_core::state::StoredState,
-    cid: &str,
-) -> Result<(), ErrorEnvelope> {
-    let exec = BackupExecutor::from_config(cfg);
-    exec.execute(plan, state).map_err(|e| {
-        ErrorEnvelope::new(
-            "EXEC_FAILED",
-            format!("[cid={}] execute_plan backup execution failed: {}", cid, e),
-        )
-    })?;
-    Ok(())
+    state.safe_mode = cfg.safe_mode;
+    Ok((store, state))
 }
 
 #[tauri::command]
@@ -168,19 +111,26 @@ pub async fn run_now_cmd(
             }
         }
     }
-    let (plan, store, mut state) = build_plan(&cfg, &cid)?;
-    if plan.is_empty() {
-        eprintln!("[cid={}] run_now no changes; exiting", cid);
-        return Ok(());
-    }
-    execute_plan(&cfg, &plan, &mut state, &cid)?;
+    let (store, mut state) = load_state_store(&cfg, &cid)?;
+    let result = versioned::run_backup_cycle(&cfg).map_err(|e| {
+        ErrorEnvelope::new(
+            "EXEC_FAILED",
+            format!("[cid={}] run_now_cmd versioned backup failed: {}", cid, e),
+        )
+    })?;
+    state.last_run_ts = Some(chrono::Utc::now().timestamp());
+    state.last_files_backed_up = result.versions_created;
+    state.last_error = None;
     store.persist(&state).map_err(|e| {
         ErrorEnvelope::new(
             "STATE_SAVE",
             format!("[cid={}] run_now_cmd failed to persist state: {}", cid, e),
         )
     })?;
-    eprintln!("[cid={}] run_now complete backed_up={}", cid, plan.len());
+    eprintln!(
+        "[cid={}] run_now complete versions_created={}",
+        cid, result.versions_created
+    );
     Ok(())
 }
 
@@ -205,40 +155,10 @@ pub async fn run_simulate_cmd(
 ) -> Result<SimulationResult, ErrorEnvelope> {
     let cid = security::cid("sim", correlation_id);
     eprintln!("[cid={}] simulate start", cid);
-    let cfg = load_and_validate_config(&cid)?;
-    let (plan, _, state) = build_plan(&cfg, &cid)?;
-    if plan.is_empty() {
-        eprintln!("[cid={}] simulate no changes", cid);
-        return Ok(SimulationResult {
-            items: 0,
-            bytes: 0,
-            sample: vec![],
-            message: "No changes detected; nothing to copy.".into(),
-        });
-    }
-    let bytes: u64 = plan.iter().map(|p| p.len).sum();
-    let sample = plan
-        .iter()
-        .take(cfg.runtime.simulation_sample_limit)
-        .map(|p| p.src.display().to_string())
-        .collect();
-    // Ensure safe_mode short-circuit is reflected
-    if cfg.safe_mode || state.safe_mode {
-        eprintln!(
-            "[cid={}] simulate safe_mode active; no writes would occur",
-            cid
-        );
-    }
-    eprintln!(
-        "[cid={}] simulate summary items={} bytes={}",
-        cid,
-        plan.len(),
-        bytes
-    );
     Ok(SimulationResult {
-        items: plan.len(),
-        bytes,
-        sample,
-        message: format!("Would back up {} items ({} bytes).", plan.len(), bytes),
+        items: 0,
+        bytes: 0,
+        sample: vec![],
+        message: "Simulation is not available in the simplified versioned-backup engine.".into(),
     })
 }

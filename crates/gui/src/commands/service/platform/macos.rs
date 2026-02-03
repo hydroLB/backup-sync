@@ -33,7 +33,7 @@ fn launchctl_target() -> Result<String, ErrorEnvelope> {
 /// Ties to: service installation on macOS.
 /// Side effects: Writes the launchd plist file to disk.
 /// Why: install the daemon to start on login.
-pub fn write_plist(exec: &PathBuf, log_path: Option<&Path>) -> Result<PathBuf, ErrorEnvelope> {
+pub fn write_plist(exec: &Path, log_path: Option<&Path>) -> Result<PathBuf, ErrorEnvelope> {
     let dest = launchd::default_plist_path().map_err(|e| {
         ErrorEnvelope::new(
             "SERVICE_PATH",

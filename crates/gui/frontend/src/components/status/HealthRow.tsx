@@ -1,6 +1,6 @@
-import React from "react";
-import { formatBytes, formatDuration } from "../../utils/format";
-import { UI_TUNING } from "../../config/uiTuning";
+import React from 'react';
+import { formatBytes, formatDuration } from '../../utils/format';
+import { UI_TUNING } from '../../config/uiTuning';
 
 type Props = {
   version: string | null;
@@ -34,7 +34,7 @@ const HealthRow: React.FC<Props> = ({
         <div className="metric-row">
           <div>
             <div className="muted">Version</div>
-            <div>{version || "Unknown"}</div>
+            <div>{version || 'Unknown'}</div>
           </div>
           <div>
             <div className="muted">Uptime</div>
@@ -42,16 +42,16 @@ const HealthRow: React.FC<Props> = ({
           </div>
           <div>
             <div className="muted">Free space</div>
-            <div>{free_bytes != null ? formatBytes(free_bytes) : "n/a"}</div>
+            <div>{free_bytes != null ? formatBytes(free_bytes) : 'n/a'}</div>
           </div>
         </div>
         {safe_mode && (
-          <div className="pill" style={{ borderColor: "#ffd27b", color: "#ffd27b", marginTop: 8 }}>
+          <div className="pill" style={{ borderColor: '#ffd27b', color: '#ffd27b', marginTop: 8 }}>
             Safe mode: scan/verify only (no writes)
           </div>
         )}
         {free_bytes != null && free_bytes < low_space_threshold && (
-          <div className="pill" style={{ borderColor: "#ff7b7b", color: "#ffb0b0", marginTop: 8 }}>
+          <div className="pill" style={{ borderColor: '#ff7b7b', color: '#ffb0b0', marginTop: 8 }}>
             Low disk space at backup destination
           </div>
         )}

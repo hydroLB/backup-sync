@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -45,6 +46,17 @@ pub struct DestinationStatus {
 const DEFAULT_IPC_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_IPC_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const STATUS_REQUEST_BYTES: &[u8] = br#"{"type":"Status"}"#;
+
+#[derive(Serialize)]
+#[serde(tag = "type", content = "payload")]
+enum Request {
+    SetSafeMode { enabled: bool },
+}
+
+#[derive(Deserialize)]
+struct AckReply {
+    ok: bool,
+}
 
 /// Purpose: Resolve the IPC timeout used for status calls.
 ///
@@ -103,11 +115,12 @@ where
 /// Ties to: `fetch_status` and the daemon's IPC server implementation.
 /// Side effects: Writes a JSON request, half-closes the write side, then reads a JSON reply.
 /// Why: Keep the on-the-wire protocol consistent and testable, and prevent request deadlocks.
-async fn fetch_status_over_stream<S>(mut stream: S, op_timeout: Duration) -> Result<Status>
+async fn request_over_stream<S, T>(mut stream: S, request: &[u8], op_timeout: Duration) -> Result<T>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    T: DeserializeOwned,
 {
-    timeout(op_timeout, stream.write_all(STATUS_REQUEST_BYTES))
+    timeout(op_timeout, stream.write_all(request))
         .await
         .context("status_api::fetch_status_over_stream timed out writing status request")?
         .context("status_api::fetch_status_over_stream failed to write status request")?;
@@ -126,12 +139,19 @@ where
         ));
     }
     let raw = String::from_utf8_lossy(&buf);
-    Ok(serde_json::from_slice(&buf).with_context(|| {
+    serde_json::from_slice(&buf).with_context(|| {
         format!(
             "status_api::fetch_status_over_stream failed to parse response: {}",
             raw
         )
-    })?)
+    })
+}
+
+async fn fetch_status_over_stream<S>(stream: S, op_timeout: Duration) -> Result<Status>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    request_over_stream(stream, STATUS_REQUEST_BYTES, op_timeout).await
 }
 
 #[cfg(windows)]
@@ -172,6 +192,61 @@ pub async fn fetch_status() -> Result<Status> {
         })?
         .with_context(|| format!("status_api::fetch_status failed to connect to {:?}", socket))?;
     fetch_status_over_stream(stream, op_timeout).await
+}
+
+#[cfg(unix)]
+pub async fn set_safe_mode(enabled: bool) -> Result<()> {
+    let socket = super::socket_path()?;
+    if !socket.exists() {
+        return Err(anyhow!(
+            "status_api::set_safe_mode daemon IPC socket not found at {:?}",
+            socket
+        ));
+    }
+    let op_timeout = resolve_ipc_timeout();
+    let stream = timeout(op_timeout, UnixStream::connect(&socket))
+        .await
+        .with_context(|| {
+            format!(
+                "status_api::set_safe_mode timed out connecting to daemon socket {:?}",
+                socket
+            )
+        })?
+        .with_context(|| {
+            format!(
+                "status_api::set_safe_mode failed to connect to {:?}",
+                socket
+            )
+        })?;
+
+    let request = serde_json::to_vec(&Request::SetSafeMode { enabled })
+        .context("status_api::set_safe_mode failed to serialize request")?;
+    let ack: AckReply = request_over_stream(stream, &request, op_timeout).await?;
+    if !ack.ok {
+        return Err(anyhow!(
+            "status_api::set_safe_mode daemon returned ok=false"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub async fn set_safe_mode(enabled: bool) -> Result<()> {
+    let op_timeout = resolve_ipc_timeout();
+    let mut stream = ClientOptions::new()
+        .open(r"\\.\pipe\backup_sync_ipc")
+        .with_context(|| {
+            "status_api::set_safe_mode failed to connect to named pipe \\\\.\\pipe\\backup_sync_ipc"
+        })?;
+    let request = serde_json::to_vec(&Request::SetSafeMode { enabled })
+        .context("status_api::set_safe_mode failed to serialize request")?;
+    let ack: AckReply = request_over_stream(&mut stream, &request, op_timeout).await?;
+    if !ack.ok {
+        return Err(anyhow!(
+            "status_api::set_safe_mode daemon returned ok=false"
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(windows)]

@@ -1,0 +1,9 @@
+[package]
+name = "tauri-plugin-single-instance"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fs2 = "0.4"
+tauri = { version = "1", features = ["path-all"] }

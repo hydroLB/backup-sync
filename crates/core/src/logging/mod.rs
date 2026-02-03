@@ -65,19 +65,17 @@ pub fn init_with_optional_file(log_path: Option<PathBuf>) -> Result<()> {
                 e
             );
         }
-    } else {
-        if let Err(e) = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_timer(formatter::default_timer())
-            .with_span_events(formatter::default_span_events())
-            .with_target(false)
-            .try_init()
-        {
-            warn!(
-                "logging::init_with_optional_file failed to initialize stdout subscriber: {}",
-                e
-            );
-        }
+    } else if let Err(e) = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_timer(formatter::default_timer())
+        .with_span_events(formatter::default_span_events())
+        .with_target(false)
+        .try_init()
+    {
+        warn!(
+            "logging::init_with_optional_file failed to initialize stdout subscriber: {}",
+            e
+        );
     }
     Ok(())
 }

@@ -1,22 +1,34 @@
-import React, { useEffect, useState } from "react";
-import { getStatus, verifyBackups, installService, exportLogs, checkUpdates, exportHealthReport, restartDaemon, doctorReport } from "../../services";
-import { formatBytes, formatDateTime } from "../../utils/format";
-import OfflineNotice from "./OfflineNotice";
-import HealthRow from "./HealthRow";
-import VerifyBlock from "./VerifyBlock";
-import ActivityFeed from "./ActivityFeed";
-import { ActionLogEntry } from "./ActionLogFlyout";
-import { checkService } from "../../services/system";
-import AdvancedPane from "./AdvancedPane";
-import ServiceBanner from "./ServiceBanner";
-import PlanModal from "./PlanModal";
-import LowSpaceGuard from "./LowSpaceGuard";
-import { StatusDto, ServiceStatusDto, VerifyResult } from "../../services/types";
-import { getLogTail } from "../../services/logs";
-import { IpcError, tauriAvailable } from "../../services/ipc";
-import { UI_TUNING } from "../../config/uiTuning";
+import React, { useEffect, useState } from 'react';
+import {
+  getStatus,
+  verifyBackups,
+  installService,
+  exportLogs,
+  checkUpdates,
+  exportHealthReport,
+  restartDaemon,
+  doctorReport,
+} from '../../services';
+import { formatBytes, formatDateTime } from '../../utils/format';
+import OfflineNotice from './OfflineNotice';
+import HealthRow from './HealthRow';
+import VerifyBlock from './VerifyBlock';
+import ActivityFeed from './ActivityFeed';
+import { ActionLogEntry } from './ActionLogFlyout';
+import { checkService } from '../../services/system';
+import AdvancedPane from './AdvancedPane';
+import ServiceBanner from './ServiceBanner';
+import PlanModal from './PlanModal';
+import LowSpaceGuard from './LowSpaceGuard';
+import { StatusDto, ServiceStatusDto, VerifyResult } from '../../services/types';
+import { getLogTail } from '../../services/logs';
+import { IpcError, tauriAvailable } from '../../services/ipc';
+import { UI_TUNING } from '../../config/uiTuning';
 
-type Props = { onEvent?: (msg: string, kind?: ActionLogEntry["kind"]) => void; onSafeMode?: (v: boolean) => void };
+type Props = {
+  onEvent?: (msg: string, kind?: ActionLogEntry['kind']) => void;
+  onSafeMode?: (v: boolean) => void;
+};
 
 /**
  * Purpose: Normalize unknown errors into a safe message string.
@@ -43,14 +55,14 @@ const errorMessage = (error: unknown): string => {
  */
 const displayError = (error: unknown): string => {
   if (error instanceof IpcError) {
-    if (error.code === "DAEMON_OFFLINE") {
-      return "Not connected yet. Finish setup, or enable Start on login to keep the daemon running.";
+    if (error.code === 'DAEMON_OFFLINE') {
+      return 'Not connected yet. Finish setup, or enable Start on login to keep the daemon running.';
     }
-    if (error.code === "IPC_TIMEOUT") {
-      return "Daemon did not respond in time. If this persists, restart the daemon or check logs.";
+    if (error.code === 'IPC_TIMEOUT') {
+      return 'Daemon did not respond in time. If this persists, restart the daemon or check logs.';
     }
-    if (error.code === "TAURI_UNAVAILABLE") {
-      return "IPC unavailable. Launch the desktop app (./start) instead of a browser.";
+    if (error.code === 'TAURI_UNAVAILABLE') {
+      return 'IPC unavailable. Launch the desktop app (./start) instead of a browser.';
     }
     return error.message;
   }
@@ -68,7 +80,7 @@ const displayError = (error: unknown): string => {
  */
 const readResumeOnSpace = (): boolean => {
   try {
-    return localStorage.getItem(UI_TUNING.resumeOnSpaceStorageKey) === "1";
+    return localStorage.getItem(UI_TUNING.resumeOnSpaceStorageKey) === '1';
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[StatusCard::readResumeOnSpace] Failed to read local storage: ${reason}`);
@@ -87,7 +99,7 @@ const readResumeOnSpace = (): boolean => {
  */
 const writeResumeOnSpace = (next: boolean): void => {
   try {
-    localStorage.setItem(UI_TUNING.resumeOnSpaceStorageKey, next ? "1" : "0");
+    localStorage.setItem(UI_TUNING.resumeOnSpaceStorageKey, next ? '1' : '0');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[StatusCard::writeResumeOnSpace] Failed to write local storage: ${reason}`);
@@ -106,13 +118,13 @@ const writeResumeOnSpace = (next: boolean): void => {
 const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
   const [status, setStatus] = useState<StatusDto | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [verifyMsg, setVerifyMsg] = useState<string>("");
+  const [verifyMsg, setVerifyMsg] = useState<string>('');
   const [verifying, setVerifying] = useState<boolean>(false);
-  const [actionMsg, setActionMsg] = useState<string>("");
-  const [toast, setToast] = useState<{ msg: string; kind: "ok" | "error" } | null>(null);
+  const [actionMsg, setActionMsg] = useState<string>('');
+  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'error' } | null>(null);
   const [serviceStatus, setServiceStatus] = useState<ServiceStatusDto | null>(null);
   const [planModal, setPlanModal] = useState<string | null>(null);
-  const [logTail, setLogTail] = useState<string>("");
+  const [logTail, setLogTail] = useState<string>('');
   const [resumeOnSpace, setResumeOnSpace] = useState<boolean>(readResumeOnSpace);
   const refreshInFlight = React.useRef(false);
 
@@ -129,9 +141,11 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     if (!tauriAvailable()) {
-      setError("[StatusCard::refresh] Tauri IPC unavailable. Please launch via the app (./launch.sh) instead of a browser.");
+      setError(
+        '[StatusCard::refresh] Tauri IPC unavailable. Please launch via the app (./launch.sh) instead of a browser.',
+      );
       setStatus(null);
-      setActionMsg("");
+      setActionMsg('');
       refreshInFlight.current = false;
       return;
     }
@@ -139,14 +153,14 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       .then((s) => {
         setStatus(s);
         setError(null);
-        setActionMsg("");
+        setActionMsg('');
         onSafeMode?.(!!s.safe_mode);
       })
       .catch((e) => {
         console.error(e);
         setError(displayError(e));
         setStatus(null);
-        setActionMsg("");
+        setActionMsg('');
       })
       .finally(() => {
         refreshInFlight.current = false;
@@ -169,14 +183,16 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       refresh();
     }, UI_TUNING.statusRefreshMs);
     return () => clearInterval(id);
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     if (!tauriAvailable()) return;
     checkService()
       .then((s) => setServiceStatus(s))
       .catch((e) => {
-        console.warn(`[StatusCard::checkService] Failed to read service status: ${errorMessage(e)}`);
+        console.warn(
+          `[StatusCard::checkService] Failed to read service status: ${errorMessage(e)}`,
+        );
       });
   }, []);
 
@@ -196,8 +212,8 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const msg = `[StatusCard::toggleResumeOnSpace] Failed to toggle resume on space: ${reason}`;
-      setToast({ msg, kind: "error" });
-      onEvent?.(msg, "error");
+      setToast({ msg, kind: 'error' });
+      onEvent?.(msg, 'error');
     }
   };
 
@@ -213,12 +229,12 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
   const handlePlanTooLarge = (msg: string) => {
     try {
       setPlanModal(msg);
-      setToast({ msg, kind: "error" });
+      setToast({ msg, kind: 'error' });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const fullMsg = `[StatusCard::handlePlanTooLarge] Failed to open plan modal: ${reason}`;
-      setToast({ msg: fullMsg, kind: "error" });
-      onEvent?.(fullMsg, "error");
+      setToast({ msg: fullMsg, kind: 'error' });
+      onEvent?.(fullMsg, 'error');
     }
   };
 
@@ -233,15 +249,15 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
    */
   const handleActionSuccess = (label: string, res: unknown) => {
     try {
-      const msg = typeof res === "string" ? res : `${label} done`;
+      const msg = typeof res === 'string' ? res : `${label} done`;
       setActionMsg(msg || `${label} done`);
-      setToast({ msg: msg || `${label} done`, kind: "ok" });
-      onEvent?.(msg || `${label} done`, "ok");
+      setToast({ msg: msg || `${label} done`, kind: 'ok' });
+      onEvent?.(msg || `${label} done`, 'ok');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const fullMsg = `[StatusCard::handleActionSuccess] Failed to surface success: ${reason}`;
-      setToast({ msg: fullMsg, kind: "error" });
-      onEvent?.(fullMsg, "error");
+      setToast({ msg: fullMsg, kind: 'error' });
+      onEvent?.(fullMsg, 'error');
     }
   };
 
@@ -259,19 +275,40 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       const errObj = e as { message?: string; code?: string };
       const msg = errObj?.message || String(e);
       const code = errObj?.code;
-      const extra = code === UI_TUNING.planTooLargeCode ? " Plan too large; narrow watched scope or add ignores." : "";
-      const fullMsg = `[StatusCard::handleActionError] ${label} failed: ${msg}${extra}`;
-      setActionMsg(fullMsg);
-      setToast({ msg: fullMsg, kind: "error" });
-      onEvent?.(fullMsg, "error");
+      const extra =
+        code === UI_TUNING.planTooLargeCode
+          ? ' Plan too large; narrow watched scope or add ignores.'
+          : '';
+      const logMsg = `[StatusCard::handleActionError] ${label} failed: ${msg}${extra}`;
+
+      let userMsg = `${label} failed.`;
       if (code === UI_TUNING.planTooLargeCode) {
-        handlePlanTooLarge("Too many files to back up in one go. Add ignore patterns (node_modules, build, cache) or narrow watched folders, then try again.");
+        userMsg = 'Too many files to back up at once. Add ignores or narrow watched folders.';
+      } else if (msg.includes('no destinations configured')) {
+        userMsg = 'Finish setup first: choose where to store backups, then try again.';
+      } else if (msg.includes('no watched paths configured')) {
+        userMsg = 'Finish setup first: add a folder or file to protect, then try again.';
+      } else if (code === 'TAURI_UNAVAILABLE') {
+        userMsg = 'This action requires the desktop app. Launch via ./start.';
+      } else if (code === 'DAEMON_OFFLINE') {
+        userMsg = 'Not connected yet. Finish setup, then enable run in background.';
+      } else if (typeof msg === 'string' && msg.trim().length > 0) {
+        userMsg = msg;
+      }
+
+      setActionMsg(userMsg);
+      setToast({ msg: userMsg, kind: 'error' });
+      onEvent?.(logMsg, 'error');
+      if (code === UI_TUNING.planTooLargeCode) {
+        handlePlanTooLarge(
+          'Too many files to back up in one go. Add ignore patterns (node_modules, build, cache) or narrow watched folders, then try again.',
+        );
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const fullMsg = `[StatusCard::handleActionError] Failed to surface error: ${reason}`;
-      setToast({ msg: fullMsg, kind: "error" });
-      onEvent?.(fullMsg, "error");
+      setToast({ msg: fullMsg, kind: 'error' });
+      onEvent?.(fullMsg, 'error');
     }
   };
 
@@ -286,21 +323,27 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
    */
   const onVerify = async () => {
     if (!tauriAvailable()) {
-      setToast({ msg: "[StatusCard::onVerify] IPC unavailable. Launch the app build to verify.", kind: "error" });
+      setToast({
+        msg: '[StatusCard::onVerify] IPC unavailable. Launch the app build to verify.',
+        kind: 'error',
+      });
       return;
     }
     try {
       setVerifying(true);
       const res: VerifyResult = await verifyBackups();
       setVerifyMsg(`Verified: ${res.ok} ok, ${res.bad} issues`);
-      setToast({ msg: `Verification finished (${res.ok} ok, ${res.bad} issues)`, kind: res.bad > 0 ? "error" : "ok" });
-      onEvent?.(`Verify finished (${res.ok} ok, ${res.bad} issues)`, res.bad > 0 ? "error" : "ok");
+      setToast({
+        msg: `Verification finished (${res.ok} ok, ${res.bad} issues)`,
+        kind: res.bad > 0 ? 'error' : 'ok',
+      });
+      onEvent?.(`Verify finished (${res.ok} ok, ${res.bad} issues)`, res.bad > 0 ? 'error' : 'ok');
       refresh();
     } catch (e) {
       const msg = `[StatusCard::onVerify] Verify failed: ${String(e)}`;
       setVerifyMsg(msg);
-      setToast({ msg, kind: "error" });
-      onEvent?.(msg, "error");
+      setToast({ msg, kind: 'error' });
+      onEvent?.(msg, 'error');
     } finally {
       setVerifying(false);
     }
@@ -321,9 +364,16 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
    * Side effects: Invokes IPC actions, updates React state, and shows confirm dialogs.
    * Why: Keep action execution paths consistent and safe.
    */
-  const runAction = async <T,>(fn: () => Promise<T>, label: string, opts?: { confirm?: string }) => {
+  const runAction = async <T,>(
+    fn: () => Promise<T>,
+    label: string,
+    opts?: { confirm?: string },
+  ) => {
     if (!tauriAvailable()) {
-      setToast({ msg: "[StatusCard::runAction] IPC unavailable. Launch the app build to run actions.", kind: "error" });
+      setToast({
+        msg: '[StatusCard::runAction] IPC unavailable. Launch the app build to run actions.',
+        kind: 'error',
+      });
       return;
     }
     if (opts?.confirm && !window.confirm(opts.confirm)) {
@@ -333,12 +383,14 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       setActionMsg(`Working on ${label}...`);
       const res = await fn();
       handleActionSuccess(label, res);
-      if (label.toLowerCase().includes("login") || label.toLowerCase().includes("daemon")) {
+      if (label.toLowerCase().includes('login') || label.toLowerCase().includes('daemon')) {
         try {
           const s = await checkService();
           setServiceStatus(s);
         } catch (e) {
-          console.warn(`[StatusCard::runAction] Failed to refresh service status: ${errorMessage(e)}`);
+          console.warn(
+            `[StatusCard::runAction] Failed to refresh service status: ${errorMessage(e)}`,
+          );
         }
       }
       refresh();
@@ -351,10 +403,10 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
     return (
       <OfflineNotice
         error={error}
-        message={error || "Not connected yet. Start the daemon or complete setup."}
-        onInstallService={() => runAction(installService, "Start on login")}
+        message={error || 'Not connected yet. Start the daemon or complete setup.'}
+        onInstallService={() => runAction(installService, 'Start on login')}
         onExportLogs={() =>
-          runAction(exportLogs, "Export logs", { confirm: "Export logs to your Desktop?" })
+          runAction(exportLogs, 'Export logs', { confirm: 'Export logs to your Desktop?' })
         }
       />
     );
@@ -366,15 +418,15 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
         <ServiceBanner
           message={serviceStatus.message}
           reachable={serviceStatus.reachable}
-          fixCommand={serviceStatus.fix_command ?? ""}
+          fixCommand={serviceStatus.fix_command ?? ''}
           uptimeSecs={serviceStatus.uptime_secs ?? null}
           lastIpcTs={serviceStatus.last_ipc_ts ?? null}
-          onFix={() => runAction(installService, "Start on login")}
+          onFix={() => runAction(installService, 'Start on login')}
         />
       )}
       <div className="section-title">
         <h3>Live status</h3>
-        <span className="pill">{error ? "Issue" : "Online"}</span>
+        <span className="pill">{error ? 'Issue' : 'Online'}</span>
       </div>
       {status.safe_mode && (
         <div className="service-banner warn">
@@ -395,35 +447,42 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       />
       <div className="divider" />
       <div className="muted">Destinations</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
         {(status.destinations || []).length === 0 && <div className="muted">None configured</div>}
         {(status.destinations || []).map((d) => (
           <div
             key={d.id}
             style={{
-              display: "flex",
-              flexDirection: "column",
-              padding: "8px 10px",
+              display: 'flex',
+              flexDirection: 'column',
+              padding: '8px 10px',
               borderRadius: 8,
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.05)",
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.05)',
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontWeight: 600 }}>{d.label || d.id}</div>
               <div className="pill">{formatBytes(d.free_bytes)}</div>
             </div>
-            <div className="muted" style={{ wordBreak: "break-all" }}>
+            <div className="muted" style={{ wordBreak: 'break-all' }}>
               {d.path}
             </div>
           </div>
         ))}
       </div>
-      {status.min_free_space_bytes != null && status.free_bytes != null && status.free_bytes < status.min_free_space_bytes && (
-        <div className="pill" style={{ borderColor: "#ff7b7b", color: "#ffb0b0", marginTop: 6 }} title="Free-space guard pauses backups until space recovers.">
-          Paused: below free space guard ({status.free_bytes} / {status.min_free_space_bytes} bytes)
-        </div>
-      )}
+      {status.min_free_space_bytes != null &&
+        status.free_bytes != null &&
+        status.free_bytes < status.min_free_space_bytes && (
+          <div
+            className="pill"
+            style={{ borderColor: '#ff7b7b', color: '#ffb0b0', marginTop: 6 }}
+            title="Free-space guard pauses backups until space recovers."
+          >
+            Paused: below free space guard ({status.free_bytes} / {status.min_free_space_bytes}{' '}
+            bytes)
+          </div>
+        )}
       <div className="metric-row">
         <div>
           <div className="muted">Last run</div>
@@ -453,24 +512,80 @@ const StatusCard: React.FC<Props> = ({ onEvent, onSafeMode }) => {
       />
       <div className="divider" />
       <div className="muted">Last error</div>
-      <div>{status.last_error ?? "None"}</div>
+      <div>{status.last_error ?? 'None'}</div>
       <div className="divider" />
       <div className="inline-actions" style={{ marginBottom: 8 }}>
-        <button className="btn secondary" onClick={() => runAction(installService, "Start on login", { confirm: "Enable the background helper to start on login?" })}>Start on login</button>
-        <button className="btn secondary" onClick={() => runAction(exportLogs, "Export logs", { confirm: "Export logs to your Desktop?" })}>Export logs</button>
-        <button className="btn secondary" onClick={() => runAction(checkUpdates, "Check updates")}>Check updates</button>
-        <button className="btn secondary" onClick={() => runAction(exportHealthReport, "Export health report", { confirm: "Export a health report to your Desktop?" })}>Export health</button>
-        <button className="btn secondary" onClick={() => runAction(doctorReport, "Doctor report", { confirm: "Run and save a doctor report to your Desktop?" })}>Doctor report</button>
-        <button className="btn secondary" onClick={() => runAction(() => import("../../services/system").then((m) => m.exportDiagnosticBundle()), "Diagnostic bundle", { confirm: "Create a diagnostic bundle on your Desktop?" })}>Diagnostic bundle</button>
-        <button className="btn secondary" onClick={() => runAction(restartDaemon, "Restart daemon", { confirm: "Restart the background daemon now?" })}>Restart daemon</button>
+        <button
+          className="btn secondary"
+          onClick={() =>
+            runAction(installService, 'Start on login', {
+              confirm: 'Enable the background helper to start on login?',
+            })
+          }
+        >
+          Start on login
+        </button>
+        <button
+          className="btn secondary"
+          onClick={() =>
+            runAction(exportLogs, 'Export logs', { confirm: 'Export logs to your Desktop?' })
+          }
+        >
+          Export logs
+        </button>
+        <button className="btn secondary" onClick={() => runAction(checkUpdates, 'Check updates')}>
+          Check updates
+        </button>
+        <button
+          className="btn secondary"
+          onClick={() =>
+            runAction(exportHealthReport, 'Export health report', {
+              confirm: 'Export a health report to your Desktop?',
+            })
+          }
+        >
+          Export health
+        </button>
+        <button
+          className="btn secondary"
+          onClick={() =>
+            runAction(doctorReport, 'Doctor report', {
+              confirm: 'Run and save a doctor report to your Desktop?',
+            })
+          }
+        >
+          Doctor report
+        </button>
+        <button
+          className="btn secondary"
+          onClick={() =>
+            runAction(
+              () => import('../../services/system').then((m) => m.exportDiagnosticBundle()),
+              'Diagnostic bundle',
+              { confirm: 'Create a diagnostic bundle on your Desktop?' },
+            )
+          }
+        >
+          Diagnostic bundle
+        </button>
+        <button
+          className="btn secondary"
+          onClick={() =>
+            runAction(restartDaemon, 'Restart daemon', {
+              confirm: 'Restart the background daemon now?',
+            })
+          }
+        >
+          Restart daemon
+        </button>
         <span className="muted">{actionMsg}</span>
       </div>
       <div className="divider" />
       <ActivityFeed items={status.recent_activity || []} />
       <AdvancedPane status={status} logTail={logTail} />
-      {error && <div style={{ color: "#ff7b7b", marginTop: 8 }}>Status error: {error}</div>}
+      {error && <div style={{ color: '#ff7b7b', marginTop: 8 }}>Status error: {error}</div>}
       {toast && (
-        <div className={`toast ${toast.kind === "error" ? "toast-error" : "toast-ok"}`}>
+        <div className={`toast ${toast.kind === 'error' ? 'toast-error' : 'toast-ok'}`}>
           {toast.msg}
         </div>
       )}

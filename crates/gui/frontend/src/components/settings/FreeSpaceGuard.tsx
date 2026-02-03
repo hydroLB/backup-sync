@@ -1,5 +1,5 @@
-import React from "react";
-import { formatBytes } from "../../utils/format";
+import React from 'react';
+import { formatBytes } from '../../utils/format';
 
 type Props = {
   minFree: number | null | undefined;
@@ -23,17 +23,24 @@ const FreeSpaceGuard: React.FC<Props> = ({ minFree, resumeOnSpace, onToggleResum
     return (
       <>
         <div className="muted" style={{ marginTop: 4 }}>
-          Free-space guard is active. {resumeOnSpace ? "Will resume when space recovers above the threshold." : "You can pause until space recovers."}
+          Free-space guard is active.{' '}
+          {resumeOnSpace
+            ? 'Will resume when space recovers above the threshold.'
+            : 'You can pause until space recovers.'}
         </div>
-        <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <label style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <input
             type="checkbox"
             checked={resumeOnSpace}
             onChange={(e) => onToggleResume(e.target.checked)}
           />
-          <span title="Automatically resume when free space is above the minimum.">Resume automatically when free space is above the minimum</span>
+          <span title="Automatically resume when free space is above the minimum.">
+            Resume automatically when free space is above the minimum
+          </span>
         </label>
-        <div className="muted" style={{ marginTop: 2 }}>Threshold: {formatBytes(minFree)} ({minFree} bytes)</div>
+        <div className="muted" style={{ marginTop: 2 }}>
+          Threshold: {formatBytes(minFree)} ({minFree} bytes)
+        </div>
         {message && <div className="muted">{message}</div>}
       </>
     );

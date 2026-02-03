@@ -1,6 +1,6 @@
-import React, { useState } from "react";
-import { validateIgnorePatterns } from "../utils/validation";
-import { UI_TUNING } from "../config/uiTuning";
+import React, { useState } from 'react';
+import { validateIgnorePatterns } from '../utils/validation';
+import { UI_TUNING } from '../config/uiTuning';
 
 type Props = {
   skip_hidden: boolean;
@@ -8,13 +8,15 @@ type Props = {
   max_parallel_copies: number;
   max_bytes_per_second: number | null;
   min_free_space_bytes?: number | null;
-  onChange: (data: Partial<{
-    skip_hidden: boolean;
-    ignore_patterns: string[];
-    max_parallel_copies: number;
-    max_bytes_per_second: number | null;
-    min_free_space_bytes?: number | null;
-  }>) => void;
+  onChange: (
+    data: Partial<{
+      skip_hidden: boolean;
+      ignore_patterns: string[];
+      max_parallel_copies: number;
+      max_bytes_per_second: number | null;
+      min_free_space_bytes?: number | null;
+    }>,
+  ) => void;
   onStatus: (msg: string) => void;
 };
 
@@ -47,19 +49,19 @@ const PerformanceControls: React.FC<Props> = ({
    * Side effects: Updates configuration state and status messaging.
    * Why: Provide quick, consistent tuning options.
    */
-  const applyPreset = (preset: "quiet" | "balanced" | "fast") => {
+  const applyPreset = (preset: 'quiet' | 'balanced' | 'fast') => {
     try {
-      if (preset === "quiet") {
+      if (preset === 'quiet') {
         onChange(UI_TUNING.performancePresets.quiet);
-        onStatus("Preset: Quiet (1 copy, 5 MB/s)");
+        onStatus('Preset: Quiet (1 copy, 5 MB/s)');
       }
-      if (preset === "balanced") {
+      if (preset === 'balanced') {
         onChange(UI_TUNING.performancePresets.balanced);
-        onStatus("Preset: Balanced (2 copies, no cap)");
+        onStatus('Preset: Balanced (2 copies, no cap)');
       }
-      if (preset === "fast") {
+      if (preset === 'fast') {
         onChange(UI_TUNING.performancePresets.fast);
-        onStatus("Preset: Fast (4 copies, no cap)");
+        onStatus('Preset: Fast (4 copies, no cap)');
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -78,12 +80,16 @@ const PerformanceControls: React.FC<Props> = ({
    */
   const applyCommonIgnores = () => {
     try {
-      const merged = Array.from(new Set([...(ignore_patterns || []), ...UI_TUNING.commonIgnorePatterns]));
+      const merged = Array.from(
+        new Set([...(ignore_patterns || []), ...UI_TUNING.commonIgnorePatterns]),
+      );
       onChange({ ignore_patterns: merged });
-      onStatus("Added common ignores");
+      onStatus('Added common ignores');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      onStatus(`[PerformanceControls::applyCommonIgnores] Failed to add ignore patterns: ${reason}`);
+      onStatus(
+        `[PerformanceControls::applyCommonIgnores] Failed to add ignore patterns: ${reason}`,
+      );
     }
   };
 
@@ -101,33 +107,49 @@ const PerformanceControls: React.FC<Props> = ({
       setShowAdvanced(!showAdvanced);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      onStatus(`[PerformanceControls::toggleAdvanced] Failed to toggle advanced controls: ${reason}`);
+      onStatus(
+        `[PerformanceControls::toggleAdvanced] Failed to toggle advanced controls: ${reason}`,
+      );
     }
   };
 
   return (
     <>
       <div className="inline-actions">
-        <button className="btn secondary" onClick={() => applyPreset("quiet")}>Quiet</button>
-        <button className="btn secondary" onClick={() => applyPreset("balanced")}>Balanced</button>
-        <button className="btn secondary" onClick={() => applyPreset("fast")}>Fast</button>
-        <button className="btn secondary" onClick={applyCommonIgnores}>Add common ignores</button>
+        <button className="btn secondary" onClick={() => applyPreset('quiet')}>
+          Quiet
+        </button>
+        <button className="btn secondary" onClick={() => applyPreset('balanced')}>
+          Balanced
+        </button>
+        <button className="btn secondary" onClick={() => applyPreset('fast')}>
+          Fast
+        </button>
+        <button className="btn secondary" onClick={applyCommonIgnores}>
+          Add common ignores
+        </button>
         <button className="btn secondary" onClick={toggleAdvanced}>
-          {showAdvanced ? "Hide advanced" : "Advanced"}
+          {showAdvanced ? 'Hide advanced' : 'Advanced'}
         </button>
       </div>
       {showAdvanced && (
         <>
-          <label style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={skip_hidden} onChange={(e) => onChange({ skip_hidden: e.target.checked })} />
-            <span title="Helps avoid backing up OS clutter and dotfiles.">Skip hidden files/folders (recommended)</span>
+          <label style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={skip_hidden}
+              onChange={(e) => onChange({ skip_hidden: e.target.checked })}
+            />
+            <span title="Helps avoid backing up OS clutter and dotfiles.">
+              Skip hidden files/folders (recommended)
+            </span>
           </label>
           <label>
             Ignore patterns (one glob per line)
             <textarea
-              value={(ignore_patterns || []).join("\n")}
+              value={(ignore_patterns || []).join('\n')}
               onChange={(e) => {
-                const next = e.target.value.split("\n").filter(Boolean);
+                const next = e.target.value.split('\n').filter(Boolean);
                 const err = validateIgnorePatterns(next);
                 if (err) {
                   onStatus(err);
@@ -135,13 +157,30 @@ const PerformanceControls: React.FC<Props> = ({
                   onChange({ ignore_patterns: next });
                 }
               }}
-              style={{ minHeight: 80, background: "rgba(255,255,255,0.04)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 10, padding: 10 }}
+              style={{
+                minHeight: 80,
+                background: 'rgba(255,255,255,0.04)',
+                color: 'var(--text)',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                padding: 10,
+              }}
             />
-            <div className="muted" style={{ marginTop: 4 }} title="Use ** for folders, *.ext for files.">Invalid globs will be blocked on save; use ** for folders, *.ext for files.</div>
+            <div
+              className="muted"
+              style={{ marginTop: 4 }}
+              title="Use ** for folders, *.ext for files."
+            >
+              Invalid globs will be blocked on save; use ** for folders, *.ext for files.
+            </div>
           </label>
           <label>
             Max parallel copies
-            <input type="number" value={max_parallel_copies} onChange={(e) => onChange({ max_parallel_copies: Number(e.target.value) || 1 })} />
+            <input
+              type="number"
+              value={max_parallel_copies}
+              onChange={(e) => onChange({ max_parallel_copies: Number(e.target.value) || 1 })}
+            />
           </label>
           <label>
             Max bytes per second (0 = unlimited)

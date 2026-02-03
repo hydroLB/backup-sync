@@ -1,5 +1,5 @@
-import { correlationId } from "./correlation";
-import { safeInvoke, wrapError } from "./ipc";
+import { correlationId } from './correlation';
+import { safeInvoke, wrapError } from './ipc';
 
 export type AuthStatus = { unlocked: boolean; seconds_left: number | null };
 
@@ -16,12 +16,12 @@ type AuthStatusResponse = [boolean, number | null];
  */
 export async function unlockSession(passcode: string): Promise<string> {
   try {
-    return await safeInvoke<string>("unlock_session_cmd", {
+    return await safeInvoke<string>('unlock_session_cmd', {
       passcode,
-      correlationId: correlationId("auth"),
+      correlationId: correlationId('auth'),
     });
   } catch (error) {
-    throw wrapError("[unlockSession] Failed to unlock session", error);
+    throw wrapError('[unlockSession] Failed to unlock session', error);
   }
 }
 
@@ -36,9 +36,9 @@ export async function unlockSession(passcode: string): Promise<string> {
  */
 export async function lockSession(): Promise<void> {
   try {
-    return await safeInvoke<void>("lock_session_cmd");
+    return await safeInvoke<void>('lock_session_cmd');
   } catch (error) {
-    throw wrapError("[lockSession] Failed to lock session", error);
+    throw wrapError('[lockSession] Failed to lock session', error);
   }
 }
 
@@ -53,9 +53,9 @@ export async function lockSession(): Promise<void> {
  */
 export async function authStatus(): Promise<AuthStatus> {
   try {
-    const [unlocked, seconds_left] = await safeInvoke<AuthStatusResponse>("auth_status_cmd");
+    const [unlocked, seconds_left] = await safeInvoke<AuthStatusResponse>('auth_status_cmd');
     return { unlocked, seconds_left };
   } catch (error) {
-    throw wrapError("[authStatus] Failed to fetch auth status", error);
+    throw wrapError('[authStatus] Failed to fetch auth status', error);
   }
 }

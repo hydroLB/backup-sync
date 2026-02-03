@@ -1,5 +1,5 @@
-import React from "react";
-import { UI_TUNING } from "../../config/uiTuning";
+import React from 'react';
+import { UI_TUNING } from '../../config/uiTuning';
 
 type Props = {
   error: string | null;
@@ -76,7 +76,7 @@ const OfflineNotice: React.FC<Props> = ({ error, onInstallService, onExportLogs,
             </button>
           )}
         </div>
-        {error && <div style={{ color: "#ff7b7b", marginTop: 8 }}>Error: {error}</div>}
+        {error && <div style={{ color: '#ff7b7b', marginTop: 8 }}>Error: {error}</div>}
       </div>
     );
   } catch (error) {

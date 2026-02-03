@@ -1,28 +1,28 @@
-import React, { useEffect, useRef, useState } from "react";
-import { open } from "@tauri-apps/api/dialog";
-import { doctorReport, installService } from "../services";
-import { Config, Destination } from "./settings/types";
-import { formatBytes } from "../utils/format";
-import EmptyState from "./settings/EmptyState";
-import BackupCadence from "./settings/BackupCadence";
-import DestinationBoard from "./settings/destinations/DestinationBoard";
-import PerformanceControls from "./PerformanceControls";
-import OnboardingOverlay from "./settings/OnboardingOverlay";
-import AccessTest from "./settings/AccessTest";
-import SafeModeToggle from "./settings/SafeModeToggle";
-import FreeSpaceGuard from "./settings/FreeSpaceGuard";
-import SaveBar from "./settings/SaveBar";
-import OnboardingSummary from "./settings/OnboardingSummary";
-import { useSettingsState } from "./settings/hooks/useSettingsState";
-import { usePickers } from "./settings/hooks/usePickers";
-import { useOnboardingState } from "./settings/useOnboarding";
-import { useWatchActions } from "./settings/useWatchActions";
-import { tauriAvailable } from "../services/ipc";
-import { UI_TUNING } from "../config/uiTuning";
-import { AccessProbe, SimulationResult } from "../services/types";
-import AuthLockModal from "./settings/AuthLockModal";
-import { authStatus, lockSession, unlockSession, AuthStatus } from "../services/auth";
-import { IpcError } from "../services/ipc";
+import React, { useEffect, useRef, useState } from 'react';
+import { open } from '@tauri-apps/api/dialog';
+import { doctorReport, installService } from '../services';
+import { Config, Destination } from './settings/types';
+import { formatBytes } from '../utils/format';
+import EmptyState from './settings/EmptyState';
+import BackupCadence from './settings/BackupCadence';
+import DestinationBoard from './settings/destinations/DestinationBoard';
+import PerformanceControls from './PerformanceControls';
+import OnboardingOverlay from './settings/OnboardingOverlay';
+import AccessTest from './settings/AccessTest';
+import SafeModeToggle from './settings/SafeModeToggle';
+import FreeSpaceGuard from './settings/FreeSpaceGuard';
+import SaveBar from './settings/SaveBar';
+import OnboardingSummary from './settings/OnboardingSummary';
+import { useSettingsState } from './settings/hooks/useSettingsState';
+import { usePickers } from './settings/hooks/usePickers';
+import { useOnboardingState } from './settings/useOnboarding';
+import { useWatchActions } from './settings/useWatchActions';
+import { tauriAvailable } from '../services/ipc';
+import { UI_TUNING } from '../config/uiTuning';
+import { AccessProbe, SimulationResult } from '../services/types';
+import AuthLockModal from './settings/AuthLockModal';
+import { authStatus, lockSession, unlockSession, AuthStatus } from '../services/auth';
+import { IpcError } from '../services/ipc';
 
 /**
  * Purpose: Render the settings panel and onboarding flows.
@@ -35,7 +35,7 @@ import { IpcError } from "../services/ipc";
  */
 export const SettingsPanel: React.FC = () => {
   const defaultCfg: Config = {
-    backup_root: "",
+    backup_root: '',
     interval_seconds: 60,
     max_backups_per_file: 3,
     skip_hidden: true,
@@ -76,7 +76,7 @@ export const SettingsPanel: React.FC = () => {
     },
     safe_mode: false,
     watched: [],
-    destinations: [{ id: "default", label: "Primary", path: "", max_backups_per_file: null }],
+    destinations: [{ id: 'default', label: 'Primary', path: '', max_backups_per_file: null }],
   };
   const state = useSettingsState(defaultCfg, (msg) => state.setStatus(msg));
   const {
@@ -101,7 +101,7 @@ export const SettingsPanel: React.FC = () => {
   const [authInfo, setAuthInfo] = useState<AuthStatus>({ unlocked: false, seconds_left: null });
   const [authError, setAuthError] = useState<string | null>(null);
   const [authVisible, setAuthVisible] = useState<boolean>(false);
-  const [passcode, setPasscode] = useState<string>("");
+  const [passcode, setPasscode] = useState<string>('');
   const pendingAuthAction = useRef<null | (() => void)>(null);
   const onboarding = useOnboardingState(cfg, destStatus?.writable);
   /**
@@ -120,8 +120,8 @@ export const SettingsPanel: React.FC = () => {
       setAuthError(null);
     } catch (error) {
       const reason =
-        error instanceof IpcError && error.code === "TAURI_UNAVAILABLE"
-          ? "IPC unavailable. Launch the desktop app (./start) instead of a browser."
+        error instanceof IpcError && error.code === 'TAURI_UNAVAILABLE'
+          ? 'IPC unavailable. Launch the desktop app (./start) instead of a browser.'
           : error instanceof Error
             ? error.message
             : String(error);
@@ -166,11 +166,11 @@ export const SettingsPanel: React.FC = () => {
   const handleUnlock = async () => {
     try {
       if (!passcode.trim()) {
-        setAuthError("[SettingsPanel::handleUnlock] Passcode is required.");
+        setAuthError('[SettingsPanel::handleUnlock] Passcode is required.');
         return;
       }
       const msg = await unlockSession(passcode);
-      setPasscode("");
+      setPasscode('');
       await refreshAuthStatus();
       setAuthVisible(false);
       setStatus(msg);
@@ -197,7 +197,7 @@ export const SettingsPanel: React.FC = () => {
     try {
       await lockSession();
       await refreshAuthStatus();
-      setStatus("Session locked.");
+      setStatus('Session locked.');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       setAuthError(`[SettingsPanel::handleLock] ${reason}`);
@@ -234,10 +234,19 @@ export const SettingsPanel: React.FC = () => {
    */
   const setBackupRootPath = (path: string, label: string) => {
     try {
-      const existing: Destination[] = cfg.destinations && cfg.destinations.length > 0 ? cfg.destinations : [];
-      const primary: Destination = existing[0] ?? { id: "default", label: "Primary", path, max_backups_per_file: null };
+      const existing: Destination[] =
+        cfg.destinations && cfg.destinations.length > 0 ? cfg.destinations : [];
+      const primary: Destination = existing[0] ?? {
+        id: 'default',
+        label: 'Primary',
+        path,
+        max_backups_per_file: null,
+      };
       const nextDests: Destination[] = [{ ...primary, path }, ...existing.slice(1)];
-      saveCfg({ ...cfg, backup_root: path, destinations: nextDests }, `Backup location set${label ? ` to ${label}` : ""}`);
+      saveCfg(
+        { ...cfg, backup_root: path, destinations: nextDests },
+        `Backup location set${label ? ` to ${label}` : ''}`,
+      );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[SettingsPanel::setBackupRootPath] Failed to set backup root: ${reason}`);
@@ -257,7 +266,7 @@ export const SettingsPanel: React.FC = () => {
     getter: () => Promise<string>,
     label: string,
     onSuccess: (path: string) => void,
-    statusPrefix: string
+    statusPrefix: string,
   ) => {
     try {
       const path = await getter();
@@ -283,12 +292,12 @@ export const SettingsPanel: React.FC = () => {
    * Why: Make diagnostics export available from settings.
    */
   const exportDoctor = async () => {
-    guardAuth("Export doctor report", async () => {
+    guardAuth('Export doctor report', async () => {
       try {
-        if (!window.confirm("Run a doctor report and save it to your Desktop?")) {
+        if (!window.confirm('Run a doctor report and save it to your Desktop?')) {
           return;
         }
-        setDoctorMsg("Running doctor...");
+        setDoctorMsg('Running doctor...');
         const path = await doctorReport();
         setDoctorMsg(`Doctor report saved to ${path}`);
       } catch (e) {
@@ -308,14 +317,16 @@ export const SettingsPanel: React.FC = () => {
    * Side effects: Performs IPC calls to resolve system paths.
    * Why: Centralize special directory resolution logic.
    */
-  const specialDir = async (kind: "desktop" | "documents" | "downloads") => {
+  const specialDir = async (kind: 'desktop' | 'documents' | 'downloads') => {
     try {
       if (!tauriAvailable()) {
-        throw new Error("[SettingsPanel::specialDir] IPC unavailable. Launch the app build to pick paths.");
+        throw new Error(
+          '[SettingsPanel::specialDir] IPC unavailable. Launch the app build to pick paths.',
+        );
       }
-      const { desktopDir, documentDir, downloadDir } = await import("@tauri-apps/api/path");
-      if (kind === "desktop") return desktopDir();
-      if (kind === "documents") return documentDir();
+      const { desktopDir, documentDir, downloadDir } = await import('@tauri-apps/api/path');
+      if (kind === 'desktop') return desktopDir();
+      if (kind === 'documents') return documentDir();
       return downloadDir();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -332,23 +343,23 @@ export const SettingsPanel: React.FC = () => {
    * Side effects: Opens a native picker and updates config state.
    * Why: Provide a safe path picker with error handling.
    */
-  const pickPath = async (kind: "File" | "Directory") => {
+  const pickPath = async (kind: 'File' | 'Directory') => {
     try {
       if (!tauriAvailable()) {
-        popup("Picker unavailable (IPC). Launch the Tauri app build to select paths.");
+        popup('Picker unavailable (IPC). Launch the Tauri app build to select paths.');
         return;
       }
-      const destId = (cfg.destinations && cfg.destinations[0]?.id) || "default";
+      const destId = (cfg.destinations && cfg.destinations[0]?.id) || 'default';
       const selection = await open({
-        directory: kind === "Directory",
+        directory: kind === 'Directory',
         multiple: false,
-        title: kind === "Directory" ? "Choose folder to protect" : "Choose file to protect",
+        title: kind === 'Directory' ? 'Choose folder to protect' : 'Choose file to protect',
       });
-      if (typeof selection === "string") {
+      if (typeof selection === 'string') {
         addWatched(selection, kind, destId);
         setStatus(`Added ${selection}`);
       } else {
-        popup("No selection made or picker was closed.");
+        popup('No selection made or picker was closed.');
       }
     } catch (e) {
       popup(`[SettingsPanel::pickPath] Path picker failed: ${e}`);
@@ -366,7 +377,7 @@ export const SettingsPanel: React.FC = () => {
    */
   const pickBackupRoot = async () => {
     try {
-      await pickerHelpers.pickDestination((path) => setBackupRootPath(path, ""));
+      await pickerHelpers.pickDestination((path) => setBackupRootPath(path, ''));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[SettingsPanel::pickBackupRoot] Failed to pick backup root: ${reason}`);
@@ -386,8 +397,14 @@ export const SettingsPanel: React.FC = () => {
     try {
       await pickerHelpers.pickDestination((selection) => {
         const id = `dest-${Date.now()}`;
-        const nextDests: Destination[] = [...(cfg.destinations || []), { id, path: selection, max_backups_per_file: null }];
-        saveCfg({ ...cfg, destinations: nextDests, backup_root: nextDests[0]?.path || selection }, "Destination added");
+        const nextDests: Destination[] = [
+          ...(cfg.destinations || []),
+          { id, path: selection, max_backups_per_file: null },
+        ];
+        saveCfg(
+          { ...cfg, destinations: nextDests, backup_root: nextDests[0]?.path || selection },
+          'Destination added',
+        );
         setStatus(`Destination added: ${selection}`);
       });
     } catch (error) {
@@ -405,22 +422,22 @@ export const SettingsPanel: React.FC = () => {
    * Side effects: Opens a native picker and updates config state.
    * Why: Attach watched items to specific destinations.
    */
-  const addPathToDestination = async (destId: string, kind: "File" | "Directory") => {
+  const addPathToDestination = async (destId: string, kind: 'File' | 'Directory') => {
     try {
       if (!tauriAvailable()) {
-        popup("Picker unavailable (IPC). Launch the Tauri app build to select paths.");
+        popup('Picker unavailable (IPC). Launch the Tauri app build to select paths.');
         return;
       }
       const selection = await open({
-        directory: kind === "Directory",
+        directory: kind === 'Directory',
         multiple: false,
-        title: kind === "Directory" ? "Choose folder to protect" : "Choose file to protect",
+        title: kind === 'Directory' ? 'Choose folder to protect' : 'Choose file to protect',
       });
-      if (typeof selection === "string") {
+      if (typeof selection === 'string') {
         addWatched(selection, kind, destId);
         setStatus(`Added ${selection}`);
       } else {
-        popup("No selection made or picker was closed.");
+        popup('No selection made or picker was closed.');
       }
     } catch (e) {
       popup(`[SettingsPanel::addPathToDestination] Path picker failed: ${e}`);
@@ -438,8 +455,10 @@ export const SettingsPanel: React.FC = () => {
    */
   const setDestinationRetention = (destId: string, v: number) => {
     try {
-      const nextDests = (cfg.destinations || []).map((d) => (d.id === destId ? { ...d, max_backups_per_file: v } : d));
-      saveCfg({ ...cfg, destinations: nextDests }, "Destination retention updated");
+      const nextDests = (cfg.destinations || []).map((d) =>
+        d.id === destId ? { ...d, max_backups_per_file: v } : d,
+      );
+      saveCfg({ ...cfg, destinations: nextDests }, 'Destination retention updated');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[SettingsPanel::setDestinationRetention] Failed to update retention: ${reason}`);
@@ -458,11 +477,16 @@ export const SettingsPanel: React.FC = () => {
   const quickAdd = async (getter: () => Promise<string>, label: string) => {
     try {
       if (!tauriAvailable()) {
-        popup("IPC unavailable. Launch the app build to use quick add.");
+        popup('IPC unavailable. Launch the app build to use quick add.');
         return;
       }
-      const destId = (cfg.destinations && cfg.destinations[0]?.id) || "default";
-      await resolveSpecialPath(getter, label, (path) => addWatched(path, "Directory", destId), "Added");
+      const destId = (cfg.destinations && cfg.destinations[0]?.id) || 'default';
+      await resolveSpecialPath(
+        getter,
+        label,
+        (path) => addWatched(path, 'Directory', destId),
+        'Added',
+      );
     } catch (e) {
       popup(`[SettingsPanel::quickAdd] Quick add failed: ${e}`);
     }
@@ -480,10 +504,15 @@ export const SettingsPanel: React.FC = () => {
   const quickAddPathToBackup = async (getter: () => Promise<string>, label: string) => {
     try {
       if (!tauriAvailable()) {
-        popup("IPC unavailable. Launch the app build to set destination.");
+        popup('IPC unavailable. Launch the app build to set destination.');
         return;
       }
-      await resolveSpecialPath(getter, label, (path) => setBackupRootPath(path, label), "Backup location set to");
+      await resolveSpecialPath(
+        getter,
+        label,
+        (path) => setBackupRootPath(path, label),
+        'Backup location set to',
+      );
     } catch (e) {
       popup(`[SettingsPanel::quickAddPathToBackup] Quick destination set failed: ${e}`);
     }
@@ -499,11 +528,11 @@ export const SettingsPanel: React.FC = () => {
    * Why: Make service enablement accessible in settings.
    */
   const enableStartOnLogin = async () => {
-    guardAuth("Enable start on login", async () => {
+    guardAuth('Enable start on login', async () => {
       try {
-        setStartOnLoginMsg("Enabling start on login...");
+        setStartOnLoginMsg('Enabling start on login...');
         await installService();
-        setStartOnLoginMsg("Enabled. The helper will start on login.");
+        setStartOnLoginMsg('Enabled. The helper will start on login.');
       } catch (e) {
         const msg = `[SettingsPanel::enableStartOnLogin] Failed to enable start on login: ${String(e)}`;
         setStartOnLoginMsg(msg);
@@ -512,7 +541,7 @@ export const SettingsPanel: React.FC = () => {
     });
   };
 
-  const canFinishOnboarding = cfg.watched.length > 0 && !!(destStatus?.writable);
+  const canFinishOnboarding = cfg.watched.length > 0 && !!destStatus?.writable;
 
   /**
    * Purpose: Persist resume on space preference to storage.
@@ -526,7 +555,7 @@ export const SettingsPanel: React.FC = () => {
   const persistResumeOnSpace = (next: boolean) => {
     try {
       setResumeOnSpace(next);
-      localStorage.setItem(UI_TUNING.resumeOnSpaceStorageKey, next ? "1" : "0");
+      localStorage.setItem(UI_TUNING.resumeOnSpaceStorageKey, next ? '1' : '0');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[SettingsPanel::persistResumeOnSpace] Failed to persist resume preference: ${reason}`);
@@ -544,11 +573,11 @@ export const SettingsPanel: React.FC = () => {
    */
   const runSimulate = async () => {
     try {
-      setSimulateMsg("Simulating...");
-      const { runSimulation } = await import("../services/backup");
+      setSimulateMsg('Simulating...');
+      const { runSimulation } = await import('../services/backup');
       const res: SimulationResult = await runSimulation();
       const summary = `Simulation: ${res.items} items, ${formatBytes(res.bytes)}.`;
-      const sample = res.sample && res.sample.length > 0 ? ` Sample: ${res.sample.join(", ")}` : "";
+      const sample = res.sample && res.sample.length > 0 ? ` Sample: ${res.sample.join(', ')}` : '';
       const msg = `${summary}${sample}`;
       setSimulateMsg(msg);
       setStatus(msg);
@@ -589,7 +618,7 @@ export const SettingsPanel: React.FC = () => {
    */
   const runAccessTest = async () => {
     try {
-      const { testAccess } = await import("../services/system");
+      const { testAccess } = await import('../services/system');
       const res: AccessProbe = await testAccess();
       setAccessResult(res);
       setAccessError(null);
@@ -598,7 +627,11 @@ export const SettingsPanel: React.FC = () => {
     }
   };
 
-  const { toggleEnabled, remove, addWatchedPath: addWatched } = useWatchActions(cfg, saveCfg, setStatus, () => {});
+  const {
+    toggleEnabled,
+    remove,
+    addWatchedPath: addWatched,
+  } = useWatchActions(cfg, saveCfg, setStatus, () => {});
 
   useEffect(() => {
     refreshAuthStatus();
@@ -606,20 +639,36 @@ export const SettingsPanel: React.FC = () => {
 
   return (
     <div className="card settings-panel">
-      <div className="inline-actions" style={{ marginBottom: 8, alignItems: "center" }}>
-        <div className="pill" style={{ borderColor: authInfo.unlocked ? "#7bffae" : "#ffb86b", color: authInfo.unlocked ? "#7bffae" : "#ffb86b" }}>
-          {authInfo.unlocked ? "Session unlocked" : "Session locked"}
+      <div className="inline-actions" style={{ marginBottom: 8, alignItems: 'center' }}>
+        <div
+          className="pill"
+          style={{
+            borderColor: authInfo.unlocked ? '#7bffae' : '#ffb86b',
+            color: authInfo.unlocked ? '#7bffae' : '#ffb86b',
+          }}
+        >
+          {authInfo.unlocked ? 'Session unlocked' : 'Session locked'}
         </div>
         {authInfo.seconds_left != null && authInfo.unlocked && (
-          <span className="muted">Time left: {Math.max(1, Math.round(authInfo.seconds_left / 60))}m</span>
+          <span className="muted">
+            Time left: {Math.max(1, Math.round(authInfo.seconds_left / 60))}m
+          </span>
         )}
         {authInfo.unlocked ? (
-          <button className="btn secondary" onClick={handleLock}>Lock</button>
+          <button className="btn secondary" onClick={handleLock}>
+            Lock
+          </button>
         ) : (
-          <button className="btn secondary" onClick={() => setAuthVisible(true)}>Unlock</button>
+          <button className="btn secondary" onClick={() => setAuthVisible(true)}>
+            Unlock
+          </button>
         )}
       </div>
-      {authError && <div className="muted" style={{ marginBottom: 8 }}>{authError}</div>}
+      {authError && (
+        <div className="muted" style={{ marginBottom: 8 }}>
+          {authError}
+        </div>
+      )}
       {onboarding.showOnboarding ? (
         <OnboardingOverlay
           step={onboarding.step as 1 | 2 | 3 | 4}
@@ -628,21 +677,29 @@ export const SettingsPanel: React.FC = () => {
           canFinish={canFinishOnboarding}
           retention={cfg.max_backups_per_file}
           watchedPaths={(cfg.watched || []).map((w) => w.path)}
-          summary={`Watched: ${cfg.watched.length}, Destination: ${destStatus?.message ?? "Not set"}`}
-          freeMessage={destStatus ? `Free space: ${destStatus.free_bytes != null ? formatBytes(destStatus.free_bytes) : "Checking…"}` : "Free space: Checking…"}
+          summary={`Watched: ${cfg.watched.length}, Destination: ${destStatus?.message ?? 'Not set'}`}
+          freeMessage={
+            destStatus
+              ? `Free space: ${destStatus.free_bytes != null ? formatBytes(destStatus.free_bytes) : 'Checking…'}`
+              : 'Free space: Checking…'
+          }
           safeMode={cfg.safe_mode}
           statusMessage={validation ?? status}
           startOnLoginMsg={startOnLoginMsg}
           onChangeRetention={(v) => setCfg({ ...cfg, max_backups_per_file: v })}
-          onAddFolder={() => pickPath("Directory")}
-          onAddFile={() => pickPath("File")}
-          onQuickAddDesktop={() => quickAdd(() => specialDir("desktop"), "Desktop")}
-          onQuickAddDocuments={() => quickAdd(() => specialDir("documents"), "Documents")}
-          onQuickAddDownloads={() => quickAdd(() => specialDir("downloads"), "Downloads")}
+          onAddFolder={() => pickPath('Directory')}
+          onAddFile={() => pickPath('File')}
+          onQuickAddDesktop={() => quickAdd(() => specialDir('desktop'), 'Desktop')}
+          onQuickAddDocuments={() => quickAdd(() => specialDir('documents'), 'Documents')}
+          onQuickAddDownloads={() => quickAdd(() => specialDir('downloads'), 'Downloads')}
           onPickDestination={pickBackupRoot}
-          onUseDesktopDest={() => quickAddPathToBackup(() => specialDir("desktop"), "Desktop")}
-          onUseDocumentsDest={() => quickAddPathToBackup(() => specialDir("documents"), "Documents")}
-          onUseDownloadsDest={() => quickAddPathToBackup(() => specialDir("downloads"), "Downloads")}
+          onUseDesktopDest={() => quickAddPathToBackup(() => specialDir('desktop'), 'Desktop')}
+          onUseDocumentsDest={() =>
+            quickAddPathToBackup(() => specialDir('documents'), 'Documents')
+          }
+          onUseDownloadsDest={() =>
+            quickAddPathToBackup(() => specialDir('downloads'), 'Downloads')
+          }
           onStartOnLogin={enableStartOnLogin}
           onTestBackup={runSimulate}
           onNext={() => onboarding.setStep((s) => Math.min(4, s + 1))}
@@ -650,85 +707,98 @@ export const SettingsPanel: React.FC = () => {
           onFinish={finishOnboarding}
         />
       ) : (
-      <div className="settings-content">
-        <DestinationBoard
-          destinations={cfg.destinations || []}
-          watched={cfg.watched || []}
-          onAddPath={(destId, path, kind) => addWatched(path, kind, destId)}
-          onPickPath={addPathToDestination}
-          onToggleEnabled={toggleEnabled}
-          onRemove={remove}
-          onAddDestination={addDestination}
-          onSetDestRetention={setDestinationRetention}
-          onSetDestLabel={(destId, label) => {
-            const nextDests = (cfg.destinations || []).map((d) => (d.id === destId ? { ...d, label } : d));
-            setCfg({ ...cfg, destinations: nextDests });
-          }}
-        />
-        {cfg.watched.length === 0 && (
-          <EmptyState
-            status={status}
-            onAddFolder={() => pickPath("Directory")}
-            onQuickAddDesktop={() => quickAdd(() => specialDir("desktop"), "Desktop")}
-            onQuickAddDocuments={() => quickAdd(() => specialDir("documents"), "Documents")}
-            onQuickAddDownloads={() => quickAdd(() => specialDir("downloads"), "Downloads")}
+        <div className="settings-content">
+          <DestinationBoard
+            destinations={cfg.destinations || []}
+            watched={cfg.watched || []}
+            onAddPath={(destId, path, kind) => addWatched(path, kind, destId)}
+            onPickPath={addPathToDestination}
+            onToggleEnabled={toggleEnabled}
+            onRemove={remove}
+            onAddDestination={addDestination}
+            onSetDestRetention={setDestinationRetention}
+            onSetDestLabel={(destId, label) => {
+              const nextDests = (cfg.destinations || []).map((d) =>
+                d.id === destId ? { ...d, label } : d,
+              );
+              setCfg({ ...cfg, destinations: nextDests });
+            }}
           />
-        )}
+          {cfg.watched.length === 0 && (
+            <EmptyState
+              status={status}
+              onAddFolder={() => pickPath('Directory')}
+              onQuickAddDesktop={() => quickAdd(() => specialDir('desktop'), 'Desktop')}
+              onQuickAddDocuments={() => quickAdd(() => specialDir('documents'), 'Documents')}
+              onQuickAddDownloads={() => quickAdd(() => specialDir('downloads'), 'Downloads')}
+            />
+          )}
 
-        <div className="divider" />
-        <BackupCadence
-          interval_seconds={cfg.interval_seconds}
-          max_backups_per_file={cfg.max_backups_per_file}
-          onChange={(data) => setCfg({ ...cfg, ...data })}
-        />
-        <OnboardingSummary
-          watchedCount={cfg.watched.length}
-          destinationMessage={destStatus?.message ?? "Not set"}
-          freeBytes={destStatus?.free_bytes ?? null}
-          safeMode={cfg.safe_mode}
-          onSimulate={runSimulate}
-        />
-        <div className="divider" />
-        <h3>Performance & filters</h3>
-        <SafeModeToggle value={!!cfg.safe_mode} onChange={(v) => setCfg({ ...cfg, safe_mode: v })} />
-        <PerformanceControls
-          skip_hidden={cfg.skip_hidden}
-          ignore_patterns={cfg.ignore_patterns}
-          max_parallel_copies={cfg.max_parallel_copies}
-          max_bytes_per_second={cfg.max_bytes_per_second}
-          min_free_space_bytes={cfg.min_free_space_bytes}
-          onChange={(data) => setCfg({ ...cfg, ...data })}
-          onStatus={setStatus}
-        />
-        <FreeSpaceGuard
-          minFree={cfg.min_free_space_bytes}
-          resumeOnSpace={resumeOnSpace}
-          onToggleResume={persistResumeOnSpace}
-        />
-        <div className="divider" />
-        <AccessTest
-          onTest={runAccessTest}
-          result={accessResult}
-          error={accessError}
-        />
-        <div className="sticky-actions">
-          <button className="btn" onClick={() => guardAuth("Save settings", () => saveCfg(cfg, "Settings saved"))} disabled={saving}>Save settings</button>
-          <span className="muted">{validation ?? status}</span>
+          <div className="divider" />
+          <BackupCadence
+            interval_seconds={cfg.interval_seconds}
+            max_backups_per_file={cfg.max_backups_per_file}
+            onChange={(data) => setCfg({ ...cfg, ...data })}
+          />
+          <OnboardingSummary
+            watchedCount={cfg.watched.length}
+            destinationMessage={destStatus?.message ?? 'Not set'}
+            freeBytes={destStatus?.free_bytes ?? null}
+            safeMode={cfg.safe_mode}
+            onSimulate={runSimulate}
+          />
+          <div className="divider" />
+          <h3>Performance & filters</h3>
+          <SafeModeToggle
+            value={!!cfg.safe_mode}
+            onChange={(v) => setCfg({ ...cfg, safe_mode: v })}
+          />
+          <PerformanceControls
+            skip_hidden={cfg.skip_hidden}
+            ignore_patterns={cfg.ignore_patterns}
+            max_parallel_copies={cfg.max_parallel_copies}
+            max_bytes_per_second={cfg.max_bytes_per_second}
+            min_free_space_bytes={cfg.min_free_space_bytes}
+            onChange={(data) => setCfg({ ...cfg, ...data })}
+            onStatus={setStatus}
+          />
+          <FreeSpaceGuard
+            minFree={cfg.min_free_space_bytes}
+            resumeOnSpace={resumeOnSpace}
+            onToggleResume={persistResumeOnSpace}
+          />
+          <div className="divider" />
+          <AccessTest onTest={runAccessTest} result={accessResult} error={accessError} />
+          <div className="sticky-actions">
+            <button
+              className="btn"
+              onClick={() => guardAuth('Save settings', () => saveCfg(cfg, 'Settings saved'))}
+              disabled={saving}
+            >
+              Save settings
+            </button>
+            <span className="muted">{validation ?? status}</span>
+          </div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {validation ? `Why can't I save? ${validation}` : 'All required fields look good.'}
+          </div>
+          {simulateMsg && (
+            <div className="muted" style={{ marginTop: 4 }}>
+              {simulateMsg}
+            </div>
+          )}
+          <div className="inline-actions" style={{ marginTop: 6 }}>
+            <button className="btn secondary" onClick={exportDoctor}>
+              Run doctor (export)
+            </button>
+            <span className="muted">{doctorMsg}</span>
+          </div>
+          <SaveBar
+            disabled={saving}
+            status={validation ?? status}
+            onSave={() => guardAuth('Save settings', () => saveCfg(cfg, 'Settings saved'))}
+          />
         </div>
-        <div className="muted" style={{ marginTop: 4 }}>
-          {validation ? `Why can't I save? ${validation}` : "All required fields look good."}
-        </div>
-        {simulateMsg && <div className="muted" style={{ marginTop: 4 }}>{simulateMsg}</div>}
-        <div className="inline-actions" style={{ marginTop: 6 }}>
-          <button className="btn secondary" onClick={exportDoctor}>Run doctor (export)</button>
-          <span className="muted">{doctorMsg}</span>
-        </div>
-        <SaveBar
-          disabled={saving}
-          status={validation ?? status}
-          onSave={() => guardAuth("Save settings", () => saveCfg(cfg, "Settings saved"))}
-        />
-      </div>
       )}
       <AuthLockModal
         visible={authVisible}
@@ -738,7 +808,7 @@ export const SettingsPanel: React.FC = () => {
         onUnlock={handleUnlock}
         onClose={() => {
           setAuthVisible(false);
-          setPasscode("");
+          setPasscode('');
           pendingAuthAction.current = null;
         }}
       />

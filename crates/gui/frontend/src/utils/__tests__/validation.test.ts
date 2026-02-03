@@ -1,4 +1,4 @@
-import { validateIgnorePatterns } from "../validation";
+import { validateIgnorePatterns } from '../validation';
 
 /**
  * Purpose: Verify empty ignore patterns are accepted.
@@ -29,8 +29,8 @@ function assertEmptyPatternsAllowed(): void {
  */
 function assertRejectsTooManyPatterns(): void {
   try {
-    const arr = new Array(201).fill("**/*.tmp");
-    expect(validateIgnorePatterns(arr)).toContain("Too many");
+    const arr = new Array(201).fill('**/*.tmp');
+    expect(validateIgnorePatterns(arr)).toContain('Too many');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[validation.test.ts::assertRejectsTooManyPatterns] ${reason}`);
@@ -48,7 +48,7 @@ function assertRejectsTooManyPatterns(): void {
  */
 function assertRejectsInvalidPatterns(): void {
   try {
-    expect(validateIgnorePatterns(["[unclosed"])).toContain("Invalid ignore pattern");
+    expect(validateIgnorePatterns(['[unclosed'])).toContain('Invalid ignore pattern');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[validation.test.ts::assertRejectsInvalidPatterns] ${reason}`);
@@ -66,16 +66,16 @@ function assertRejectsInvalidPatterns(): void {
  */
 function assertAcceptsValidGlobs(): void {
   try {
-    expect(validateIgnorePatterns(["**/*.log", "**/node_modules/**"])).toBeNull();
+    expect(validateIgnorePatterns(['**/*.log', '**/node_modules/**'])).toBeNull();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[validation.test.ts::assertAcceptsValidGlobs] ${reason}`);
   }
 }
 
-describe("validateIgnorePatterns", () => {
-  it("allows empty", assertEmptyPatternsAllowed);
-  it("rejects too many", assertRejectsTooManyPatterns);
-  it("rejects invalid regex-ish patterns", assertRejectsInvalidPatterns);
-  it("passes valid globs", assertAcceptsValidGlobs);
+describe('validateIgnorePatterns', () => {
+  it('allows empty', assertEmptyPatternsAllowed);
+  it('rejects too many', assertRejectsTooManyPatterns);
+  it('rejects invalid regex-ish patterns', assertRejectsInvalidPatterns);
+  it('passes valid globs', assertAcceptsValidGlobs);
 });

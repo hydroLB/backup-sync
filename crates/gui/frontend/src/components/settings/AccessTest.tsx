@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   onTest: () => void;
@@ -24,28 +24,34 @@ type Props = {
 const AccessTest: React.FC<Props> = ({ onTest, result, error }) => {
   try {
     return (
-      <div className="card" style={{ background: "rgba(255,255,255,0.04)" }}>
+      <div className="card" style={{ background: 'rgba(255,255,255,0.04)' }}>
         <div className="section-title">
           <h4 style={{ margin: 0 }}>Test access</h4>
-          <button className="btn secondary" onClick={onTest}>Run test</button>
+          <button className="btn secondary" onClick={onTest}>
+            Run test
+          </button>
         </div>
         {result ? (
-          <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ display: 'grid', gap: 6 }}>
             <div className="muted">Destination: {result.destination_message}</div>
             {result.watched_missing.length > 0 && (
-              <div style={{ color: "#ff7b7b" }}>Missing: {result.watched_missing.join(", ")}</div>
+              <div style={{ color: '#ff7b7b' }}>Missing: {result.watched_missing.join(', ')}</div>
             )}
             {result.watched_unwritable.length > 0 && (
-              <div style={{ color: "#ff7b7b" }}>Unwritable: {result.watched_unwritable.join(", ")}</div>
+              <div style={{ color: '#ff7b7b' }}>
+                Unwritable: {result.watched_unwritable.join(', ')}
+              </div>
             )}
             {result.watched_ok.length > 0 && (
               <div className="muted">OK: {result.watched_ok.length} paths</div>
             )}
           </div>
         ) : (
-          <p className="muted">Quickly check that watched paths exist and destination is writable.</p>
+          <p className="muted">
+            Quickly check that watched paths exist and destination is writable.
+          </p>
         )}
-        {error && <div style={{ color: "#ff7b7b" }}>{error}</div>}
+        {error && <div style={{ color: '#ff7b7b' }}>{error}</div>}
       </div>
     );
   } catch (error) {

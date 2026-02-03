@@ -95,7 +95,7 @@ fn build_doctor_report(
     report.push_str(&format!("State file: {:?}\n", state_path));
     let dest_path = cfg
         .destinations
-        .get(0)
+        .first()
         .map(|d| d.path.clone())
         .unwrap_or_else(|| cfg.backup_root.clone());
     report.push_str(&format!("Backup destination: {:?}\n", dest_path));
@@ -495,7 +495,7 @@ pub async fn export_diagnostic_bundle_cmd(
     let dest_dir = desktop_dir().ok_or_else(|| {
         ErrorEnvelope::new(
             "NO_DESKTOP",
-            format!("support::export_diagnostic_bundle_cmd no desktop directory available"),
+            "support::export_diagnostic_bundle_cmd no desktop directory available".to_string(),
         )
     })?;
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
@@ -519,7 +519,7 @@ pub async fn export_diagnostic_bundle_cmd(
         &state,
         &recent_activity,
     );
-    write_zip_entry(&mut zip, "diagnostics.txt", &primary, opts.clone())?;
+    write_zip_entry(&mut zip, "diagnostics.txt", &primary, opts)?;
     write_zip_entry(
         &mut zip,
         "config-redacted.json",
@@ -527,16 +527,16 @@ pub async fn export_diagnostic_bundle_cmd(
             "support::export_diagnostic_bundle_cmd redacted config",
             &redacted,
         ),
-        opts.clone(),
+        opts,
     )?;
     write_zip_entry(
         &mut zip,
         "config-diff.json",
         &serialize_json("support::export_diagnostic_bundle_cmd config diff", &diff),
-        opts.clone(),
+        opts,
     )?;
-    write_zip_entry(&mut zip, "status.json", &status_json, opts.clone())?;
-    write_zip_entry(&mut zip, "log-tail.txt", &tail, opts.clone())?;
+    write_zip_entry(&mut zip, "status.json", &status_json, opts)?;
+    write_zip_entry(&mut zip, "log-tail.txt", &tail, opts)?;
 
     maybe_add_state(&mut zip, &state_path, opts)?;
     zip.finish().map_err(|e| {

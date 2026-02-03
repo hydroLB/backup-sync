@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { Config } from "./types";
-import { UI_TUNING } from "../../config/uiTuning";
+import { useEffect, useState } from 'react';
+import { Config } from './types';
+import { UI_TUNING } from '../../config/uiTuning';
 
 /**
  * Purpose: Manage onboarding state based on config readiness.
@@ -18,7 +18,7 @@ export function useOnboardingState(cfg: Config | null, destWritable: boolean | u
   useEffect(() => {
     try {
       const flag = localStorage.getItem(UI_TUNING.onboardingDoneStorageKey);
-      if (flag === "1") setDone(true);
+      if (flag === '1') setDone(true);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[useOnboardingState::init] Failed to read onboarding flag: ${reason}`);
@@ -54,7 +54,7 @@ export function useOnboardingState(cfg: Config | null, destWritable: boolean | u
   const finish = () => {
     setDone(true);
     try {
-      localStorage.setItem(UI_TUNING.onboardingDoneStorageKey, "1");
+      localStorage.setItem(UI_TUNING.onboardingDoneStorageKey, '1');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[useOnboardingState::finish] Failed to persist onboarding flag: ${reason}`);

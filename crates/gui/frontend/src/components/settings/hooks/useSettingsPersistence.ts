@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Config } from "../types";
-import { saveConfig } from "../../../services";
+import { useState } from 'react';
+import { Config } from '../types';
+import { saveConfig } from '../../../services';
 
 type SetStatus = (s: string) => void;
 type SetValidation = (s: string | null) => void;
@@ -36,7 +36,7 @@ export function useSettingsPersistence(setStatus: SetStatus, setValidation: SetV
         setValidation(null);
         setSaving(true);
         saveConfig({ ...nextCfg, ignore_patterns: dedupedIgnores })
-          .then(() => setStatus("Saved"))
+          .then(() => setStatus('Saved'))
           .catch((e) => setStatus(`[useSettingsPersistence::persist] ${String(e)}`))
           .finally(() => setSaving(false));
       } catch (error) {

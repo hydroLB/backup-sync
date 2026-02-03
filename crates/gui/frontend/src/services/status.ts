@@ -1,5 +1,5 @@
-import { safeInvoke, wrapError } from "./ipc";
-import { StatusDto } from "./types";
+import { safeInvoke, wrapError } from './ipc';
+import { StatusDto } from './types';
 
 /**
  * Purpose: Fetch the current daemon status from the backend.
@@ -12,8 +12,8 @@ import { StatusDto } from "./types";
  */
 export async function getStatus(): Promise<StatusDto> {
   try {
-    return await safeInvoke<StatusDto>("get_status");
+    return await safeInvoke<StatusDto>('get_status');
   } catch (error) {
-    throw wrapError("[getStatus] Failed to fetch status", error);
+    throw wrapError('[getStatus] Failed to fetch status', error);
   }
 }

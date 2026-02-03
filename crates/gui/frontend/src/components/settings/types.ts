@@ -1,6 +1,6 @@
 export type WatchedPath = {
   path: string;
-  kind: "File" | "Directory";
+  kind: 'File' | 'Directory';
   enabled: boolean;
   destination_id?: string;
   max_backups_per_file?: number | null;

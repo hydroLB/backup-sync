@@ -47,36 +47,31 @@ pub async fn install_service_cmd(
     let (exec, log_path) = common::load_exec_and_log()?;
     let log_path = log_path.as_deref();
     #[cfg(target_os = "macos")]
-    {
+    let message = {
         let dest = platform::macos::write_plist(&exec, log_path)?;
         platform::macos::enable_launchd(&dest)?;
-        return Ok(format!(
-            "Service installed at {:?}. Enabled via launchctl.",
-            dest
-        ));
-    }
+        format!("Service installed at {:?}. Enabled via launchctl.", dest)
+    };
     #[cfg(target_os = "linux")]
-    {
+    let message = {
         let dest = platform::linux::write_unit(&exec, log_path)?;
         platform::linux::enable_systemd()?;
-        return Ok(format!(
-            "Service installed at {:?} and enabled via systemd.",
-            dest
-        ));
-    }
+        format!("Service installed at {:?} and enabled via systemd.", dest)
+    };
     #[cfg(target_os = "windows")]
-    {
+    let message = {
         let dest = platform::windows::write_task(&exec)?;
         platform::windows::enable_task(&dest)?;
-        return Ok(format!(
+        format!(
             "Service installed at {:?} and registered via schtasks.",
             dest
-        ));
-    }
+        )
+    };
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         return platform::unsupported::install_service();
     }
+    Ok(message)
 }
 
 /// Purpose: Checks the service status and daemon reachability.
@@ -97,21 +92,14 @@ pub async fn check_service_cmd() -> Result<ServiceStatus, ErrorEnvelope> {
         None
     };
     #[cfg(target_os = "macos")]
-    {
-        return platform::macos::status_macos(reachable, uptime, last_ipc);
-    }
+    let status = platform::macos::status_macos(reachable, uptime, last_ipc);
     #[cfg(target_os = "linux")]
-    {
-        return platform::linux::status_linux(reachable, uptime, last_ipc);
-    }
+    let status = platform::linux::status_linux(reachable, uptime, last_ipc);
     #[cfg(target_os = "windows")]
-    {
-        return platform::windows::status_windows(reachable, uptime, last_ipc);
-    }
+    let status = platform::windows::status_windows(reachable, uptime, last_ipc);
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        return platform::unsupported::status();
-    }
+    let status = platform::unsupported::status();
+    status
 }
 
 /// Purpose: Restarts the daemon using platform specific tools.
@@ -128,19 +116,12 @@ pub fn restart_daemon_cmd(
 ) -> Result<String, ErrorEnvelope> {
     security::ensure_unlocked(&auth_state, correlation_id.clone())?;
     #[cfg(target_os = "macos")]
-    {
-        return platform::macos::restart_daemon();
-    }
+    let result = platform::macos::restart_daemon();
     #[cfg(target_os = "linux")]
-    {
-        return platform::linux::restart_daemon();
-    }
+    let result = platform::linux::restart_daemon();
     #[cfg(target_os = "windows")]
-    {
-        return platform::windows::restart_daemon();
-    }
+    let result = platform::windows::restart_daemon();
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        return platform::unsupported::restart_daemon();
-    }
+    let result = platform::unsupported::restart_daemon();
+    result
 }

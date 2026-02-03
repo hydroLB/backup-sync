@@ -1,9 +1,9 @@
 # Backup Sync
 
-Built as a local first backup manager with a Rust core, a long running daemon, a CLI, and a Tauri plus React desktop app. The design keeps state on disk, uses OS config and data directories, and exposes the same operations in GUI and CLI flows.
+Backup Sync is a simple desktop backup app for space efficient, versioned backups of selected folders to an external drive or partition. It uses a content addressed blob store (SHA-256) so unchanged file contents are not duplicated across versions.
 
 ## Repository map
-- `crates/core` contains the backup engine, hashing, retention policies, and state model
+- `crates/core` contains the backup engine, blob store layout, and restore logic
 - `crates/daemon` runs scheduled cycles, watcher integrations, IPC, and shutdown handling
 - `crates/cli` provides operational commands for status, run once, verify, and diagnostics
 - `crates/gui` is the Tauri backend and IPC bridge
@@ -11,11 +11,13 @@ Built as a local first backup manager with a Rust core, a long running daemon, a
 - `docs` holds standards, perf baselines, and release notes
 
 ## System overview
-- A scan collects metadata for watched files, applies ignore patterns, and enforces timeouts
-- Planning decides what to back up based on size, timestamps, and periodic content hashes
-- Execution copies to a temp file, verifies size, then renames atomically and updates state
-- Verification re hashes the newest backups and records results for the UI
-- IPC exposes status snapshots with bounded payload sizes
+- Every 30 minutes, the daemon scans each configured folder and builds a snapshot manifest.
+- A new version is created only when the snapshot differs from the latest manifest (add, modify, delete).
+- File contents are stored in `.backup_sync/v1/blobs/sha256/...` keyed by SHA-256; manifests map relative paths to blob hashes plus metadata.
+- Each folder keeps N versions (default 5). When retention prunes old manifests, unreferenced blobs are garbage collected.
+- Restore reconstructs a selected version either to a new directory or in place (in place removes files not present in the selected version).
+
+Details: see `docs/storage.md` and `docs/ui.md`.
 
 ## Setup
 1. Install Rust stable, Node 18 or newer, and npm.
@@ -31,8 +33,13 @@ Quickstart (dev):
 
 ### Desktop app
 1. Start the app with `make run`.
-2. Add at least one watched path and a destination.
-3. Run a Simulation to preview changes, then run a backup.
+2. Choose a backup destination (external drive/partition path).
+3. Add one or more folders to back up.
+4. Set “Backups to keep” per folder (default 5).
+5. Use:
+   - Start/Stop to pause or resume background writes (safe mode)
+   - Back up now for an immediate run
+   - Restore… to pick a folder + version and restore to a new directory or in place
 
 ### CLI
 - Status snapshot: `cargo run -p cli -- status`
@@ -132,6 +139,7 @@ max_backups_per_file = 10
 - If backups are skipped, verify watched paths exist and are outside the destination.
 - If verification reports issues, run `backup-sync verify` and review recent logs.
 - For detailed diagnostics, export a doctor report from the UI or CLI.
+- If the dev server port conflicts with another program, set `BACKUP_SYNC_DEV_PORT` or let Vite pick the repo-specific default in `crates/gui/frontend/vite.config.ts`.
 
 ## Release notes
 - Changes are tracked in `CHANGELOG.md`.
@@ -139,10 +147,10 @@ max_backups_per_file = 10
 
 ## Notable code paths
 This system emphasizes bounded IO, explicit config validation, and performance guardrails that stay visible in code review.
-- `crates/core/src/backup/execution/worker.rs` shows staged copy, retries with jitter, throttling, and state updates.
+- `crates/core/src/backup/versioned/store.rs` implements the SHA-256 blob store, manifests, retention, and garbage collection.
+- `crates/core/src/backup/versioned/restore.rs` reconstructs versions with atomic writes and optional in-place cleanup.
 - `crates/core/src/config/registry.rs` centralizes defaults and validation limits for config knobs.
-- `crates/core/src/fs/scanning/collector.rs` enforces scan timeouts and uses redacted logging.
 - `crates/core/src/bin/perf_guard.rs` captures and validates performance baselines.
 - `crates/daemon/src/runtime/loop.rs` coordinates lifecycle, IPC, and graceful shutdown.
 - `crates/gui/frontend/src/config/uiTuning.ts` consolidates UI tuning knobs.
-- `crates/gui/frontend/src/utils/bst.ts` keeps watch list prefix checks fast and deterministic.
+- `crates/gui/frontend/src/components/minimal/MinimalMain.tsx` is the spec-minimal main screen UI.

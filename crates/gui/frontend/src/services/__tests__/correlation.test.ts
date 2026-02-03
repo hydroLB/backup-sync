@@ -1,4 +1,4 @@
-import { correlationId } from "../correlation";
+import { correlationId } from '../correlation';
 
 /**
  * Purpose: Validate correlation id format and uniqueness for service calls.
@@ -11,16 +11,16 @@ import { correlationId } from "../correlation";
  */
 function assertCorrelationId(): void {
   try {
-    const a = correlationId("run");
-    const b = correlationId("run");
+    const a = correlationId('run');
+    const b = correlationId('run');
     expect(a).not.toEqual(b);
-    expect(a.startsWith("run-")).toBe(true);
+    expect(a.startsWith('run-')).toBe(true);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[correlation.test.ts::assertCorrelationId] ${reason}`);
   }
 }
 
-describe("correlationId", () => {
-  it("produces unique-ish ids", assertCorrelationId);
+describe('correlationId', () => {
+  it('produces unique-ish ids', assertCorrelationId);
 });

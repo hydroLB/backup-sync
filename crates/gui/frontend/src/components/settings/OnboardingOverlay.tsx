@@ -1,5 +1,5 @@
-import React from "react";
-import { formatBytes } from "../../utils/format";
+import React from 'react';
+import { formatBytes } from '../../utils/format';
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -72,10 +72,10 @@ const OnboardingOverlay: React.FC<Props> = ({
   watchedPaths,
 }) => {
   const stepMeta = [
-    { id: 1 as Step, label: "What to protect", done: hasWatched },
-    { id: 2 as Step, label: "Where to store", done: destStatus?.writable ?? false },
-    { id: 3 as Step, label: "Versions to keep", done: false },
-    { id: 4 as Step, label: "Run in background", done: false },
+    { id: 1 as Step, label: 'What to protect', done: hasWatched },
+    { id: 2 as Step, label: 'Where to store', done: destStatus?.writable ?? false },
+    { id: 3 as Step, label: 'Versions to keep', done: false },
+    { id: 4 as Step, label: 'Run in background', done: false },
   ];
 
   /**
@@ -114,15 +114,27 @@ const OnboardingOverlay: React.FC<Props> = ({
       if (step === 1) {
         return (
           <>
-            <p className="muted">Add at least one folder or file. We’ll keep you here until something is selected.</p>
-            <div className="inline-actions" style={{ flexWrap: "wrap" }}>
-              <button className="btn" onClick={onAddFolder}>Add folder</button>
-              <button className="btn secondary" onClick={onAddFile}>Add file</button>
+            <p className="muted">
+              Add at least one folder or file. We’ll keep you here until something is selected.
+            </p>
+            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+              <button className="btn" onClick={onAddFolder}>
+                Add folder
+              </button>
+              <button className="btn secondary" onClick={onAddFile}>
+                Add file
+              </button>
             </div>
-            <div className="inline-actions" style={{ flexWrap: "wrap" }}>
-              <button className="btn secondary" onClick={onQuickAddDesktop}>Quick add Desktop</button>
-              <button className="btn secondary" onClick={onQuickAddDocuments}>Quick add Documents</button>
-              <button className="btn secondary" onClick={onQuickAddDownloads}>Quick add Downloads</button>
+            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+              <button className="btn secondary" onClick={onQuickAddDesktop}>
+                Quick add Desktop
+              </button>
+              <button className="btn secondary" onClick={onQuickAddDocuments}>
+                Quick add Documents
+              </button>
+              <button className="btn secondary" onClick={onQuickAddDownloads}>
+                Quick add Downloads
+              </button>
             </div>
             {watchedPaths.length > 0 && (
               <div className="watched-list">
@@ -143,21 +155,33 @@ const OnboardingOverlay: React.FC<Props> = ({
       if (step === 2) {
         return (
           <>
-            <p className="muted">Pick a backup destination. We’ll create the folder and block finishing until it’s writable.</p>
-            <div className="inline-actions" style={{ flexWrap: "wrap" }}>
-              <button className="btn" onClick={onPickDestination}>Choose destination</button>
-              <button className="btn secondary" onClick={onUseDesktopDest}>Use Desktop</button>
-              <button className="btn secondary" onClick={onUseDocumentsDest}>Use Documents</button>
-              <button className="btn secondary" onClick={onUseDownloadsDest}>Use Downloads</button>
+            <p className="muted">
+              Pick a backup destination. We’ll create the folder and block finishing until it’s
+              writable.
+            </p>
+            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+              <button className="btn" onClick={onPickDestination}>
+                Choose destination
+              </button>
+              <button className="btn secondary" onClick={onUseDesktopDest}>
+                Use Desktop
+              </button>
+              <button className="btn secondary" onClick={onUseDocumentsDest}>
+                Use Documents
+              </button>
+              <button className="btn secondary" onClick={onUseDownloadsDest}>
+                Use Downloads
+              </button>
             </div>
             <div className="muted">
               {destStatus ? (
                 <>
                   {destStatus.message}
-                  {destStatus.free_bytes != null && ` • Free: ${formatBytes(destStatus.free_bytes)}`}
+                  {destStatus.free_bytes != null &&
+                    ` • Free: ${formatBytes(destStatus.free_bytes)}`}
                 </>
               ) : (
-                "Waiting for destination check…"
+                'Waiting for destination check…'
               )}
             </div>
           </>
@@ -167,7 +191,7 @@ const OnboardingOverlay: React.FC<Props> = ({
         return (
           <>
             <p className="muted">How many old versions do you want to keep per file?</p>
-            <div className="slider-wrap" style={{ display: "grid", gap: 8 }}>
+            <div className="slider-wrap" style={{ display: 'grid', gap: 8 }}>
               <div className="slider-track">
                 <input
                   type="range"
@@ -183,14 +207,16 @@ const OnboardingOverlay: React.FC<Props> = ({
                     const active = val <= retention;
                     return (
                       <div key={val} className="slider-dot-wrap">
-                        <div className={`slider-dot ${active ? "active" : ""}`} />
+                        <div className={`slider-dot ${active ? 'active' : ''}`} />
                         <div className="slider-num">{val}</div>
                       </div>
                     );
                   })}
                 </div>
               </div>
-              <div className="muted">Keeping <strong>{retention}</strong> old revisions.</div>
+              <div className="muted">
+                Keeping <strong>{retention}</strong> old revisions.
+              </div>
             </div>
             <div className="muted">You can adjust this anytime in settings.</div>
           </>
@@ -198,22 +224,40 @@ const OnboardingOverlay: React.FC<Props> = ({
       }
       return (
         <>
-          <p className="muted">Enable background mode so backups run even when the window is closed.</p>
-          <div className="inline-actions" style={{ flexWrap: "wrap" }}>
-            <button className="btn secondary" onClick={onStartOnLogin}>Enable start on login</button>
-            <button className="btn secondary" onClick={onFinish} disabled={!canFinish}>Finish setup</button>
-            <button className="btn" onClick={onTestBackup} disabled={!canFinish}>Test backup now</button>
+          <p className="muted">
+            Enable background mode so backups run even when the window is closed.
+          </p>
+          <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+            <button className="btn secondary" onClick={onStartOnLogin}>
+              Enable start on login
+            </button>
+            <button className="btn secondary" onClick={onFinish} disabled={!canFinish}>
+              Finish setup
+            </button>
+            <button className="btn" onClick={onTestBackup} disabled={!canFinish}>
+              Test backup now
+            </button>
           </div>
-          <div className="muted">{startOnLoginMsg || "We’ll install a small helper and keep the tray icon running."}</div>
+          <div className="muted">
+            {startOnLoginMsg || 'We’ll install a small helper and keep the tray icon running.'}
+          </div>
           <div className="muted">Summary: {summary}</div>
           {freeMessage && <div className="muted">{freeMessage}</div>}
-          <div className="muted">Safe mode: {safeMode ? "On (scan/verify only)" : "Off (normal backups)"}</div>
-          {!canFinish && <div style={{ color: "var(--danger)" }}>Add a watched item and destination before finishing.</div>}
+          <div className="muted">
+            Safe mode: {safeMode ? 'On (scan/verify only)' : 'Off (normal backups)'}
+          </div>
+          {!canFinish && (
+            <div style={{ color: 'var(--danger)' }}>
+              Add a watched item and destination before finishing.
+            </div>
+          )}
         </>
       );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return <div className="muted">[OnboardingOverlay::renderBody] Failed to render: {reason}</div>;
+      return (
+        <div className="muted">[OnboardingOverlay::renderBody] Failed to render: {reason}</div>
+      );
     }
   };
 
@@ -223,8 +267,10 @@ const OnboardingOverlay: React.FC<Props> = ({
         <div className="section-title">
           <div>
             <div className="pill step-pill">First-run guide</div>
-            <h3 style={{ margin: "6px 0 2px" }}>Let’s finish setup</h3>
-            <p className="muted" style={{ margin: 0 }}>We’ll block the app until the essentials are valid.</p>
+            <h3 style={{ margin: '6px 0 2px' }}>Let’s finish setup</h3>
+            <p className="muted" style={{ margin: 0 }}>
+              We’ll block the app until the essentials are valid.
+            </p>
           </div>
           <div className="pill step-pill">{step} / 4</div>
         </div>
@@ -232,24 +278,28 @@ const OnboardingOverlay: React.FC<Props> = ({
           {stepMeta.map((s) => (
             <div
               key={s.id}
-              className={`onboarding-step ${step === s.id ? "active" : ""} ${s.done ? "done" : ""}`}
+              className={`onboarding-step ${step === s.id ? 'active' : ''} ${s.done ? 'done' : ''}`}
             >
               <span>{s.label}</span>
-              <span className="badge">{s.done ? "Done" : s.id === step ? "Now" : "Next"}</span>
+              <span className="badge">{s.done ? 'Done' : s.id === step ? 'Now' : 'Next'}</span>
             </div>
           ))}
         </div>
-        <div className="onboarding-body">
-          {renderBody()}
-        </div>
+        <div className="onboarding-body">{renderBody()}</div>
         <div className="onboarding-actions">
           <div className="muted">{statusMessage}</div>
           <div className="onboarding-nav">
-            <button className="btn secondary" onClick={onBack} disabled={step === 1}>Back</button>
+            <button className="btn secondary" onClick={onBack} disabled={step === 1}>
+              Back
+            </button>
             {step < 4 ? (
-              <button className="btn" onClick={onNext} disabled={nextDisabled()}>Next</button>
+              <button className="btn" onClick={onNext} disabled={nextDisabled()}>
+                Next
+              </button>
             ) : (
-              <button className="btn" onClick={onFinish} disabled={!canFinish}>Finish</button>
+              <button className="btn" onClick={onFinish} disabled={!canFinish}>
+                Finish
+              </button>
             )}
           </div>
         </div>

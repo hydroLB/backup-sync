@@ -1,7 +1,7 @@
-import { correlationId } from "./correlation";
-import { safeInvoke, wrapError } from "./ipc";
-import { AccessProbe, DestinationCheck, ServiceStatusDto } from "./types";
-import { UI_TUNING } from "../config/uiTuning";
+import { correlationId } from './correlation';
+import { safeInvoke, wrapError } from './ipc';
+import { AccessProbe, DestinationCheck, ServiceStatusDto } from './types';
+import { UI_TUNING } from '../config/uiTuning';
 
 /**
  * Purpose: Apply jitter to a base delay value.
@@ -20,7 +20,7 @@ function applyJitter(delayMs: number, jitterPct: number): number {
     const rand = Math.random() * (delta * 2) - delta;
     return Math.max(0, Math.round(delayMs + rand));
   } catch (error) {
-    throw wrapError("[applyJitter] Failed to apply jitter", error);
+    throw wrapError('[applyJitter] Failed to apply jitter', error);
   }
 }
 
@@ -60,9 +60,9 @@ async function withBackoff<T>(label: string, fn: () => Promise<T>): Promise<T> {
  */
 export async function installService(): Promise<string> {
   try {
-    return await withBackoff("installService", () => safeInvoke("install_service_cmd"));
+    return await withBackoff('installService', () => safeInvoke('install_service_cmd'));
   } catch (error) {
-    throw wrapError("[installService] Failed to install service", error);
+    throw wrapError('[installService] Failed to install service', error);
   }
 }
 
@@ -77,9 +77,9 @@ export async function installService(): Promise<string> {
  */
 export async function restartDaemon(): Promise<string> {
   try {
-    return await withBackoff("restartDaemon", () => safeInvoke("restart_daemon_cmd"));
+    return await withBackoff('restartDaemon', () => safeInvoke('restart_daemon_cmd'));
   } catch (error) {
-    throw wrapError("[restartDaemon] Failed to restart daemon", error);
+    throw wrapError('[restartDaemon] Failed to restart daemon', error);
   }
 }
 
@@ -94,9 +94,9 @@ export async function restartDaemon(): Promise<string> {
  */
 export async function checkUpdates(): Promise<string> {
   try {
-    return await safeInvoke("check_updates_cmd");
+    return await safeInvoke('check_updates_cmd');
   } catch (error) {
-    throw wrapError("[checkUpdates] Failed to check for updates", error);
+    throw wrapError('[checkUpdates] Failed to check for updates', error);
   }
 }
 
@@ -111,9 +111,9 @@ export async function checkUpdates(): Promise<string> {
  */
 export async function checkDestination(path: string): Promise<DestinationCheck> {
   try {
-    return await safeInvoke<DestinationCheck>("check_destination_cmd", { path });
+    return await safeInvoke<DestinationCheck>('check_destination_cmd', { path });
   } catch (error) {
-    throw wrapError("[checkDestination] Failed to validate destination", error);
+    throw wrapError('[checkDestination] Failed to validate destination', error);
   }
 }
 
@@ -128,9 +128,9 @@ export async function checkDestination(path: string): Promise<DestinationCheck> 
  */
 export async function testAccess(): Promise<AccessProbe> {
   try {
-    return await safeInvoke<AccessProbe>("test_access_cmd");
+    return await safeInvoke<AccessProbe>('test_access_cmd');
   } catch (error) {
-    throw wrapError("[testAccess] Failed to test access permissions", error);
+    throw wrapError('[testAccess] Failed to test access permissions', error);
   }
 }
 
@@ -145,11 +145,11 @@ export async function testAccess(): Promise<AccessProbe> {
  */
 export async function doctorReport(): Promise<string> {
   try {
-    return await safeInvoke("doctor_report_cmd", {
-      correlationId: correlationId("doctor"),
+    return await safeInvoke('doctor_report_cmd', {
+      correlationId: correlationId('doctor'),
     });
   } catch (error) {
-    throw wrapError("[doctorReport] Failed to generate doctor report", error);
+    throw wrapError('[doctorReport] Failed to generate doctor report', error);
   }
 }
 
@@ -164,9 +164,9 @@ export async function doctorReport(): Promise<string> {
  */
 export async function checkService(): Promise<ServiceStatusDto> {
   try {
-    return await safeInvoke<ServiceStatusDto>("check_service_cmd");
+    return await safeInvoke<ServiceStatusDto>('check_service_cmd');
   } catch (error) {
-    throw wrapError("[checkService] Failed to check service status", error);
+    throw wrapError('[checkService] Failed to check service status', error);
   }
 }
 
@@ -181,10 +181,10 @@ export async function checkService(): Promise<ServiceStatusDto> {
  */
 export async function exportDiagnosticBundle(): Promise<string> {
   try {
-    return await safeInvoke("export_diagnostic_bundle_cmd", {
-      correlationId: correlationId("diag"),
+    return await safeInvoke('export_diagnostic_bundle_cmd', {
+      correlationId: correlationId('diag'),
     });
   } catch (error) {
-    throw wrapError("[exportDiagnosticBundle] Failed to export diagnostic bundle", error);
+    throw wrapError('[exportDiagnosticBundle] Failed to export diagnostic bundle', error);
   }
 }

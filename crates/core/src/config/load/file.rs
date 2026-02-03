@@ -1,4 +1,5 @@
 use super::defaults::default_config;
+use super::normalize::normalize_loaded_config;
 use crate::config::model::Config;
 use crate::platform::paths::config_file_path;
 use anyhow::{Context, Result};
@@ -26,7 +27,7 @@ pub fn load_config() -> Result<Config> {
                 path
             )
         })?;
-        Ok(cfg)
+        Ok(normalize_loaded_config(cfg))
     } else {
         let cfg = default_config()?;
         save_config(&cfg)?;
@@ -82,5 +83,5 @@ pub fn load_from_path(path: &Path) -> Result<Config> {
             path
         )
     })?;
-    Ok(cfg)
+    Ok(normalize_loaded_config(cfg))
 }

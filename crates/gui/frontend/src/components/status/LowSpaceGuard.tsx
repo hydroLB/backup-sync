@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   freeBytes: number | null;
@@ -16,7 +16,12 @@ type Props = {
  * Side effects: Registers UI event handlers for resume toggles.
  * Why: Highlights capacity risks and lets operators control resume behavior.
  */
-const LowSpaceGuard: React.FC<Props> = ({ freeBytes, threshold, resumeOnSpace, onToggleResume }) => {
+const LowSpaceGuard: React.FC<Props> = ({
+  freeBytes,
+  threshold,
+  resumeOnSpace,
+  onToggleResume,
+}) => {
   /**
    * Purpose: Toggle resume behavior when low space is detected.
    *
@@ -40,12 +45,12 @@ const LowSpaceGuard: React.FC<Props> = ({ freeBytes, threshold, resumeOnSpace, o
       return null;
     }
     return (
-      <div className="pill" style={{ borderColor: "#ff7b7b", color: "#ffb0b0", marginTop: 6 }}>
+      <div className="pill" style={{ borderColor: '#ff7b7b', color: '#ffb0b0', marginTop: 6 }}>
         <span title="Free-space guard will pause backups until space recovers.">
           Low disk space at backup destination
         </span>
         <button className="btn secondary" style={{ marginLeft: 8 }} onClick={handleToggle}>
-          {resumeOnSpace ? "Pause until fixed" : "Resume when ok"}
+          {resumeOnSpace ? 'Pause until fixed' : 'Resume when ok'}
         </button>
       </div>
     );

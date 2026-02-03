@@ -1,4 +1,4 @@
-import { formatBytes, formatDuration, formatDateTime, formatSince } from "../format";
+import { formatBytes, formatDuration, formatDateTime, formatSince } from '../format';
 
 /**
  * Purpose: Verify null and undefined bytes format to a fallback.
@@ -11,8 +11,8 @@ import { formatBytes, formatDuration, formatDateTime, formatSince } from "../for
  */
 function assertFormatBytesHandlesNull(): void {
   try {
-    expect(formatBytes(null)).toBe("n/a");
-    expect(formatBytes(undefined)).toBe("n/a");
+    expect(formatBytes(null)).toBe('n/a');
+    expect(formatBytes(undefined)).toBe('n/a');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatBytesHandlesNull] ${reason}`);
@@ -30,7 +30,7 @@ function assertFormatBytesHandlesNull(): void {
  */
 function assertFormatBytesSmallNumbers(): void {
   try {
-    expect(formatBytes(500)).toBe("500.00 B");
+    expect(formatBytes(500)).toBe('500.00 B');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatBytesSmallNumbers] ${reason}`);
@@ -48,9 +48,9 @@ function assertFormatBytesSmallNumbers(): void {
  */
 function assertFormatBytesUnits(): void {
   try {
-    expect(formatBytes(1024)).toBe("1.00 KB");
-    expect(formatBytes(1024 * 1024)).toBe("1.00 MB");
-    expect(formatBytes(5 * 1024 * 1024 * 1024)).toBe("5.0 GB");
+    expect(formatBytes(1024)).toBe('1.00 KB');
+    expect(formatBytes(1024 * 1024)).toBe('1.00 MB');
+    expect(formatBytes(5 * 1024 * 1024 * 1024)).toBe('5.0 GB');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatBytesUnits] ${reason}`);
@@ -68,8 +68,8 @@ function assertFormatBytesUnits(): void {
  */
 function assertFormatDurationHandlesNull(): void {
   try {
-    expect(formatDuration(null)).toBe("n/a");
-    expect(formatDuration(-1)).toBe("n/a");
+    expect(formatDuration(null)).toBe('n/a');
+    expect(formatDuration(-1)).toBe('n/a');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatDurationHandlesNull] ${reason}`);
@@ -87,8 +87,8 @@ function assertFormatDurationHandlesNull(): void {
  */
 function assertFormatDurationMinutesHours(): void {
   try {
-    expect(formatDuration(60)).toBe("1m");
-    expect(formatDuration(3600 + 120)).toBe("1h 2m");
+    expect(formatDuration(60)).toBe('1m');
+    expect(formatDuration(3600 + 120)).toBe('1h 2m');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatDurationMinutesHours] ${reason}`);
@@ -106,7 +106,7 @@ function assertFormatDurationMinutesHours(): void {
  */
 function assertFormatDateTimeMissing(): void {
   try {
-    expect(formatDateTime(null)).toBe("Never");
+    expect(formatDateTime(null)).toBe('Never');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatDateTimeMissing] ${reason}`);
@@ -125,7 +125,7 @@ function assertFormatDateTimeMissing(): void {
 function assertFormatDateTimeTimestamp(): void {
   try {
     const ts = 1_600_000_000; // epoch seconds
-    expect(formatDateTime(ts)).toContain("2020");
+    expect(formatDateTime(ts)).toContain('2020');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatDateTimeTimestamp] ${reason}`);
@@ -143,7 +143,7 @@ function assertFormatDateTimeTimestamp(): void {
  */
 function assertFormatSinceMissing(): void {
   try {
-    expect(formatSince(null)).toBe("never");
+    expect(formatSince(null)).toBe('never');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatSinceMissing] ${reason}`);
@@ -162,31 +162,31 @@ function assertFormatSinceMissing(): void {
 function assertFormatSinceMinutesHours(): void {
   try {
     const now = Date.now() / 1000;
-    expect(formatSince(now - 60)).toBe("1m ago");
-    expect(formatSince(now - 7200)).toBe("2h 0m ago");
+    expect(formatSince(now - 60)).toBe('1m ago');
+    expect(formatSince(now - 7200)).toBe('2h 0m ago');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[format.test.ts::assertFormatSinceMinutesHours] ${reason}`);
   }
 }
 
-describe("formatBytes", () => {
-  it("formats null/undefined", assertFormatBytesHandlesNull);
-  it("formats small numbers", assertFormatBytesSmallNumbers);
-  it("formats KB/MB/GB", assertFormatBytesUnits);
+describe('formatBytes', () => {
+  it('formats null/undefined', assertFormatBytesHandlesNull);
+  it('formats small numbers', assertFormatBytesSmallNumbers);
+  it('formats KB/MB/GB', assertFormatBytesUnits);
 });
 
-describe("formatDuration", () => {
-  it("handles null/negative", assertFormatDurationHandlesNull);
-  it("formats minutes/hours", assertFormatDurationMinutesHours);
+describe('formatDuration', () => {
+  it('handles null/negative', assertFormatDurationHandlesNull);
+  it('formats minutes/hours', assertFormatDurationMinutesHours);
 });
 
-describe("formatDateTime", () => {
-  it("returns Never for missing", assertFormatDateTimeMissing);
-  it("formats timestamps", assertFormatDateTimeTimestamp);
+describe('formatDateTime', () => {
+  it('returns Never for missing', assertFormatDateTimeMissing);
+  it('formats timestamps', assertFormatDateTimeTimestamp);
 });
 
-describe("formatSince", () => {
-  it("handles missing", assertFormatSinceMissing);
-  it("formats minutes and hours", assertFormatSinceMinutesHours);
+describe('formatSince', () => {
+  it('handles missing', assertFormatSinceMissing);
+  it('formats minutes and hours', assertFormatSinceMinutesHours);
 });

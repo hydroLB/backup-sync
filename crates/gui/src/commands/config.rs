@@ -1,8 +1,9 @@
-use crate::api::config_api;
+use crate::api::{config_api, status_api};
 use crate::commands::auth;
 use crate::commands::error::ErrorEnvelope;
 use crate::commands::security;
 use tauri::State;
+use tracing::warn;
 
 #[tauri::command]
 /// Purpose: Loads the current configuration for the GUI.
@@ -51,10 +52,10 @@ pub fn save_config_cmd(
 /// Ties to: GUI safe mode switches.
 /// Side effects: Reads and writes the config file to persist safe mode changes.
 /// Why: provide a simple toggle for enabling or disabling safe mode.
-pub fn toggle_safe_mode_cmd(
+pub async fn toggle_safe_mode_cmd(
     desired: Option<bool>,
     correlation_id: Option<String>,
-    auth_state: State<auth::SessionAuth>,
+    auth_state: State<'_, auth::SessionAuth>,
 ) -> Result<bool, ErrorEnvelope> {
     security::ensure_unlocked(&auth_state, correlation_id.clone())?;
     let mut cfg = config_api::get_config().map_err(|e| {
@@ -71,5 +72,8 @@ pub fn toggle_safe_mode_cmd(
             format!("config::toggle_safe_mode_cmd failed to save config: {}", e),
         )
     })?;
+    if let Err(e) = status_api::set_safe_mode(next).await {
+        warn!("config::toggle_safe_mode_cmd failed to update daemon safe mode: {e}");
+    }
     Ok(next)
 }

@@ -121,7 +121,7 @@ fn resolve_daemon_exec() -> Result<PathBuf, ErrorEnvelope> {
 pub fn load_exec_and_log() -> Result<(PathBuf, Option<PathBuf>), ErrorEnvelope> {
     let exec = resolve_daemon_exec()?;
     let log_path = backup_core::platform::paths::log_file_path().ok();
-    Ok((exec, log_path.map(PathBuf::from)))
+    Ok((exec, log_path))
 }
 
 /// Purpose: Runs a command and returns its output on success.

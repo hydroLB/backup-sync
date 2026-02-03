@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   backup_root: string;
@@ -18,22 +18,37 @@ type Props = {
  * Side effects: Registers UI event handlers for destination changes.
  * Why: Make destination selection quick and accessible.
  */
-const DestinationPicker: React.FC<Props> = ({ backup_root, onChange, onBrowse, onUseDownloads, onUseDocuments, onUseDesktop }) => {
+const DestinationPicker: React.FC<Props> = ({
+  backup_root,
+  onChange,
+  onBrowse,
+  onUseDownloads,
+  onUseDocuments,
+  onUseDesktop,
+}) => {
   try {
     return (
       <label>
         Backup destination
-        <div className="inline-actions" style={{ flexWrap: "wrap" }}>
+        <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
           <input
             type="text"
             value={backup_root}
             onChange={(e) => onChange(e.target.value)}
             style={{ flex: 1, minWidth: 220 }}
           />
-          <button className="btn secondary" onClick={onBrowse}>Browse…</button>
-          <button className="btn secondary" onClick={onUseDownloads}>Use Downloads</button>
-          <button className="btn secondary" onClick={onUseDocuments}>Use Documents</button>
-          <button className="btn secondary" onClick={onUseDesktop}>Use Desktop</button>
+          <button className="btn secondary" onClick={onBrowse}>
+            Browse…
+          </button>
+          <button className="btn secondary" onClick={onUseDownloads}>
+            Use Downloads
+          </button>
+          <button className="btn secondary" onClick={onUseDocuments}>
+            Use Documents
+          </button>
+          <button className="btn secondary" onClick={onUseDesktop}>
+            Use Desktop
+          </button>
         </div>
       </label>
     );

@@ -59,7 +59,7 @@ pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent) {
         // Prevent Tauri/macOS from just hiding the window; force a full quit so it does not re-open blank.
         api.prevent_close();
         // Ask Tauri to terminate cleanly so we don't leave stray tray icons/processes.
-        let _ = event.window().app_handle().exit(0);
+        event.window().app_handle().exit(0);
     }
 }
 
@@ -200,9 +200,9 @@ fn spawn_restart(app: &tauri::AppHandle) {
 /// Why: isolate config writes from the UI thread.
 fn spawn_toggle_safe_mode(app: &tauri::AppHandle) {
     let handle = app.app_handle();
-    async_runtime::spawn_blocking(move || {
+    async_runtime::spawn(async move {
         let auth = handle.state::<SessionAuth>();
-        if let Err(e) = commands::config::toggle_safe_mode_cmd(None, None, auth) {
+        if let Err(e) = commands::config::toggle_safe_mode_cmd(None, None, auth).await {
             eprintln!("toggle safe mode failed: {:?}", e);
         }
     });

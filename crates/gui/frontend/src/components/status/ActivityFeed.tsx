@@ -1,6 +1,6 @@
-import React from "react";
-import { UI_TUNING } from "../../config/uiTuning";
-import { formatBytes, formatDateTime } from "../../utils/format";
+import React from 'react';
+import { UI_TUNING } from '../../config/uiTuning';
+import { formatBytes, formatDateTime } from '../../utils/format';
 
 type Activity = {
   path: string;

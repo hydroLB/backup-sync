@@ -1,6 +1,6 @@
-import React from "react";
-import { UI_TUNING } from "../../config/uiTuning";
-import { formatDateTime } from "../../utils/format";
+import React from 'react';
+import { UI_TUNING } from '../../config/uiTuning';
+import { formatDateTime } from '../../utils/format';
 
 type Props = {
   last_verify_ts: number | null;
@@ -62,7 +62,7 @@ const VerifyBlock: React.FC<Props> = ({
         </div>
         <div>
           <button className="btn" disabled={verifying} onClick={handleVerify}>
-            {verifying ? "Verifying..." : "Verify backups"}
+            {verifying ? 'Verifying...' : 'Verify backups'}
           </button>
           <div className="muted">{verifyMsg}</div>
         </div>

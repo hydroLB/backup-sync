@@ -3,7 +3,7 @@ use crate::config::model::{ExecutionTuning, HashingTuning};
 use crate::fs::hashing::hash_file_with_tuning;
 use crate::logging::redact_path;
 use crate::state::history;
-use crate::state::models::{ActivityItem, FileState, StoredState};
+use crate::state::models::{ActivityItem, StoredState};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -306,10 +306,7 @@ impl BackupExecutor {
         final_path: PathBuf,
         state: &mut StoredState,
     ) -> Result<()> {
-        let entry = state
-            .files
-            .entry(item.key.clone())
-            .or_insert_with(FileState::default);
+        let entry = state.files.entry(item.key.clone()).or_default();
         entry.len = item.len;
         entry.mtime = item.mtime;
         entry.last_hash = Some(hash);
