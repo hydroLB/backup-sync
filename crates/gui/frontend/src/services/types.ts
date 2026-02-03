@@ -1,4 +1,4 @@
-import { Config } from "../components/settings/types";
+import { Config } from '../components/settings/types';
 
 /**
  * Purpose: Status payload returned by the backend.
@@ -91,6 +91,31 @@ export type VerifyResult = {
   last_verify_ts?: number | null;
   last_verify_status?: string | null;
   last_verify_issues?: number | null;
+};
+
+export type VersionInfoDto = {
+  id: string;
+  created_at_unix: number;
+};
+
+export type FolderVersionsDto = {
+  source_path: string;
+  versions: VersionInfoDto[];
+};
+
+export type RestoreModeDto = 'in_place' | 'to_directory';
+
+export type RestoreArgs = {
+  source_path: string;
+  version_id: string;
+  mode: RestoreModeDto;
+  target_dir?: string | null;
+};
+
+export type RestoreResultDto = {
+  files_written: number;
+  files_removed: number;
+  dirs_created: number;
 };
 
 /**

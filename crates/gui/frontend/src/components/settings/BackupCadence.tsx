@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   interval_seconds: number;
@@ -22,11 +22,19 @@ const BackupCadence: React.FC<Props> = ({ interval_seconds, max_backups_per_file
         <h3>Backup cadence</h3>
         <label>
           Backup interval (seconds)
-          <input type="number" value={interval_seconds} onChange={(e) => onChange({ interval_seconds: Number(e.target.value) })} />
+          <input
+            type="number"
+            value={interval_seconds}
+            onChange={(e) => onChange({ interval_seconds: Number(e.target.value) })}
+          />
         </label>
         <label>
           Max backups per file
-          <input type="number" value={max_backups_per_file} onChange={(e) => onChange({ max_backups_per_file: Number(e.target.value) })} />
+          <input
+            type="number"
+            value={max_backups_per_file}
+            onChange={(e) => onChange({ max_backups_per_file: Number(e.target.value) })}
+          />
         </label>
       </>
     );

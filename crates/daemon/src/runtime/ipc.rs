@@ -25,6 +25,7 @@ use tokio::net::UnixListener;
 #[serde(tag = "type", content = "payload")]
 enum Request {
     Status,
+    SetSafeMode { enabled: bool },
 }
 
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
@@ -52,6 +53,11 @@ struct StatusReply {
     recent_activity: Vec<backup_core::ActivityItem>,
     safe_mode: bool,
     destinations: Vec<DestinationStatus>,
+}
+
+#[derive(Serialize)]
+struct AckReply {
+    ok: bool,
 }
 
 /// Purpose: Reads free space for a path, logging warnings when it fails.
@@ -137,6 +143,20 @@ where
         .write_all(payload.as_bytes())
         .await
         .context("daemon::runtime::ipc write_status_reply failed to write status reply")?;
+    writer.shutdown().await.ok();
+    Ok(())
+}
+
+async fn write_ack_reply<W>(writer: &mut W, ok: bool) -> Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let payload = serde_json::to_string(&AckReply { ok })
+        .context("daemon::runtime::ipc write_ack_reply failed to serialize reply")?;
+    writer
+        .write_all(payload.as_bytes())
+        .await
+        .context("daemon::runtime::ipc write_ack_reply failed to write reply")?;
     writer.shutdown().await.ok();
     Ok(())
 }
@@ -262,6 +282,26 @@ pub async fn spawn_server(
                                 }
                             }
                         }
+                        Request::SetSafeMode { enabled } => {
+                            {
+                                let mut st = state.lock().await;
+                                st.safe_mode = enabled;
+                            }
+                            match timeout(ipc_timeout, write_ack_reply(&mut stream, true)).await {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write error: {e:?}"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write timeout after {:?}",
+                                        ipc_timeout
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -313,6 +353,26 @@ pub async fn spawn_server(
                             match timeout(ipc_timeout, write_status_reply(&mut server, &reply))
                                 .await
                             {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write error: {e:?}"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write timeout after {:?}",
+                                        ipc_timeout
+                                    );
+                                }
+                            }
+                        }
+                        Request::SetSafeMode { enabled } => {
+                            {
+                                let mut st = state.lock().await;
+                                st.safe_mode = enabled;
+                            }
+                            match timeout(ipc_timeout, write_ack_reply(&mut server, true)).await {
                                 Ok(Ok(_)) => {}
                                 Ok(Err(e)) => {
                                     tracing::error!(

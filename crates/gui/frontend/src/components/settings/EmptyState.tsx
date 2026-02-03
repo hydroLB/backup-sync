@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   status: string;
@@ -17,18 +17,32 @@ type Props = {
  * Side effects: Registers UI event handlers for quick add actions.
  * Why: Guide users through first time setup quickly.
  */
-const EmptyState: React.FC<Props> = ({ status, onAddFolder, onQuickAddDesktop, onQuickAddDocuments, onQuickAddDownloads }) => {
+const EmptyState: React.FC<Props> = ({
+  status,
+  onAddFolder,
+  onQuickAddDesktop,
+  onQuickAddDocuments,
+  onQuickAddDownloads,
+}) => {
   try {
     return (
       <div className="empty-hero">
         <h3>Protect your first folder</h3>
         <p>Tap once, we handle the rest. You can always add more later.</p>
-        <button className="btn big-cta" onClick={onAddFolder}>Protect my files</button>
+        <button className="btn big-cta" onClick={onAddFolder}>
+          Protect my files
+        </button>
         <div className="divider" />
         <div className="quick-grid">
-          <button className="btn secondary" onClick={onQuickAddDesktop}>Add Desktop</button>
-          <button className="btn secondary" onClick={onQuickAddDocuments}>Add Documents</button>
-          <button className="btn secondary" onClick={onQuickAddDownloads}>Add Downloads</button>
+          <button className="btn secondary" onClick={onQuickAddDesktop}>
+            Add Desktop
+          </button>
+          <button className="btn secondary" onClick={onQuickAddDocuments}>
+            Add Documents
+          </button>
+          <button className="btn secondary" onClick={onQuickAddDownloads}>
+            Add Downloads
+          </button>
         </div>
         {status && <div style={{ marginTop: 8 }}>{status}</div>}
       </div>

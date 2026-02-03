@@ -1,4 +1,4 @@
-import { UI_TUNING } from "../config/uiTuning";
+import { UI_TUNING } from '../config/uiTuning';
 
 const MAX_IGNORE_PATTERNS = UI_TUNING.configLimits.maxIgnorePatterns;
 
@@ -21,7 +21,7 @@ export function validateIgnorePatterns(patterns: string[]): string | null {
         continue;
       }
       try {
-        new RegExp(pat.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*"));
+        new RegExp(pat.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
       } catch {
         return `[validateIgnorePatterns] Invalid ignore pattern: ${pat}`;
       }

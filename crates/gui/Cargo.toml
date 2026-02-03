@@ -3,6 +3,10 @@ name = "gui"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+single-instance = ["dep:tauri-plugin-single-instance"]
+
 [dependencies]
 backup_core = { path = "../core" }
 daemon = { path = "../daemon" }
@@ -17,7 +21,7 @@ dirs = "5"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 chrono = { version = "0.4", features = ["serde"] }
 fs2 = "0.4"
-tauri-plugin-single-instance = { git = "https://github.com/tauri-apps/tauri-plugin-single-instance.git", rev = "632c48307ceb129f8aea3ca894fa631785dfc47f" }
+tauri-plugin-single-instance = { path = "../tauri-plugin-single-instance", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "1", features = [] }

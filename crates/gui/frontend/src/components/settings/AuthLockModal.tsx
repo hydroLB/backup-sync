@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   visible: boolean;
@@ -18,7 +18,14 @@ type Props = {
  * Side effects: Registers UI event handlers for unlock actions.
  * Why: Protect settings behind an explicit unlock step.
  */
-const AuthLockModal: React.FC<Props> = ({ visible, passcode, unlockSeconds, onChange, onUnlock, onClose }) => {
+const AuthLockModal: React.FC<Props> = ({
+  visible,
+  passcode,
+  unlockSeconds,
+  onChange,
+  onUnlock,
+  onClose,
+}) => {
   try {
     if (!visible) return null;
     const unlockMinutes = Math.max(1, Math.round(unlockSeconds / 60));
@@ -26,7 +33,10 @@ const AuthLockModal: React.FC<Props> = ({ visible, passcode, unlockSeconds, onCh
       <div className="modal">
         <div className="modal__content">
           <h4>Unlock to edit settings</h4>
-          <p className="muted">Enter your passcode (set BACKUP_SYNC_PASSPHRASE). Session stays unlocked for about {unlockMinutes} minutes.</p>
+          <p className="muted">
+            Enter your passcode (set BACKUP_SYNC_PASSPHRASE). Session stays unlocked for about{' '}
+            {unlockMinutes} minutes.
+          </p>
           <input
             type="password"
             placeholder="Passcode"
@@ -34,8 +44,12 @@ const AuthLockModal: React.FC<Props> = ({ visible, passcode, unlockSeconds, onCh
             onChange={(e) => onChange(e.target.value)}
           />
           <div className="inline-actions" style={{ marginTop: 8 }}>
-            <button className="btn" onClick={onUnlock}>Unlock</button>
-            <button className="btn secondary" onClick={onClose}>Cancel</button>
+            <button className="btn" onClick={onUnlock}>
+              Unlock
+            </button>
+            <button className="btn secondary" onClick={onClose}>
+              Cancel
+            </button>
           </div>
         </div>
       </div>

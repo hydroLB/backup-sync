@@ -1,13 +1,13 @@
-import React, { useState } from "react";
-import { Destination, WatchedPath } from "../types";
-import DestMenu from "./DestMenu";
-import DestItems from "./DestItems";
+import React, { useState } from 'react';
+import { Destination, WatchedPath } from '../types';
+import DestMenu from './DestMenu';
+import DestItems from './DestItems';
 
 type Props = {
   dest: Destination;
   items: WatchedPath[];
-  onAddPath: (destId: string, path: string, kind: "File" | "Directory") => void;
-  onPickPath: (destId: string, kind: "File" | "Directory") => void;
+  onAddPath: (destId: string, path: string, kind: 'File' | 'Directory') => void;
+  onPickPath: (destId: string, kind: 'File' | 'Directory') => void;
   onToggleEnabled: (path: string) => void;
   onRemove: (path: string) => void;
   onSetRetention: (destId: string, v: number) => void;
@@ -48,8 +48,8 @@ const DestCard: React.FC<Props> = ({
   onSetLabel,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [label, setLabel] = useState(dest.label || "");
-  const [status, setStatus] = useState("");
+  const [label, setLabel] = useState(dest.label || '');
+  const [status, setStatus] = useState('');
 
   /**
    * Purpose: Handle drag and drop of files or folders onto the card.
@@ -65,12 +65,13 @@ const DestCard: React.FC<Props> = ({
       e.preventDefault();
       const files = Array.from(e.dataTransfer?.files || []);
       if (!files.length) {
-        setStatus("No files detected in drop.");
+        setStatus('No files detected in drop.');
         return;
       }
       files.forEach((f) => {
         const path = resolveDropPath(f);
-        const kind: "File" | "Directory" = f.type === "" && !f.name.includes(".") ? "Directory" : "File";
+        const kind: 'File' | 'Directory' =
+          f.type === '' && !f.name.includes('.') ? 'Directory' : 'File';
         if (path) onAddPath(dest.id, path, kind);
       });
       setStatus(`Added ${files.length} item(s)`);
@@ -97,15 +98,26 @@ const DestCard: React.FC<Props> = ({
             <div className="muted dest-path">{dest.path}</div>
           </div>
           <div className="dest-actions">
-            <button className="icon-btn" onClick={() => setMenuOpen(!menuOpen)}>⋮</button>
+            <button className="icon-btn" onClick={() => setMenuOpen(!menuOpen)}>
+              ⋮
+            </button>
           </div>
         </div>
-        {menuOpen && <DestMenu retention={dest.max_backups_per_file ?? 3} onChange={(v) => onSetRetention(dest.id, v)} />}
+        {menuOpen && (
+          <DestMenu
+            retention={dest.max_backups_per_file ?? 3}
+            onChange={(v) => onSetRetention(dest.id, v)}
+          />
+        )}
         <div className="dest-drop">
           <div>Drag files/folders here</div>
           <div className="inline-actions" style={{ marginTop: 6 }}>
-            <button className="btn secondary" onClick={() => onPickPath(dest.id, "Directory")}>Add folder</button>
-            <button className="btn secondary" onClick={() => onPickPath(dest.id, "File")}>Add file</button>
+            <button className="btn secondary" onClick={() => onPickPath(dest.id, 'Directory')}>
+              Add folder
+            </button>
+            <button className="btn secondary" onClick={() => onPickPath(dest.id, 'File')}>
+              Add file
+            </button>
           </div>
           {status && <div className="muted small">{status}</div>}
         </div>

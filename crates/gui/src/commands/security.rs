@@ -15,7 +15,7 @@ pub fn ensure_unlocked(
     state: &State<SessionAuth>,
     correlation_id: Option<String>,
 ) -> Result<(), ErrorEnvelope> {
-    ensure_session_unlocked(&*state, correlation_id)
+    ensure_session_unlocked(state, correlation_id)
 }
 
 /// Purpose: Ensures the provided session auth is unlocked.

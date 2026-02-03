@@ -1,7 +1,7 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import App from "./App";
-import "./styles.css";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './styles.css';
 
 /**
  * Purpose: Mount the React application into the DOM root element.
@@ -14,14 +14,14 @@ import "./styles.css";
  */
 function mountApp(): void {
   try {
-    const root = document.getElementById("root");
+    const root = document.getElementById('root');
     if (!root) {
-      throw new Error("Root element #root was not found");
+      throw new Error('Root element #root was not found');
     }
     ReactDOM.createRoot(root as HTMLElement).render(
       <React.StrictMode>
         <App />
-      </React.StrictMode>
+      </React.StrictMode>,
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

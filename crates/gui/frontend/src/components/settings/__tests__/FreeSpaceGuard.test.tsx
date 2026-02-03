@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import FreeSpaceGuard from "../FreeSpaceGuard";
+import { render, screen, fireEvent } from '@testing-library/react';
+import FreeSpaceGuard from '../FreeSpaceGuard';
 
 /**
  * Purpose: Verify the guard renders and toggles when minFree is set.
@@ -15,7 +15,7 @@ function assertGuardRendersAndToggles(): void {
     const onToggle = vi.fn();
     render(<FreeSpaceGuard minFree={1024} resumeOnSpace={false} onToggleResume={onToggle} />);
     expect(screen.getByText(/Free-space guard is active/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole('checkbox'));
     expect(onToggle).toHaveBeenCalledWith(true);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -42,7 +42,7 @@ function assertBytesLabelShown(): void {
   }
 }
 
-describe("FreeSpaceGuard", () => {
-  it("renders guard info when minFree is set", assertGuardRendersAndToggles);
-  it("shows bytes label when provided", assertBytesLabelShown);
+describe('FreeSpaceGuard', () => {
+  it('renders guard info when minFree is set', assertGuardRendersAndToggles);
+  it('shows bytes label when provided', assertBytesLabelShown);
 });

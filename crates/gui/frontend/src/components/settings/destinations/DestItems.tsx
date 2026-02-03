@@ -1,5 +1,5 @@
-import React from "react";
-import { WatchedPath } from "../types";
+import React from 'react';
+import { WatchedPath } from '../types';
 
 type Props = {
   items: WatchedPath[];
@@ -28,8 +28,12 @@ const DestItems: React.FC<Props> = ({ items, onToggleEnabled, onRemove }) => {
               <div className="muted small">{w.path}</div>
             </div>
             <div className="inline-actions">
-              <button className="btn secondary" onClick={() => onToggleEnabled(w.path)}>{w.enabled ? "Pause" : "Enable"}</button>
-              <button className="btn secondary" onClick={() => onRemove(w.path)}>Remove</button>
+              <button className="btn secondary" onClick={() => onToggleEnabled(w.path)}>
+                {w.enabled ? 'Pause' : 'Enable'}
+              </button>
+              <button className="btn secondary" onClick={() => onRemove(w.path)}>
+                Remove
+              </button>
             </div>
           </div>
         ))}

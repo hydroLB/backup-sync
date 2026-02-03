@@ -4,6 +4,7 @@
 # Rust
 /target/
 **/target/
+.cargo-home/
 
 # Node
 /node_modules/

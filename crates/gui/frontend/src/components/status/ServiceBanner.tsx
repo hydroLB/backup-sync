@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 type Props = {
   message: string;
@@ -20,7 +20,14 @@ const SECONDS_PER_HOUR = 3600;
  * Side effects: Registers UI event handlers for remediation actions.
  * Why: Surfaces service health and recovery steps in one place.
  */
-const ServiceBanner: React.FC<Props> = ({ message, reachable, fixCommand, onFix, uptimeSecs, lastIpcTs }) => {
+const ServiceBanner: React.FC<Props> = ({
+  message,
+  reachable,
+  fixCommand,
+  onFix,
+  uptimeSecs,
+  lastIpcTs,
+}) => {
   /**
    * Purpose: Safely invoke the fix action.
    *
@@ -41,13 +48,17 @@ const ServiceBanner: React.FC<Props> = ({ message, reachable, fixCommand, onFix,
 
   try {
     return (
-      <div className={`service-banner ${reachable ? "ok" : "warn"}`}>
+      <div className={`service-banner ${reachable ? 'ok' : 'warn'}`}>
         <div>{message}</div>
         <div className="muted">
           {uptimeSecs != null && uptimeSecs > 0 && (
-            <span style={{ marginRight: 8 }}>Uptime: {Math.floor(uptimeSecs / SECONDS_PER_HOUR)}h</span>
+            <span style={{ marginRight: 8 }}>
+              Uptime: {Math.floor(uptimeSecs / SECONDS_PER_HOUR)}h
+            </span>
           )}
-          {lastIpcTs ? <span>Last contact: {new Date(lastIpcTs * 1000).toLocaleTimeString()}</span> : null}
+          {lastIpcTs ? (
+            <span>Last contact: {new Date(lastIpcTs * 1000).toLocaleTimeString()}</span>
+          ) : null}
         </div>
         {!reachable && (
           <div className="inline-actions">

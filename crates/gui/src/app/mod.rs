@@ -1,7 +1,6 @@
 use crate::commands::auth::SessionAuth;
 use tauri::async_runtime;
 use tauri::Manager;
-use tauri_plugin_single_instance::init as single_instance;
 
 mod actions;
 mod tray_menu;
@@ -24,11 +23,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tuning::resolve_runtime_tuning();
     let tray_refresh = std::time::Duration::from_secs(runtime.tray_tooltip_refresh_seconds);
 
-    tauri::Builder::default()
-        .plugin(single_instance(|app, _argv, _cwd| {
+    let builder = tauri::Builder::default();
+
+    #[cfg(feature = "single-instance")]
+    let builder = {
+        use tauri_plugin_single_instance::init as single_instance;
+        builder.plugin(single_instance(|app, _argv, _cwd| {
             // Focus existing instance instead of spawning a second tray/window.
             actions::show_main_window(app);
         }))
+    };
+
+    builder
         .manage(SessionAuth::default())
         .setup(move |app| {
             // Keep tray tooltip updated with daemon status.
@@ -51,7 +57,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .system_tray(tray_menu::build_tray())
-        .on_system_tray_event(|app, event| actions::handle_tray_event(app, event))
+        .on_system_tray_event(actions::handle_tray_event)
         .on_window_event(actions::handle_window_event)
         .invoke_handler(tauri::generate_handler![
             crate::commands::status::get_status,
@@ -59,6 +65,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::commands::config::save_config_cmd,
             crate::commands::backup::run::run_now_cmd,
             crate::commands::backup::run::run_simulate_cmd,
+            crate::commands::backup::restore::list_versions_cmd,
+            crate::commands::backup::restore::restore_version_cmd,
             crate::commands::backup::verify::verify_cmd,
             crate::commands::logs::log_tail_cmd,
             crate::commands::service::install_service_cmd,

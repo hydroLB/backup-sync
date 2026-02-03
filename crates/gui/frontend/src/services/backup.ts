@@ -1,6 +1,6 @@
-import { correlationId } from "./correlation";
-import { SimulationResult, VerifyResult } from "./types";
-import { safeInvoke, wrapError } from "./ipc";
+import { correlationId } from './correlation';
+import { SimulationResult, VerifyResult } from './types';
+import { safeInvoke, wrapError } from './ipc';
 
 /**
  * Purpose: Trigger an immediate backup run.
@@ -13,9 +13,9 @@ import { safeInvoke, wrapError } from "./ipc";
  */
 export async function runNow(): Promise<void> {
   try {
-    return await safeInvoke("run_now_cmd", { correlationId: correlationId("run") });
+    return await safeInvoke('run_now_cmd', { correlationId: correlationId('run') });
   } catch (error) {
-    throw wrapError("[runNow] Failed to trigger backup run", error);
+    throw wrapError('[runNow] Failed to trigger backup run', error);
   }
 }
 
@@ -30,9 +30,9 @@ export async function runNow(): Promise<void> {
  */
 export async function runSimulation(): Promise<SimulationResult> {
   try {
-    return await safeInvoke("run_simulate_cmd", { correlationId: correlationId("sim") });
+    return await safeInvoke('run_simulate_cmd', { correlationId: correlationId('sim') });
   } catch (error) {
-    throw wrapError("[runSimulation] Failed to simulate backup", error);
+    throw wrapError('[runSimulation] Failed to simulate backup', error);
   }
 }
 
@@ -47,9 +47,9 @@ export async function runSimulation(): Promise<SimulationResult> {
  */
 export async function verifyBackups(): Promise<VerifyResult> {
   try {
-    return await safeInvoke("verify_cmd", { correlationId: correlationId("verify") });
+    return await safeInvoke('verify_cmd', { correlationId: correlationId('verify') });
   } catch (error) {
-    throw wrapError("[verifyBackups] Failed to verify backups", error);
+    throw wrapError('[verifyBackups] Failed to verify backups', error);
   }
 }
 
@@ -64,10 +64,10 @@ export async function verifyBackups(): Promise<VerifyResult> {
  */
 export async function exportHealthReport(): Promise<string> {
   try {
-    return await safeInvoke("export_health_report_cmd", {
-      correlationId: correlationId("health"),
+    return await safeInvoke('export_health_report_cmd', {
+      correlationId: correlationId('health'),
     });
   } catch (error) {
-    throw wrapError("[exportHealthReport] Failed to export health report", error);
+    throw wrapError('[exportHealthReport] Failed to export health report', error);
   }
 }

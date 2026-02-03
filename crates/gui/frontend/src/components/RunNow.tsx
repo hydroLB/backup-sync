@@ -1,16 +1,17 @@
-import React, { useState } from "react";
-import { runNow, runSimulation } from "../services/backup";
-import { getLogTail } from "../services/logs";
-import { formatBytes } from "../utils/format";
-import { ActionLogEntry } from "./status/ActionLogFlyout";
-import { SimulationResult } from "../services/types";
-import { UI_TUNING } from "../config/uiTuning";
+import React, { useState } from 'react';
+import { runNow, runSimulation } from '../services/backup';
+import { getLogTail } from '../services/logs';
+import { formatBytes } from '../utils/format';
+import { ActionLogEntry } from './status/ActionLogFlyout';
+import { SimulationResult } from '../services/types';
+import { UI_TUNING } from '../config/uiTuning';
 
-type Props = { onEvent?: (msg: string, kind?: ActionLogEntry["kind"]) => void; safeMode?: boolean };
+type Props = { onEvent?: (msg: string, kind?: ActionLogEntry['kind']) => void; safeMode?: boolean };
 type PlanError = { message?: string; code?: string };
 
 const PLAN_TOO_LARGE_CODE = UI_TUNING.planTooLargeCode;
-const { maxLogLines, logPreviewMaxHeightPx, logPreviewPaddingPx, logPreviewRadiusPx } = UI_TUNING.runNow;
+const { maxLogLines, logPreviewMaxHeightPx, logPreviewPaddingPx, logPreviewRadiusPx } =
+  UI_TUNING.runNow;
 
 /**
  * Purpose: Format a plan error with context and notify the UI where applicable.
@@ -24,17 +25,18 @@ const { maxLogLines, logPreviewMaxHeightPx, logPreviewPaddingPx, logPreviewRadiu
 const formatPlanError = (
   err: unknown,
   label: string,
-  onEvent?: (msg: string, kind?: ActionLogEntry["kind"]) => void,
-  onPlanTooLarge?: () => void
+  onEvent?: (msg: string, kind?: ActionLogEntry['kind']) => void,
+  onPlanTooLarge?: () => void,
 ) => {
   try {
     const errObj = err as PlanError;
     const msg = errObj?.message || String(err);
-    const extra = errObj?.code === PLAN_TOO_LARGE_CODE
-      ? " Plan is too large; narrow watched scope or add ignores."
-      : "";
+    const extra =
+      errObj?.code === PLAN_TOO_LARGE_CODE
+        ? ' Plan is too large; narrow watched scope or add ignores.'
+        : '';
     const full = `${msg}${extra}`;
-    onEvent?.(`${label} failed: ${full}`, "error");
+    onEvent?.(`${label} failed: ${full}`, 'error');
     if (errObj?.code === PLAN_TOO_LARGE_CODE) {
       onPlanTooLarge?.();
     }
@@ -55,8 +57,8 @@ const formatPlanError = (
  * Why: Allows operators to trigger backups on demand with feedback.
  */
 export const RunNow: React.FC<Props> = ({ onEvent, safeMode }) => {
-  const [message, setMessage] = useState<string>("");
-  const [log, setLog] = useState<string>("");
+  const [message, setMessage] = useState<string>('');
+  const [log, setLog] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [simulating, setSimulating] = useState<boolean>(false);
 
@@ -73,16 +75,16 @@ export const RunNow: React.FC<Props> = ({ onEvent, safeMode }) => {
     try {
       setLoading(true);
       await runNow();
-      setMessage("Manual backup triggered.");
-      onEvent?.("Manual backup triggered", "ok");
+      setMessage('Manual backup triggered.');
+      onEvent?.('Manual backup triggered', 'ok');
       const tail = await getLogTail();
-      const lines = String(tail).split("\n");
-      setLog(lines.slice(-maxLogLines).join("\n"));
+      const lines = String(tail).split('\n');
+      setLog(lines.slice(-maxLogLines).join('\n'));
     } catch (e) {
       try {
-        const full = formatPlanError(e, "Manual run", onEvent, () => {
+        const full = formatPlanError(e, 'Manual run', onEvent, () => {
           setLog(
-            "Too many files to back up. Add ignores (node_modules, build, target, logs) or narrow watched scope, then try again."
+            'Too many files to back up. Add ignores (node_modules, build, target, logs) or narrow watched scope, then try again.',
           );
         });
         setMessage(full);
@@ -109,13 +111,13 @@ export const RunNow: React.FC<Props> = ({ onEvent, safeMode }) => {
       setSimulating(true);
       const res: SimulationResult = await runSimulation();
       const summary = `Simulation: ${res.items} items, ${formatBytes(res.bytes)}.`;
-      const sample = res.sample && res.sample.length > 0 ? ` Sample: ${res.sample.join(", ")}` : "";
+      const sample = res.sample && res.sample.length > 0 ? ` Sample: ${res.sample.join(', ')}` : '';
       const msg = `${summary}${sample}`;
       setMessage(msg);
-      onEvent?.(msg, res.items === 0 ? "info" : "ok");
+      onEvent?.(msg, res.items === 0 ? 'info' : 'ok');
     } catch (e) {
       try {
-        const full = formatPlanError(e, "Simulation", onEvent);
+        const full = formatPlanError(e, 'Simulation', onEvent);
         setMessage(full);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -138,10 +140,10 @@ export const RunNow: React.FC<Props> = ({ onEvent, safeMode }) => {
         </p>
         <div className="inline-actions">
           <button className="btn" onClick={handleRun} disabled={loading || safeMode}>
-            {safeMode ? "Safe mode enabled" : loading ? "Running..." : "Run backup now"}
+            {safeMode ? 'Safe mode enabled' : loading ? 'Running...' : 'Run backup now'}
           </button>
           <button className="btn secondary" onClick={handleSimulate} disabled={simulating}>
-            {simulating ? "Simulating..." : "Simulate backup"}
+            {simulating ? 'Simulating...' : 'Simulate backup'}
           </button>
           {message && <span className="muted">{message}</span>}
         </div>
@@ -149,11 +151,11 @@ export const RunNow: React.FC<Props> = ({ onEvent, safeMode }) => {
           <pre
             style={{
               maxHeight: logPreviewMaxHeightPx,
-              overflow: "auto",
-              background: "rgba(255,255,255,0.05)",
+              overflow: 'auto',
+              background: 'rgba(255,255,255,0.05)',
               padding: logPreviewPaddingPx,
               borderRadius: logPreviewRadiusPx,
-              border: "1px solid var(--border)",
+              border: '1px solid var(--border)',
             }}
           >
             {log}

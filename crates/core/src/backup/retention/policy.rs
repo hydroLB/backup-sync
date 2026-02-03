@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Purpose: Enforces retention by pruning oldest backup entries beyond the max.
 ///
@@ -49,7 +49,7 @@ pub fn enforce_on_disk(max: usize, existing: Vec<PathBuf>) -> Result<Vec<PathBuf
 /// Ties to: retention sorting.
 /// Side effects: None.
 /// Why: use timestamp ordering to drop the oldest backups first.
-fn parse_timestamp(p: &PathBuf) -> Option<i64> {
+fn parse_timestamp(p: &Path) -> Option<i64> {
     let name = p.file_name()?.to_string_lossy();
     let ts = name.split("__").next()?;
     NaiveDateTime::parse_from_str(ts, "%Y%m%d-%H%M%S")

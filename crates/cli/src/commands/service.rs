@@ -82,8 +82,6 @@ pub fn install_service(
     dry_run: bool,
 ) -> Result<()> {
     #[cfg(not(target_os = "linux"))]
-    let user = user; // keep signature consistent; unused on non-Linux
-    #[cfg(not(target_os = "linux"))]
     let _ = user;
     let exec = resolve_daemon_exec()
         .context("cli::install_service failed to resolve daemon executable")?;

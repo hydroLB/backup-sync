@@ -1,4 +1,4 @@
-import { safeInvoke, wrapError } from "./ipc";
+import { safeInvoke, wrapError } from './ipc';
 
 /**
  * Purpose: Fetch the recent log tail from the backend.
@@ -11,9 +11,9 @@ import { safeInvoke, wrapError } from "./ipc";
  */
 export async function getLogTail(): Promise<string> {
   try {
-    return await safeInvoke("log_tail_cmd");
+    return await safeInvoke('log_tail_cmd');
   } catch (error) {
-    throw wrapError("[getLogTail] Failed to fetch log tail", error);
+    throw wrapError('[getLogTail] Failed to fetch log tail', error);
   }
 }
 
@@ -28,8 +28,8 @@ export async function getLogTail(): Promise<string> {
  */
 export async function exportLogs(): Promise<string> {
   try {
-    return await safeInvoke("export_logs_cmd");
+    return await safeInvoke('export_logs_cmd');
   } catch (error) {
-    throw wrapError("[exportLogs] Failed to export logs", error);
+    throw wrapError('[exportLogs] Failed to export logs', error);
   }
 }

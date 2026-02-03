@@ -42,7 +42,7 @@ run:
 	./launch.sh
 
 bench:
-	cargo bench -p backup_core
+	cargo bench -p backup_core --features bench
 
 perf-record:
 	./scripts/perf/record_baseline.sh

@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-gui = { path = ".." }
+gui = { path = "..", features = ["single-instance"] }
 
 [[bin]]
 name = "gui-app"

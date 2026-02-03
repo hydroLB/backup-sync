@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
-import { UI_TUNING } from "../../config/uiTuning";
-import { formatBytes, formatDateTime } from "../../utils/format";
-import { StatusDto } from "../../services/types";
+import React, { useMemo } from 'react';
+import { UI_TUNING } from '../../config/uiTuning';
+import { formatBytes, formatDateTime } from '../../utils/format';
+import { StatusDto } from '../../services/types';
 
 type Props = {
   status: StatusDto | null;
@@ -40,7 +40,8 @@ const AdvancedPane: React.FC<Props> = ({ status, logTail }) => {
           <span className="pill">Debug</span>
         </div>
         <div className="muted" style={{ marginBottom: 6 }}>
-          IPC healthy. Free: {formatBytes(status.free_bytes)} • Last run: {formatDateTime(status.last_run_ts)}
+          IPC healthy. Free: {formatBytes(status.free_bytes)} • Last run:{' '}
+          {formatDateTime(status.last_run_ts)}
         </div>
         <pre className="advanced-pane__code">{json}</pre>
         {logTail && (

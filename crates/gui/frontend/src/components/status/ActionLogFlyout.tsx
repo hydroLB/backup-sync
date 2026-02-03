@@ -1,7 +1,7 @@
-import React, { useState } from "react";
-import { formatDateTime } from "../../utils/format";
+import React, { useState } from 'react';
+import { formatDateTime } from '../../utils/format';
 
-export type ActionLogEntry = { msg: string; kind: "ok" | "error" | "info"; ts: number };
+export type ActionLogEntry = { msg: string; kind: 'ok' | 'error' | 'info'; ts: number };
 
 type Props = {
   items: ActionLogEntry[];
@@ -41,7 +41,7 @@ const ActionLogFlyout: React.FC<Props> = ({ items }) => {
     return (
       <div className="action-log">
         <button className="btn secondary" onClick={toggleOpen}>
-          {open ? "Hide activity" : "What just happened?"}
+          {open ? 'Hide activity' : 'What just happened?'}
         </button>
         {latest && !open && (
           <span className="muted" style={{ marginLeft: 8 }}>
@@ -55,14 +55,19 @@ const ActionLogFlyout: React.FC<Props> = ({ items }) => {
               <span className="pill">{items.length} events</span>
             </div>
             {items.length === 0 && (
-              <div className="muted">No actions yet. Run a backup or change settings to see updates.</div>
-            )}
-            {items.slice().reverse().map((e, idx) => (
-              <div key={idx} className={`action-log__row action-log__row--${e.kind}`}>
-                <div className="muted">{formatDateTime(e.ts)}</div>
-                <div>{e.msg}</div>
+              <div className="muted">
+                No actions yet. Run a backup or change settings to see updates.
               </div>
-            ))}
+            )}
+            {items
+              .slice()
+              .reverse()
+              .map((e, idx) => (
+                <div key={idx} className={`action-log__row action-log__row--${e.kind}`}>
+                  <div className="muted">{formatDateTime(e.ts)}</div>
+                  <div>{e.msg}</div>
+                </div>
+              ))}
           </div>
         )}
       </div>

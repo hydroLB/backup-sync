@@ -1,12 +1,12 @@
-import React from "react";
-import { Destination, WatchedPath } from "../types";
-import DestCard from "./DestCard";
+import React from 'react';
+import { Destination, WatchedPath } from '../types';
+import DestCard from './DestCard';
 
 type Props = {
   destinations: Destination[];
   watched: WatchedPath[];
-  onAddPath: (destId: string, path: string, kind: "File" | "Directory") => void;
-  onPickPath: (destId: string, kind: "File" | "Directory") => void;
+  onAddPath: (destId: string, path: string, kind: 'File' | 'Directory') => void;
+  onPickPath: (destId: string, kind: 'File' | 'Directory') => void;
   onToggleEnabled: (path: string) => void;
   onRemove: (path: string) => void;
   onAddDestination: () => void;
@@ -39,11 +39,13 @@ const DestinationBoard: React.FC<Props> = ({
       <div className="destination-board">
         <div className="board-header">
           <h3>Backup locations</h3>
-          <button className="btn secondary" onClick={onAddDestination}>Add destination</button>
+          <button className="btn secondary" onClick={onAddDestination}>
+            Add destination
+          </button>
         </div>
         <div className="dest-grid">
           {destinations.map((d) => {
-            const items = watched.filter((w) => (w.destination_id || "default") === d.id);
+            const items = watched.filter((w) => (w.destination_id || 'default') === d.id);
             return (
               <DestCard
                 key={d.id}

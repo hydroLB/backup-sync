@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import AuthLockModal from "../AuthLockModal";
+import { render, screen, fireEvent } from '@testing-library/react';
+import AuthLockModal from '../AuthLockModal';
 
 /**
  * Purpose: Ensure the unlock handler fires when the button is clicked.
@@ -21,9 +21,9 @@ function assertUnlockHandlerInvoked(): void {
         onChange={() => {}}
         onUnlock={onUnlock}
         onClose={() => {}}
-      />
+      />,
     );
-    const button = screen.getByRole("button", { name: /Unlock/i });
+    const button = screen.getByRole('button', { name: /Unlock/i });
     fireEvent.click(button);
     expect(onUnlock).toHaveBeenCalled();
   } catch (error) {
@@ -51,7 +51,7 @@ function assertGuidanceCopyVisible(): void {
         onChange={() => {}}
         onUnlock={() => {}}
         onClose={() => {}}
-      />
+      />,
     );
     expect(screen.getByText(/Unlock to edit/i)).toBeInTheDocument();
   } catch (error) {
@@ -60,7 +60,7 @@ function assertGuidanceCopyVisible(): void {
   }
 }
 
-describe("AuthLockModal", () => {
-  it("invokes unlock handler", assertUnlockHandlerInvoked);
-  it("shows guidance copy when locked", assertGuidanceCopyVisible);
+describe('AuthLockModal', () => {
+  it('invokes unlock handler', assertUnlockHandlerInvoked);
+  it('shows guidance copy when locked', assertGuidanceCopyVisible);
 });

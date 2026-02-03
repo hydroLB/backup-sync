@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import SafeModeToggle from "../SafeModeToggle";
+import { render, screen, fireEvent } from '@testing-library/react';
+import SafeModeToggle from '../SafeModeToggle';
 
 /**
  * Purpose: Verify the toggle wiring updates safe mode state.
@@ -14,7 +14,7 @@ function assertToggleUpdatesValue(): void {
   try {
     const onChange = vi.fn();
     render(<SafeModeToggle value={false} onChange={onChange} />);
-    const checkbox = screen.getByRole("checkbox");
+    const checkbox = screen.getByRole('checkbox');
     fireEvent.click(checkbox);
     expect(onChange).toHaveBeenCalledWith(true);
   } catch (error) {
@@ -42,7 +42,7 @@ function assertHelperTextVisible(): void {
   }
 }
 
-describe("SafeModeToggle", () => {
-  it("renders label and toggles", assertToggleUpdatesValue);
-  it("shows helper text", assertHelperTextVisible);
+describe('SafeModeToggle', () => {
+  it('renders label and toggles', assertToggleUpdatesValue);
+  it('shows helper text', assertHelperTextVisible);
 });

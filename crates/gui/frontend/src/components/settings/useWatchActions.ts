@@ -1,6 +1,6 @@
-import { Config, WatchedPath } from "./types";
-import { useState } from "react";
-import { buildPathIndex, bstAnyPrefix } from "../../utils/bst";
+import { Config, WatchedPath } from './types';
+import { useState } from 'react';
+import { buildPathIndex, bstAnyPrefix } from '../../utils/bst';
 
 type PersistFn = (next: Config, message?: string) => void;
 
@@ -13,7 +13,12 @@ type PersistFn = (next: Config, message?: string) => void;
  * Side effects: Updates React state, persists config, and emits status messages.
  * Why: Centralize watch list mutations with validation.
  */
-export function useWatchActions(cfg: Config, persist: PersistFn, setStatus: (s: string) => void, setOpenPath: (p: string | null) => void) {
+export function useWatchActions(
+  cfg: Config,
+  persist: PersistFn,
+  setStatus: (s: string) => void,
+  setOpenPath: (p: string | null) => void,
+) {
   const [active, setActive] = useState<string | null>(null);
 
   /**
@@ -27,27 +32,27 @@ export function useWatchActions(cfg: Config, persist: PersistFn, setStatus: (s: 
    */
   const addWatchedPath = (
     path: string,
-    kind: "File" | "Directory",
+    kind: 'File' | 'Directory',
     destination_id?: string,
-    max_backups_per_file?: number | null
+    max_backups_per_file?: number | null,
   ) => {
     try {
       const existingIndex = buildPathIndex(cfg.watched || []);
       if (bstAnyPrefix(existingIndex, path) || (cfg.watched || []).some((w) => w.path === path)) {
-        setStatus("Already watching that path or a parent/child path.");
+        setStatus('Already watching that path or a parent/child path.');
         return;
       }
       const item: WatchedPath = {
         path,
         kind,
         enabled: true,
-        destination_id: destination_id || "default",
+        destination_id: destination_id || 'default',
       };
       if (max_backups_per_file !== undefined) {
         item.max_backups_per_file = max_backups_per_file;
       }
       const next = [...(cfg.watched || []), item];
-      persist({ ...cfg, watched: next }, "Added");
+      persist({ ...cfg, watched: next }, 'Added');
       if (!active) setActive(path);
       setOpenPath(path);
     } catch (e) {
@@ -67,9 +72,9 @@ export function useWatchActions(cfg: Config, persist: PersistFn, setStatus: (s: 
   const toggleEnabled = (path: string) => {
     try {
       const next = (cfg.watched || []).map((w) =>
-        w.path === path ? { ...w, enabled: !w.enabled } : w
+        w.path === path ? { ...w, enabled: !w.enabled } : w,
       );
-      persist({ ...cfg, watched: next }, "Updated");
+      persist({ ...cfg, watched: next }, 'Updated');
     } catch (e) {
       setStatus(`[useWatchActions::toggleEnabled] Failed to toggle watched path: ${e}`);
     }
@@ -88,9 +93,9 @@ export function useWatchActions(cfg: Config, persist: PersistFn, setStatus: (s: 
     try {
       const next = (cfg.watched || []).filter((w) => w.path !== path);
       if (next.length === 0) {
-        setStatus("Add at least one folder or file to back up.");
+        setStatus('Add at least one folder or file to back up.');
       }
-      persist({ ...cfg, watched: next }, "Removed");
+      persist({ ...cfg, watched: next }, 'Removed');
     } catch (e) {
       setStatus(`[useWatchActions::remove] Failed to remove watched path: ${e}`);
     }
