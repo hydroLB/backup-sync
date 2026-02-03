@@ -1,4 +1,4 @@
-import { Config } from "./types";
+import { Config, WatchedPath } from "./types";
 import { useState } from "react";
 import { buildPathIndex, bstAnyPrefix } from "../../utils/bst";
 
@@ -37,10 +37,16 @@ export function useWatchActions(cfg: Config, persist: PersistFn, setStatus: (s: 
         setStatus("Already watching that path or a parent/child path.");
         return;
       }
-      const next = [
-        ...(cfg.watched || []),
-        { path, kind, enabled: true, destination_id: destination_id || "default", max_backups_per_file },
-      ];
+      const item: WatchedPath = {
+        path,
+        kind,
+        enabled: true,
+        destination_id: destination_id || "default",
+      };
+      if (max_backups_per_file !== undefined) {
+        item.max_backups_per_file = max_backups_per_file;
+      }
+      const next = [...(cfg.watched || []), item];
       persist({ ...cfg, watched: next }, "Added");
       if (!active) setActive(path);
       setOpenPath(path);

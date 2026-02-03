@@ -1,5 +1,5 @@
 import { correlationId } from "./correlation";
-import { safeInvoke } from "./ipc";
+import { safeInvoke, wrapError } from "./ipc";
 import { AccessProbe, DestinationCheck, ServiceStatusDto } from "./types";
 import { UI_TUNING } from "../config/uiTuning";
 
@@ -20,8 +20,7 @@ function applyJitter(delayMs: number, jitterPct: number): number {
     const rand = Math.random() * (delta * 2) - delta;
     return Math.max(0, Math.round(delayMs + rand));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[applyJitter] Failed to apply jitter: ${reason}`);
+    throw wrapError("[applyJitter] Failed to apply jitter", error);
   }
 }
 
@@ -35,25 +34,19 @@ function applyJitter(delayMs: number, jitterPct: number): number {
  * Why: Reduces transient failures during service actions.
  */
 async function withBackoff<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  try {
-    let lastErr: unknown;
-    for (const delayMs of UI_TUNING.system.retryDelaysMs) {
-      if (delayMs > 0) {
-        const jittered = applyJitter(delayMs, UI_TUNING.system.retryJitterPct);
-        await new Promise((resolve) => setTimeout(resolve, jittered));
-      }
-      try {
-        return await fn();
-      } catch (err) {
-        lastErr = err;
-      }
+  let lastErr: unknown;
+  for (const delayMs of UI_TUNING.system.retryDelaysMs) {
+    if (delayMs > 0) {
+      const jittered = applyJitter(delayMs, UI_TUNING.system.retryJitterPct);
+      await new Promise((resolve) => setTimeout(resolve, jittered));
     }
-    const message = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    throw new Error(`[withBackoff] Exhausted retries for ${label}: ${message}`);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[withBackoff] Backoff execution failed for ${label}: ${reason}`);
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+    }
   }
+  throw wrapError(`[withBackoff] Exhausted retries for ${label}`, lastErr);
 }
 
 /**
@@ -69,8 +62,7 @@ export async function installService(): Promise<string> {
   try {
     return await withBackoff("installService", () => safeInvoke("install_service_cmd"));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[installService] Failed to install service: ${reason}`);
+    throw wrapError("[installService] Failed to install service", error);
   }
 }
 
@@ -87,8 +79,7 @@ export async function restartDaemon(): Promise<string> {
   try {
     return await withBackoff("restartDaemon", () => safeInvoke("restart_daemon_cmd"));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[restartDaemon] Failed to restart daemon: ${reason}`);
+    throw wrapError("[restartDaemon] Failed to restart daemon", error);
   }
 }
 
@@ -105,8 +96,7 @@ export async function checkUpdates(): Promise<string> {
   try {
     return await safeInvoke("check_updates_cmd");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[checkUpdates] Failed to check for updates: ${message}`);
+    throw wrapError("[checkUpdates] Failed to check for updates", error);
   }
 }
 
@@ -123,8 +113,7 @@ export async function checkDestination(path: string): Promise<DestinationCheck> 
   try {
     return await safeInvoke<DestinationCheck>("check_destination_cmd", { path });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[checkDestination] Failed to validate destination: ${message}`);
+    throw wrapError("[checkDestination] Failed to validate destination", error);
   }
 }
 
@@ -141,8 +130,7 @@ export async function testAccess(): Promise<AccessProbe> {
   try {
     return await safeInvoke<AccessProbe>("test_access_cmd");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[testAccess] Failed to test access permissions: ${message}`);
+    throw wrapError("[testAccess] Failed to test access permissions", error);
   }
 }
 
@@ -161,8 +149,7 @@ export async function doctorReport(): Promise<string> {
       correlationId: correlationId("doctor"),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[doctorReport] Failed to generate doctor report: ${message}`);
+    throw wrapError("[doctorReport] Failed to generate doctor report", error);
   }
 }
 
@@ -179,8 +166,7 @@ export async function checkService(): Promise<ServiceStatusDto> {
   try {
     return await safeInvoke<ServiceStatusDto>("check_service_cmd");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[checkService] Failed to check service status: ${message}`);
+    throw wrapError("[checkService] Failed to check service status", error);
   }
 }
 
@@ -199,7 +185,6 @@ export async function exportDiagnosticBundle(): Promise<string> {
       correlationId: correlationId("diag"),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[exportDiagnosticBundle] Failed to export diagnostic bundle: ${message}`);
+    throw wrapError("[exportDiagnosticBundle] Failed to export diagnostic bundle", error);
   }
 }

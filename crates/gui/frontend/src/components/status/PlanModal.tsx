@@ -45,7 +45,9 @@ const PlanModal: React.FC<Props> = ({ message, onClose }) => {
           <ul className="muted">
             <li>Add ignores: node_modules, build, target, *.log, Cache</li>
             <li>Limit watched folders to what you need</li>
-            <li>Run "Simulate backup" to see the scope before retrying</li>
+            <li>
+              Run &quot;Simulate backup&quot; to see the scope before retrying
+            </li>
           </ul>
           <div className="inline-actions">
             <button className="btn" onClick={handleClose}>

@@ -11,32 +11,32 @@ hooks:
 	git config core.hooksPath .githooks
 
 frontend-install:
-	cd crates/gui/frontend && npm ci
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm ci
 
 frontend-lint:
-	cd crates/gui/frontend && npm run lint
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm run lint
 
 frontend-format:
-	cd crates/gui/frontend && npm run format
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm run format
 
 frontend-format-check:
-	cd crates/gui/frontend && npm run format:check
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm run format:check
 
 frontend-typecheck:
-	cd crates/gui/frontend && npm run typecheck
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm run typecheck
 
 frontend-test:
-	cd crates/gui/frontend && npm test
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm test
 
 frontend-coverage:
-	cd crates/gui/frontend && npm run test:coverage
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm run test:coverage
 
 test:
 	cargo test -p backup_core -p daemon -p cli
 
 build:
 	cargo build --workspace
-	cd crates/gui/frontend && npm ci && npm run build
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm ci && npm_config_cache=$(CURDIR)/.npm-cache npm run build
 
 run:
 	./launch.sh
@@ -59,7 +59,7 @@ coverage:
 audit:
 	cargo install cargo-audit --locked
 	cargo audit --deny warnings
-	cd crates/gui/frontend && npm audit --audit-level=high --omit=dev
+	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm audit --audit-level=high --omit=dev
 
 ci:
 	$(MAKE) fmt-check

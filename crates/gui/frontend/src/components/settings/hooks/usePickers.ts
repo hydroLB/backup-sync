@@ -1,5 +1,4 @@
 import { open } from "@tauri-apps/api/dialog";
-import { Config } from "../types";
 import { tauriAvailable } from "../../../services/ipc";
 
 /**
@@ -11,7 +10,7 @@ import { tauriAvailable } from "../../../services/ipc";
  * Side effects: Invokes IPC-backed file pickers and emits popup messages.
  * Why: Centralize picker behavior and IPC checks.
  */
-export function usePickers(cfg: Config, popup: (msg: string) => void) {
+export function usePickers(popup: (msg: string) => void) {
   /**
    * Purpose: Pick a file or directory and attach it to a destination.
    *

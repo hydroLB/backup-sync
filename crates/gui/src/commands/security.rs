@@ -1,5 +1,5 @@
-use crate::commands::auth::ensure_passphrase_configured;
 use crate::commands::auth::SessionAuth;
+use crate::commands::auth::{auth_enabled, ensure_passphrase_configured};
 use crate::commands::correlation;
 use crate::commands::error::ErrorEnvelope;
 use tauri::State;
@@ -29,6 +29,9 @@ pub fn ensure_session_unlocked(
     auth: &SessionAuth,
     correlation_id: Option<String>,
 ) -> Result<(), ErrorEnvelope> {
+    if !auth_enabled() {
+        return Ok(());
+    }
     ensure_passphrase_configured()?;
     if auth.is_unlocked() {
         return Ok(());

@@ -1,6 +1,6 @@
 import { correlationId } from "./correlation";
 import { SimulationResult, VerifyResult } from "./types";
-import { safeInvoke } from "./ipc";
+import { safeInvoke, wrapError } from "./ipc";
 
 /**
  * Purpose: Trigger an immediate backup run.
@@ -15,8 +15,7 @@ export async function runNow(): Promise<void> {
   try {
     return await safeInvoke("run_now_cmd", { correlationId: correlationId("run") });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[runNow] Failed to trigger backup run: ${message}`);
+    throw wrapError("[runNow] Failed to trigger backup run", error);
   }
 }
 
@@ -33,8 +32,7 @@ export async function runSimulation(): Promise<SimulationResult> {
   try {
     return await safeInvoke("run_simulate_cmd", { correlationId: correlationId("sim") });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[runSimulation] Failed to simulate backup: ${message}`);
+    throw wrapError("[runSimulation] Failed to simulate backup", error);
   }
 }
 
@@ -51,8 +49,7 @@ export async function verifyBackups(): Promise<VerifyResult> {
   try {
     return await safeInvoke("verify_cmd", { correlationId: correlationId("verify") });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[verifyBackups] Failed to verify backups: ${message}`);
+    throw wrapError("[verifyBackups] Failed to verify backups", error);
   }
 }
 
@@ -71,7 +68,6 @@ export async function exportHealthReport(): Promise<string> {
       correlationId: correlationId("health"),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[exportHealthReport] Failed to export health report: ${message}`);
+    throw wrapError("[exportHealthReport] Failed to export health report", error);
   }
 }

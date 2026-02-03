@@ -27,6 +27,8 @@ enum Request {
     Status,
 }
 
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
+
 #[derive(Serialize, Deserialize, Clone)]
 struct DestinationStatus {
     id: String,
@@ -139,6 +141,62 @@ where
     Ok(())
 }
 
+/// Purpose: Reads and parses a JSON IPC request without requiring the client to close the stream.
+///
+/// Inputs: a readable IPC stream, a timeout bound, and a max request size.
+/// Outputs: a parsed `Request` value.
+/// Ties to: both Unix socket and Windows named pipe IPC servers.
+/// Side effects: Reads bytes from the IPC stream until a request is parsed or limits are exceeded.
+/// Why: Avoid deadlocks where both sides wait for EOF; allow small request/response exchanges.
+async fn read_request<R>(reader: &mut R, ipc_timeout: Duration) -> Result<Request>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 2048];
+    loop {
+        if buf.len() > MAX_REQUEST_BYTES {
+            anyhow::bail!(
+                "daemon::runtime::ipc read_request exceeded max request size {} bytes",
+                MAX_REQUEST_BYTES
+            );
+        }
+        let n = match timeout(ipc_timeout, reader.read(&mut chunk)).await {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => {
+                return Err(
+                    anyhow::anyhow!(e).context("daemon::runtime::ipc read_request read error")
+                );
+            }
+            Err(_) => {
+                anyhow::bail!(
+                    "daemon::runtime::ipc read_request timed out after {:?}",
+                    ipc_timeout
+                );
+            }
+        };
+        if n == 0 {
+            if buf.is_empty() {
+                anyhow::bail!("daemon::runtime::ipc read_request got empty request");
+            }
+            // EOF after some bytes; attempt a final parse below.
+        } else {
+            buf.extend_from_slice(&chunk[..n]);
+        }
+
+        match serde_json::from_slice::<Request>(&buf) {
+            Ok(req) => return Ok(req),
+            Err(e) => {
+                if e.is_eof() && n != 0 {
+                    continue;
+                }
+                return Err(anyhow::anyhow!(e)
+                    .context("daemon::runtime::ipc read_request failed to parse request"));
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 /// Purpose: Spawns a Unix socket based IPC server for status requests.
 ///
@@ -173,25 +231,12 @@ pub async fn spawn_server(
         loop {
             match listener.accept().await {
                 Ok((mut stream, _addr)) => {
-                    let mut buf = Vec::new();
-                    match timeout(ipc_timeout, stream.read_to_end(&mut buf)).await {
-                        Ok(Ok(_)) => {}
-                        Ok(Err(e)) => {
-                            tracing::error!("daemon::runtime::ipc spawn_server read error: {e:?}");
-                            continue;
-                        }
-                        Err(_) => {
-                            tracing::error!(
-                                "daemon::runtime::ipc spawn_server read timeout after {:?}",
-                                ipc_timeout
-                            );
-                            continue;
-                        }
-                    }
-                    let req = match serde_json::from_slice::<Request>(&buf) {
+                    let req = match read_request(&mut stream, ipc_timeout).await {
                         Ok(r) => r,
                         Err(e) => {
-                            tracing::error!("daemon::runtime::ipc spawn_server parse error: {e:?}");
+                            tracing::error!(
+                                "daemon::runtime::ipc spawn_server request read error: {e:?}"
+                            );
                             continue;
                         }
                     };
@@ -251,49 +296,36 @@ pub async fn spawn_server(
                 .create(pipe_name)
             {
                 Ok(mut server) => {
-                    let mut buf = Vec::new();
-                    match timeout(ipc_timeout, server.read_to_end(&mut buf)).await {
-                        Ok(Ok(_)) => {
-                            if let Ok(req) = serde_json::from_slice::<Request>(&buf) {
-                                match req {
-                                    Request::Status => {
-                                        let st = state.lock().await.clone();
-                                        let reply = build_status_reply(
-                                            &st,
-                                            &destinations,
-                                            recent_activity_limit,
-                                        );
-                                        match timeout(
-                                            ipc_timeout,
-                                            write_status_reply(&mut server, &reply),
-                                        )
-                                        .await
-                                        {
-                                            Ok(Ok(_)) => {}
-                                            Ok(Err(e)) => {
-                                                tracing::error!(
-                                                    "daemon::runtime::ipc spawn_server write error: {e:?}"
-                                                );
-                                            }
-                                            Err(_) => {
-                                                tracing::error!(
-                                                    "daemon::runtime::ipc spawn_server write timeout after {:?}",
-                                                    ipc_timeout
-                                                );
-                                            }
-                                        }
-                                    }
+                    let req = match read_request(&mut server, ipc_timeout).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::error!(
+                                "daemon::runtime::ipc spawn_server request read error: {e:?}"
+                            );
+                            continue;
+                        }
+                    };
+                    match req {
+                        Request::Status => {
+                            let st = state.lock().await.clone();
+                            let reply =
+                                build_status_reply(&st, &destinations, recent_activity_limit);
+                            match timeout(ipc_timeout, write_status_reply(&mut server, &reply))
+                                .await
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write error: {e:?}"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write timeout after {:?}",
+                                        ipc_timeout
+                                    );
                                 }
                             }
-                        }
-                        Ok(Err(e)) => {
-                            tracing::error!("daemon::runtime::ipc spawn_server read error: {e:?}");
-                        }
-                        Err(_) => {
-                            tracing::error!(
-                                "daemon::runtime::ipc spawn_server read timeout after {:?}",
-                                ipc_timeout
-                            );
                         }
                     }
                 }
@@ -320,4 +352,24 @@ pub fn socket_path() -> Result<PathBuf> {
     let mut p = dirs::runtime_dir().unwrap_or(std::env::temp_dir());
     p.push("backup_sync_ipc.sock");
     Ok(p)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn read_request_parses_without_client_shutdown() {
+        let (mut client, mut server) = tokio::net::UnixStream::pair().unwrap();
+        let server_task = tokio::spawn(async move {
+            let req = read_request(&mut server, Duration::from_secs(1))
+                .await
+                .unwrap();
+            matches!(req, Request::Status);
+        });
+        client.write_all(br#"{"type":"Status"}"#).await.unwrap();
+        // Intentionally do not shutdown the client; server must still parse.
+        server_task.await.unwrap();
+    }
 }

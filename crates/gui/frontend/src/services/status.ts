@@ -1,4 +1,4 @@
-import { safeInvoke } from "./ipc";
+import { safeInvoke, wrapError } from "./ipc";
 import { StatusDto } from "./types";
 
 /**
@@ -14,7 +14,6 @@ export async function getStatus(): Promise<StatusDto> {
   try {
     return await safeInvoke<StatusDto>("get_status");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[getStatus] Failed to fetch status: ${message}`);
+    throw wrapError("[getStatus] Failed to fetch status", error);
   }
 }

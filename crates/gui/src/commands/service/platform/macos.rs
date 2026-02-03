@@ -5,6 +5,27 @@ use crate::commands::service::common::{
 use daemon::integration::launchd;
 use std::path::{Path, PathBuf};
 
+const LAUNCHD_LABEL: &str = "com.backup_sync.daemon";
+
+/// Purpose: Resolve the launchctl target identifier for the current user session.
+///
+/// Inputs: none.
+/// Outputs: a `launchctl` domain-qualified service identifier.
+/// Ties to: `restart_daemon` and best-effort daemon kickstarts after install.
+/// Side effects: Executes `id -u` to determine the numeric UID.
+/// Why: `launchctl kickstart` requires an explicit domain on modern macOS.
+fn launchctl_target() -> Result<String, ErrorEnvelope> {
+    let out = run_command("id", &["-u"], "SERVICE_UID", "id -u")?;
+    let uid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if uid.is_empty() {
+        return Err(ErrorEnvelope::new(
+            "SERVICE_UID",
+            "service::macos::launchctl_target failed to parse UID from `id -u` output",
+        ));
+    }
+    Ok(format!("gui/{}/{}", uid, LAUNCHD_LABEL))
+}
+
 /// Purpose: Writes the launchd plist to disk.
 ///
 /// Inputs: the executable path and optional log path.
@@ -57,7 +78,18 @@ pub fn enable_launchd(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
         &["load", dest_str],
         "SERVICE_ENABLE",
         "launchctl load",
-    )
+    )?;
+
+    // Best-effort kickstart, but do not fail the install if it is not supported.
+    if let Ok(target) = launchctl_target() {
+        let _ = run_command(
+            "launchctl",
+            &["kickstart", "-k", &target],
+            "SERVICE_ENABLE",
+            "launchctl kickstart",
+        );
+    }
+    Ok(())
 }
 
 /// Purpose: Builds the service status payload for macOS.
@@ -118,11 +150,12 @@ pub fn status_macos(
 /// Side effects: Runs launchctl to restart the daemon.
 /// Why: allow users to recover a stuck daemon.
 pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
+    let target = launchctl_target().unwrap_or_else(|_| LAUNCHD_LABEL.to_string());
     run_command(
         "launchctl",
-        &["kickstart", "-k", "system/com.backup_sync.daemon"],
+        &["kickstart", "-k", &target],
         "RESTART_FAILED",
         "launchctl kickstart",
     )?;
-    Ok("Daemon restarted via launchctl.".to_string())
+    Ok(format!("Daemon restarted via launchctl ({target})."))
 }

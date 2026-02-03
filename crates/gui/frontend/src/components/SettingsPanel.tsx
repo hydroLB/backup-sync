@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/api/dialog";
 import { doctorReport, installService } from "../services";
-import { Config } from "./settings/types";
+import { Config, Destination } from "./settings/types";
 import { formatBytes } from "../utils/format";
 import EmptyState from "./settings/EmptyState";
 import BackupCadence from "./settings/BackupCadence";
@@ -22,6 +22,7 @@ import { UI_TUNING } from "../config/uiTuning";
 import { AccessProbe, SimulationResult } from "../services/types";
 import AuthLockModal from "./settings/AuthLockModal";
 import { authStatus, lockSession, unlockSession, AuthStatus } from "../services/auth";
+import { IpcError } from "../services/ipc";
 
 /**
  * Purpose: Render the settings panel and onboarding flows.
@@ -118,9 +119,14 @@ export const SettingsPanel: React.FC = () => {
       setAuthInfo(status);
       setAuthError(null);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason =
+        error instanceof IpcError && error.code === "TAURI_UNAVAILABLE"
+          ? "IPC unavailable. Launch the desktop app (./start) instead of a browser."
+          : error instanceof Error
+            ? error.message
+            : String(error);
       setAuthInfo({ unlocked: false, seconds_left: null });
-      setAuthError(`[SettingsPanel::refreshAuthStatus] ${reason}`);
+      setAuthError(reason);
     }
   };
   /**
@@ -214,7 +220,7 @@ export const SettingsPanel: React.FC = () => {
       setStatus(`[SettingsPanel::popup] Failed to set status: ${reason}`);
     }
   };
-  const pickerHelpers = usePickers(cfg, popup);
+  const pickerHelpers = usePickers(popup);
   const saving = false;
 
   /**
@@ -228,8 +234,9 @@ export const SettingsPanel: React.FC = () => {
    */
   const setBackupRootPath = (path: string, label: string) => {
     try {
-      const dests = cfg.destinations && cfg.destinations.length > 0 ? cfg.destinations : [{ id: "default", label: "Primary", path }];
-      const nextDests = [{ ...dests[0], path }, ...dests.slice(1)];
+      const existing: Destination[] = cfg.destinations && cfg.destinations.length > 0 ? cfg.destinations : [];
+      const primary: Destination = existing[0] ?? { id: "default", label: "Primary", path, max_backups_per_file: null };
+      const nextDests: Destination[] = [{ ...primary, path }, ...existing.slice(1)];
       saveCfg({ ...cfg, backup_root: path, destinations: nextDests }, `Backup location set${label ? ` to ${label}` : ""}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -379,7 +386,7 @@ export const SettingsPanel: React.FC = () => {
     try {
       await pickerHelpers.pickDestination((selection) => {
         const id = `dest-${Date.now()}`;
-        const nextDests = [...(cfg.destinations || []), { id, label: undefined, path: selection, max_backups_per_file: null }];
+        const nextDests: Destination[] = [...(cfg.destinations || []), { id, path: selection, max_backups_per_file: null }];
         saveCfg({ ...cfg, destinations: nextDests, backup_root: nextDests[0]?.path || selection }, "Destination added");
         setStatus(`Destination added: ${selection}`);
       });
@@ -410,7 +417,7 @@ export const SettingsPanel: React.FC = () => {
         title: kind === "Directory" ? "Choose folder to protect" : "Choose file to protect",
       });
       if (typeof selection === "string") {
-        addWatchedPath(selection, kind, destId);
+        addWatched(selection, kind, destId);
         setStatus(`Added ${selection}`);
       } else {
         popup("No selection made or picker was closed.");
@@ -479,36 +486,6 @@ export const SettingsPanel: React.FC = () => {
       await resolveSpecialPath(getter, label, (path) => setBackupRootPath(path, label), "Backup location set to");
     } catch (e) {
       popup(`[SettingsPanel::quickAddPathToBackup] Quick destination set failed: ${e}`);
-    }
-  };
-
-  /**
-   * Purpose: Apply a performance preset to the current config.
-   *
-   * Inputs: Preset identifier.
-   * Outputs: Updates config and status messaging.
-   * Ties to: Onboarding preset actions and performance tuning.
-   * Side effects: Updates config state and triggers persistence.
-   * Why: Provide quick preset application during setup.
-   */
-  const applyPreset = (preset: "quiet" | "balanced" | "fast") => {
-    try {
-      const presetConfig = UI_TUNING.performancePresets[preset];
-      const next = { ...cfg, ...presetConfig };
-      if (preset === "quiet") {
-        setStatus("Preset applied: Quiet");
-      }
-      if (preset === "balanced") {
-        setStatus("Preset applied: Balanced");
-      }
-      if (preset === "fast") {
-        setStatus("Preset applied: Fast");
-      }
-      setCfg(next);
-      guardAuth("Save settings", () => saveCfg(next, "Preset saved"));
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      popup(`[SettingsPanel::applyPreset] Failed to apply preset: ${reason}`);
     }
   };
 
@@ -666,7 +643,6 @@ export const SettingsPanel: React.FC = () => {
           onUseDesktopDest={() => quickAddPathToBackup(() => specialDir("desktop"), "Desktop")}
           onUseDocumentsDest={() => quickAddPathToBackup(() => specialDir("documents"), "Documents")}
           onUseDownloadsDest={() => quickAddPathToBackup(() => specialDir("downloads"), "Downloads")}
-          onSetPreset={applyPreset}
           onStartOnLogin={enableStartOnLogin}
           onTestBackup={runSimulate}
           onNext={() => onboarding.setStep((s) => Math.min(4, s + 1))}
@@ -707,7 +683,7 @@ export const SettingsPanel: React.FC = () => {
         />
         <OnboardingSummary
           watchedCount={cfg.watched.length}
-          destinationMessage={destStatus?.message}
+          destinationMessage={destStatus?.message ?? "Not set"}
           freeBytes={destStatus?.free_bytes ?? null}
           safeMode={cfg.safe_mode}
           onSimulate={runSimulate}

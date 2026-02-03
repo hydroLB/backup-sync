@@ -40,9 +40,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
 
-            // Start fully hidden to keep background behavior predictable.
-            if let Some(window) = app.get_window("main") {
-                let _ = window.hide();
+            if runtime.gui_start_hidden {
+                // Hide on launch for users that want tray-first behavior.
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.hide();
+                }
+            } else {
+                actions::show_main_window(&app.app_handle());
             }
             Ok(())
         })

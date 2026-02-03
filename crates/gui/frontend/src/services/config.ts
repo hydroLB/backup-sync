@@ -1,6 +1,6 @@
 import { correlationId } from "./correlation";
 import { Config } from "../components/settings/types";
-import { safeInvoke } from "./ipc";
+import { safeInvoke, wrapError } from "./ipc";
 
 /**
  * Purpose: Load the current configuration from the backend.
@@ -15,8 +15,7 @@ export async function loadConfig(): Promise<Config> {
   try {
     return await safeInvoke<Config>("load_config_cmd");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[loadConfig] Failed to load configuration: ${message}`);
+    throw wrapError("[loadConfig] Failed to load configuration", error);
   }
 }
 
@@ -33,7 +32,6 @@ export async function saveConfig(cfg: Config): Promise<void> {
   try {
     return await safeInvoke("save_config_cmd", { cfg, correlationId: correlationId("save") });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[saveConfig] Failed to save configuration: ${message}`);
+    throw wrapError("[saveConfig] Failed to save configuration", error);
   }
 }

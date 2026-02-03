@@ -24,6 +24,8 @@ pub struct RuntimeTuning {
     pub log_tail_lines: usize,
     #[serde(default = "crate::config::model::defaults::default_simulation_sample_limit")]
     pub simulation_sample_limit: usize,
+    #[serde(default)]
+    pub gui_start_hidden: bool,
 }
 
 impl Default for RuntimeTuning {
@@ -54,6 +56,7 @@ impl Default for RuntimeTuning {
             log_tail_lines: crate::config::model::defaults::default_log_tail_lines(),
             simulation_sample_limit:
                 crate::config::model::defaults::default_simulation_sample_limit(),
+            gui_start_hidden: false,
         }
     }
 }

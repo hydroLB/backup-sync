@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import StatusCard from "./components/status/StatusCard";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { RunNow } from "./components/RunNow";
