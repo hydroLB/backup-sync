@@ -1,4 +1,7 @@
-use super::model::{Manifest, ManifestEntry, ManifestEntryKind, VersionIndex, VersionInfo};
+use super::model::{
+    Manifest, ManifestEntry, ManifestEntryKind, ReadFailure, ReadFailurePhase, VersionIndex,
+    VersionInfo,
+};
 use crate::config::model::{Config, Destination, WatchedKind, WatchedPath};
 use crate::logging::redact_path;
 use anyhow::{Context, Result};
@@ -8,7 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct FolderDescriptor {
     pub source_path: PathBuf,
@@ -34,6 +37,137 @@ pub struct BackupCycleResult {
 
 pub(crate) const STORE_DIR: &str = ".backup_sync";
 pub(crate) const STORE_SCHEMA_VERSION: u32 = 1;
+
+/**
+ * Summary: Best-effort directory fsync helper for crash-consistent commits.
+ *
+ * Inputs: `path` directory path to sync.
+ * Outputs: `Ok(())` when the directory metadata is durably flushed.
+ * Side effects: Opens a directory handle and invokes `sync_all` on it.
+ * Error handling: On Unix, returns contextual errors; on non-Unix, it is a no-op.
+ * Ties to other methods: Used by `create_dir_all_durable`, `write_json_atomic_durable`, and `write_blob_durable`.
+ * Why this exists: Atomic rename is not durable across power loss without syncing the parent directory.
+ */
+#[cfg(target_family = "unix")]
+fn sync_dir(path: &Path) -> Result<()> {
+    let dir = fs::File::open(path)
+        .with_context(|| format!("versioned::sync_dir failed to open directory {:?}", path))?;
+    dir.sync_all()
+        .with_context(|| format!("versioned::sync_dir failed to sync directory {:?}", path))?;
+    Ok(())
+}
+
+/**
+ * Summary: Best-effort directory fsync helper for crash-consistent commits.
+ *
+ * Inputs: `path` directory path to sync.
+ * Outputs: `Ok(())` always.
+ * Side effects: None.
+ * Error handling: None.
+ * Ties to other methods: Used by `create_dir_all_durable`, `write_json_atomic_durable`, and `write_blob_durable`.
+ * Why this exists: Some platforms do not support opening directories with `std::fs::File` reliably.
+ */
+#[cfg(not(target_family = "unix"))]
+fn sync_dir(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+/**
+ * Summary: Create a directory tree and fsync its parent directories for durability.
+ *
+ * Inputs: `path` directory to create; `durability_root` root directory to stop syncing at.
+ * Outputs: `Ok(())` when the directory exists and parent entries are durably flushed.
+ * Side effects: Creates directories and performs directory fsync operations.
+ * Error handling: Returns contextual errors when create or sync steps fail.
+ * Ties to other methods: Used to prepare `blobs_root` and `manifests_root` before durable writes.
+ * Why this exists: Directory creation and atomic renames are not crash-safe without syncing parents.
+ */
+fn create_dir_all_durable(path: &Path, durability_root: &Path) -> Result<()> {
+    if path != durability_root && !path.starts_with(durability_root) {
+        anyhow::bail!(
+            "versioned::create_dir_all_durable invalid durability root; path {:?} is not within {:?}",
+            path,
+            durability_root
+        );
+    }
+    if path.exists() {
+        if !path.is_dir() {
+            anyhow::bail!(
+                "versioned::create_dir_all_durable expected directory at {:?}",
+                path
+            );
+        }
+        return Ok(());
+    }
+    fs::create_dir_all(path).with_context(|| {
+        format!(
+            "versioned::create_dir_all_durable failed to create directory {:?}",
+            path
+        )
+    })?;
+
+    // Sync the created directory itself and each ancestor up to `durability_root` so
+    // directory entries become durable (power-loss safe) on filesystems that require it.
+    let mut cur: Option<&Path> = Some(path);
+    while let Some(p) = cur {
+        if p.exists() {
+            sync_dir(p)?;
+        }
+        if p == durability_root {
+            break;
+        }
+        cur = p.parent();
+    }
+    Ok(())
+}
+
+/**
+ * Summary: Retry helper that runs an operation with backoff and optional overall timeout.
+ *
+ * Inputs: `label` used for error context, `timeout_seconds` as an overall time bound, `retry_delays`
+ * as backoff schedule, and `op` as the fallible operation.
+ * Outputs: On success, returns `(value, attempts_used)`. On failure, returns the last error.
+ * Side effects: Sleeps between attempts when retries are configured.
+ * Error handling: Preserves the last error and adds context including attempt count and timeout status.
+ * Ties to other methods: Used by file hashing, blob writing, and metadata reads for glitch resilience.
+ * Why this exists: Make transient IO failures first-class without failing an entire backup cycle.
+ */
+fn retry_with_backoff<T, F>(
+    label: &str,
+    timeout_seconds: u64,
+    retry_delays: &[Duration],
+    mut op: F,
+) -> Result<(T, u32)>
+where
+    F: FnMut() -> Result<T>,
+{
+    let start = Instant::now();
+    let mut last_err: Option<anyhow::Error> = None;
+    let max_attempts = retry_delays.len() + 1;
+    for attempt_idx in 0..max_attempts {
+        if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
+            let attempts = attempt_idx as u32;
+            anyhow::bail!(
+                "{label} timed out after {}s (attempts={})",
+                timeout_seconds,
+                attempts.max(1)
+            );
+        }
+        match op() {
+            Ok(v) => return Ok((v, (attempt_idx + 1) as u32)),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt_idx < retry_delays.len() {
+                    std::thread::sleep(retry_delays[attempt_idx]);
+                    continue;
+                }
+            }
+        }
+    }
+    Err(last_err
+        .unwrap_or_else(|| anyhow::anyhow!("{label} failed (no error captured)")))
+    .with_context(|| format!("{label} failed after {max_attempts} attempts"))
+}
 
 pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
     let destinations_by_id: HashMap<&str, &Destination> = cfg
@@ -78,11 +212,12 @@ fn backup_one_folder(
     watched: &WatchedPath,
     desc: &FolderDescriptor,
 ) -> Result<FolderBackupResult> {
+    let retry_delays = cfg.execution.retry_delays();
     let store_root = store_root(&desc.destination_root);
     let blobs_root = blobs_root(&store_root);
-    fs::create_dir_all(&blobs_root).with_context(|| {
+    create_dir_all_durable(&blobs_root, &desc.destination_root).with_context(|| {
         format!(
-            "versioned::backup_one_folder failed to create blob directory {:?}",
+            "versioned::backup_one_folder failed to create durable blob directory {:?}",
             blobs_root
         )
     })?;
@@ -90,21 +225,23 @@ fn backup_one_folder(
     let source_id = sha256_hex(desc.source_path.to_string_lossy().as_bytes());
     let source_root = sources_root(&store_root).join(&source_id);
     let manifests_root = source_root.join("manifests");
-    fs::create_dir_all(&manifests_root).with_context(|| {
+    create_dir_all_durable(&manifests_root, &desc.destination_root).with_context(|| {
         format!(
-            "versioned::backup_one_folder failed to create manifests directory {:?}",
+            "versioned::backup_one_folder failed to create durable manifests directory {:?}",
             manifests_root
         )
     })?;
 
     let mut index = load_index(&source_root, &desc.source_path)?;
     let prev = latest_manifest(&manifests_root, &index)?;
-    let snapshot = scan_snapshot(cfg, watched, &prev)?;
+    let mut snapshot = scan_snapshot(cfg, watched, &prev, &retry_delays)?;
+    let mut had_read_failures = !snapshot.read_failures.is_empty();
     let changed = match &prev {
         None => true,
         Some(prev_manifest) => !manifests_equivalent(prev_manifest, &snapshot),
     };
     if !changed {
+        write_scan_report(&source_root, &snapshot, None, &desc.destination_root)?;
         return Ok(FolderBackupResult {
             changed: false,
             ..Default::default()
@@ -126,28 +263,84 @@ fn backup_one_folder(
         ..Default::default()
     };
 
-    for entry in snapshot.entries.values() {
-        if entry.kind != ManifestEntryKind::File {
+    let file_rel_paths: Vec<String> = snapshot
+        .entries
+        .values()
+        .filter(|e| e.kind == ManifestEntryKind::File)
+        .map(|e| e.rel_path.clone())
+        .collect();
+
+    for rel_path in file_rel_paths {
+        let entry = match snapshot.entries.get(&rel_path).cloned() {
+            None => continue,
+            Some(e) => e,
+        };
+        let Some(hash) = entry.sha256.as_deref() else {
+            had_read_failures = true;
+            snapshot.read_failures.push(ReadFailure {
+                rel_path: rel_path.clone(),
+                phase: ReadFailurePhase::BlobWrite,
+                attempts: 1,
+                message: "missing sha256 for file entry".to_string(),
+            });
+            snapshot.entries.remove(&rel_path);
             continue;
-        }
-        let hash = entry
-            .sha256
-            .as_ref()
-            .context("versioned::backup_one_folder missing sha256 for file entry")?;
+        };
         let blob_path = blob_path(&blobs_root, hash);
         if blob_path.exists() {
             continue;
         }
         let src_path = match watched.kind {
             WatchedKind::File => desc.source_path.clone(),
-            WatchedKind::Directory => desc.source_path.join(Path::new(&entry.rel_path)),
+            WatchedKind::Directory => desc.source_path.join(Path::new(&rel_path)),
         };
-        let (count, bytes) = write_blob(&src_path, &blob_path, cfg.hashing.timeout_seconds)?;
-        written.blobs_written += count;
-        written.bytes_written += bytes;
+        match write_blob(
+            &src_path,
+            &blob_path,
+            cfg.hashing.timeout_seconds,
+            &retry_delays,
+            &desc.destination_root,
+        ) {
+            Ok((count, bytes)) => {
+                written.blobs_written += count;
+                written.bytes_written += bytes;
+            }
+            Err(e) => {
+                had_read_failures = true;
+                snapshot.read_failures.push(ReadFailure {
+                    rel_path: rel_path.clone(),
+                    phase: ReadFailurePhase::BlobWrite,
+                    attempts: (retry_delays.len() + 1) as u32,
+                    message: format!("{e:#}"),
+                });
+                if let Some(prev_manifest) = prev.as_ref() {
+                    if let Some(prev_entry) = prev_manifest.entries.get(&rel_path) {
+                        snapshot.entries.insert(rel_path.clone(), prev_entry.clone());
+                    } else {
+                        snapshot.entries.remove(&rel_path);
+                    }
+                } else {
+                    snapshot.entries.remove(&rel_path);
+                }
+            }
+        }
     }
 
-    write_json_atomic(&manifest_path, &snapshot).with_context(|| {
+    let changed_after_failures = match &prev {
+        None => true,
+        Some(prev_manifest) => !manifests_equivalent(prev_manifest, &snapshot),
+    };
+    if !changed_after_failures {
+        write_scan_report(&source_root, &snapshot, None, &desc.destination_root)?;
+        return Ok(FolderBackupResult {
+            changed: false,
+            blobs_written: written.blobs_written,
+            bytes_written: written.bytes_written,
+            ..Default::default()
+        });
+    }
+
+    write_json_atomic_durable(&manifest_path, &snapshot, &desc.destination_root).with_context(|| {
         format!(
             "versioned::backup_one_folder failed to write manifest {:?}",
             manifest_path
@@ -167,18 +360,26 @@ fn backup_one_folder(
     });
 
     let mut deleted_any = false;
-    while index.versions.len() > desc.keep_versions {
-        if let Some(oldest) = index.versions.first().cloned() {
-            let path = manifests_root.join(format!("{}.json", oldest.id));
-            let _ = fs::remove_file(&path);
-            index.versions.remove(0);
-            deleted_any = true;
-        } else {
-            break;
+    if !had_read_failures {
+        while index.versions.len() > desc.keep_versions {
+            if let Some(oldest) = index.versions.first().cloned() {
+                let path = manifests_root.join(format!("{}.json", oldest.id));
+                let _ = fs::remove_file(&path);
+                index.versions.remove(0);
+                deleted_any = true;
+            } else {
+                break;
+            }
         }
     }
 
-    write_index(&source_root, &index)?;
+    write_index(&source_root, &index, &desc.destination_root)?;
+    write_scan_report(
+        &source_root,
+        &snapshot,
+        Some(&version_id),
+        &desc.destination_root,
+    )?;
 
     if deleted_any {
         gc_unreferenced_blobs(&store_root, &blobs_root)?;
@@ -206,64 +407,122 @@ pub(crate) fn blob_path(blobs_root: &Path, hash: &str) -> PathBuf {
     blobs_root.join(prefix).join(hash)
 }
 
-fn write_blob(src_path: &Path, blob_path: &Path, timeout_seconds: u64) -> Result<(usize, u64)> {
-    if let Some(parent) = blob_path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "versioned::write_blob failed to create blob parent directory {:?}",
-                parent
-            )
-        })?;
-    }
+/**
+ * Summary: Write a content-addressed blob durably (fsync file and parent directory).
+ *
+ * Inputs: Source file path, destination blob path, timeout in seconds, and `durability_root`.
+ * Outputs: `(blobs_written, bytes_written)` for accounting.
+ * Side effects: Reads from the source filesystem and writes a new blob file under the destination store.
+ * Error handling: Returns contextual errors for create, IO, timeout, fsync, and rename failures.
+ * Ties to other methods: Called by `backup_one_folder` before writing the manifest that references blobs.
+ * Why this exists: A blob referenced by a manifest must be durable across power loss before the manifest commit.
+ */
+fn write_blob(
+    src_path: &Path,
+    blob_path: &Path,
+    timeout_seconds: u64,
+    retry_delays: &[Duration],
+    durability_root: &Path,
+) -> Result<(usize, u64)> {
+    let parent = blob_path
+        .parent()
+        .context("versioned::write_blob missing blob parent")?;
+    create_dir_all_durable(parent, durability_root).with_context(|| {
+        format!(
+            "versioned::write_blob failed to create durable blob parent directory {:?}",
+            parent
+        )
+    })?;
+
+    let label = format!("versioned::write_blob {:?} -> {:?}", src_path, blob_path);
+    let (written, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
+        write_blob_once(src_path, blob_path, timeout_seconds, durability_root)
+    })?;
+    Ok((1, written))
+}
+
+/**
+ * Summary: Single-attempt blob write (used by retry wrapper).
+ *
+ * Inputs: Source file path, destination blob path, timeout in seconds, and `durability_root`.
+ * Outputs: Number of bytes written to the blob temp file.
+ * Side effects: Reads from source, writes temp file, fsyncs, renames, and fsyncs the parent directory.
+ * Error handling: Returns contextual errors for IO, timeout, fsync, and rename operations.
+ * Ties to other methods: Called by `write_blob` via `retry_with_backoff`.
+ * Why this exists: Allow clean retry semantics without partial blob files surviving failed attempts.
+ */
+fn write_blob_once(
+    src_path: &Path,
+    blob_path: &Path,
+    timeout_seconds: u64,
+    durability_root: &Path,
+) -> Result<u64> {
+    let _ = durability_root;
     let start = Instant::now();
     let mut file = fs::File::open(src_path).with_context(|| {
         format!(
-            "versioned::write_blob failed to open source file {:?}",
+            "versioned::write_blob_once failed to open source file {:?}",
             src_path
         )
     })?;
-    let mut temp = tempfile::NamedTempFile::new_in(
-        blob_path
-            .parent()
-            .context("versioned::write_blob missing blob parent")?,
-    )
-    .context("versioned::write_blob failed to create temp file")?;
+    let parent = blob_path
+        .parent()
+        .context("versioned::write_blob_once missing blob parent")?;
+    let mut temp =
+        tempfile::NamedTempFile::new_in(parent).context("versioned::write_blob_once temp create")?;
     let mut buf = vec![0u8; 64 * 1024];
     let mut written: u64 = 0;
     loop {
         if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
             anyhow::bail!(
-                "versioned::write_blob timed out after {}s writing {:?}",
+                "versioned::write_blob_once timed out after {}s writing {:?}",
                 timeout_seconds,
                 src_path
             );
         }
         let n = file
             .read(&mut buf)
-            .with_context(|| format!("versioned::write_blob failed reading {:?}", src_path))?;
+            .with_context(|| format!("versioned::write_blob_once failed reading {:?}", src_path))?;
         if n == 0 {
             break;
         }
         temp.write_all(&buf[..n]).with_context(|| {
             format!(
-                "versioned::write_blob failed writing temp for {:?}",
+                "versioned::write_blob_once failed writing temp for {:?}",
                 src_path
             )
         })?;
         written += n as u64;
     }
-    temp.flush().ok();
+    temp.flush().with_context(|| {
+        format!(
+            "versioned::write_blob_once failed to flush temp for {:?}",
+            src_path
+        )
+    })?;
+    temp.as_file().sync_all().with_context(|| {
+        format!(
+            "versioned::write_blob_once failed to fsync temp file for {:?}",
+            src_path
+        )
+    })?;
     temp.persist(blob_path).map_err(|e| {
         anyhow::anyhow!(
-            "versioned::write_blob failed to persist blob {:?}: {}",
+            "versioned::write_blob_once failed to persist blob {:?}: {}",
             blob_path,
             e
         )
     })?;
-    Ok((1, written))
+    sync_dir(parent)?;
+    Ok(written)
 }
 
-fn scan_snapshot(cfg: &Config, watched: &WatchedPath, prev: &Option<Manifest>) -> Result<Manifest> {
+fn scan_snapshot(
+    cfg: &Config,
+    watched: &WatchedPath,
+    prev: &Option<Manifest>,
+    retry_delays: &[Duration],
+) -> Result<Manifest> {
     let prev_entries: HashMap<&str, &ManifestEntry> = prev
         .as_ref()
         .map(|m| {
@@ -278,6 +537,8 @@ fn scan_snapshot(cfg: &Config, watched: &WatchedPath, prev: &Option<Manifest>) -
         .context("versioned::scan_snapshot failed to build ignore set")?;
 
     let mut entries: BTreeMap<String, ManifestEntry> = BTreeMap::new();
+    let mut read_failures: Vec<ReadFailure> = Vec::new();
+    let prev_manifest = prev.as_ref();
 
     match watched.kind {
         WatchedKind::File => {
@@ -286,22 +547,54 @@ fn scan_snapshot(cfg: &Config, watched: &WatchedPath, prev: &Option<Manifest>) -
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "file".to_string());
-            let e = scan_one_file(
+            match scan_one_file(
                 &watched.path,
                 &name,
                 cfg.hashing.timeout_seconds,
+                retry_delays,
                 &prev_entries,
-            )?;
-            entries.insert(name.clone(), e);
+            ) {
+                Ok(e) => {
+                    entries.insert(name.clone(), e);
+                }
+                Err(error) => {
+                    read_failures.push(ReadFailure {
+                        rel_path: name.clone(),
+                        phase: ReadFailurePhase::Hash,
+                        attempts: (retry_delays.len() + 1) as u32,
+                        message: format!("{error:#}"),
+                    });
+                    if let Some(prev_manifest) = prev_manifest {
+                        if let Some(prev_entry) = prev_manifest.entries.get(&name) {
+                            entries.insert(name.clone(), prev_entry.clone());
+                        }
+                    }
+                }
+            }
         }
         WatchedKind::Directory => {
             for item in walkdir::WalkDir::new(&watched.path)
                 .follow_links(false)
                 .into_iter()
             {
-                let item = item.with_context(|| {
-                    format!("versioned::scan_snapshot failed walking {:?}", watched.path)
-                })?;
+                let item = match item {
+                    Ok(i) => i,
+                    Err(e) => {
+                        let rel_str = e
+                            .path()
+                            .and_then(|p| p.strip_prefix(&watched.path).ok())
+                            .map(normalize_rel)
+                            .unwrap_or_else(|| "<walk_error>".to_string());
+                        read_failures.push(ReadFailure {
+                            rel_path: rel_str.clone(),
+                            phase: ReadFailurePhase::Walk,
+                            attempts: 1,
+                            message: e.to_string(),
+                        });
+                        carry_forward_prev_prefix(&mut entries, prev_manifest, &rel_str);
+                        continue;
+                    }
+                };
                 let path = item.path();
                 let rel = path.strip_prefix(&watched.path).unwrap_or(path);
                 if rel.as_os_str().is_empty() {
@@ -330,9 +623,30 @@ fn scan_snapshot(cfg: &Config, watched: &WatchedPath, prev: &Option<Manifest>) -
                 }
                 if item.file_type().is_file() {
                     let rel_str = normalize_rel(rel);
-                    let entry =
-                        scan_one_file(path, &rel_str, cfg.hashing.timeout_seconds, &prev_entries)?;
-                    entries.insert(rel_str.clone(), entry);
+                    match scan_one_file(
+                        path,
+                        &rel_str,
+                        cfg.hashing.timeout_seconds,
+                        retry_delays,
+                        &prev_entries,
+                    ) {
+                        Ok(entry) => {
+                            entries.insert(rel_str.clone(), entry);
+                        }
+                        Err(error) => {
+                            read_failures.push(ReadFailure {
+                                rel_path: rel_str.clone(),
+                                phase: ReadFailurePhase::Hash,
+                                attempts: (retry_delays.len() + 1) as u32,
+                                message: format!("{error:#}"),
+                            });
+                            if let Some(prev_manifest) = prev_manifest {
+                                if let Some(prev_entry) = prev_manifest.entries.get(&rel_str) {
+                                    entries.insert(rel_str.clone(), prev_entry.clone());
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -342,8 +656,30 @@ fn scan_snapshot(cfg: &Config, watched: &WatchedPath, prev: &Option<Manifest>) -
         schema_version: STORE_SCHEMA_VERSION,
         source_path: watched.path.to_string_lossy().into_owned(),
         created_at_unix: chrono::Utc::now().timestamp(),
+        read_failures,
         entries,
     })
+}
+
+fn carry_forward_prev_prefix(
+    entries: &mut BTreeMap<String, ManifestEntry>,
+    prev: Option<&Manifest>,
+    rel_prefix: &str,
+) {
+    let Some(prev) = prev else { return };
+    if rel_prefix.is_empty() || rel_prefix == "<walk_error>" {
+        return;
+    }
+    let prefix = if rel_prefix.ends_with('/') {
+        rel_prefix.to_string()
+    } else {
+        format!("{rel_prefix}/")
+    };
+    for e in prev.entries.values() {
+        if e.rel_path == rel_prefix || e.rel_path.starts_with(&prefix) {
+            entries.entry(e.rel_path.clone()).or_insert_with(|| e.clone());
+        }
+    }
 }
 
 fn scan_one_file(
@@ -428,9 +764,19 @@ fn load_index(source_root: &Path, source_path: &Path) -> Result<VersionIndex> {
     Ok(index)
 }
 
-fn write_index(source_root: &Path, index: &VersionIndex) -> Result<()> {
+/**
+ * Summary: Persist the version index durably (atomic rename plus fsync).
+ *
+ * Inputs: `source_root` folder, `index` payload, and `durability_root` stop directory for fsync.
+ * Outputs: `Ok(())` when the updated index is durably persisted.
+ * Side effects: Writes `index.json` under the source root.
+ * Error handling: Returns contextual errors from serialization, IO, fsync, and rename operations.
+ * Ties to other methods: Called after `write_json_atomic_durable` writes the manifest for a new version.
+ * Why this exists: The index is the commit pointer; it must not reference versions that are not durable on disk.
+ */
+fn write_index(source_root: &Path, index: &VersionIndex, durability_root: &Path) -> Result<()> {
     let path = source_root.join("index.json");
-    write_json_atomic(&path, index).with_context(|| {
+    write_json_atomic_durable(&path, index, durability_root).with_context(|| {
         format!(
             "versioned::write_index failed to write version index {:?}",
             path
@@ -454,30 +800,50 @@ fn latest_manifest(manifests_root: &Path, index: &VersionIndex) -> Result<Option
     Ok(Some(manifest))
 }
 
-fn write_json_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "versioned::write_json_atomic failed to create parent {:?}",
-                parent
-            )
-        })?;
-    }
-    let tmp = path.with_extension("tmp");
+/**
+ * Summary: Atomically write JSON and make it durable with fsync.
+ *
+ * Inputs: `path` destination file path, `value` JSON-serializable payload, and `durability_root`.
+ * Outputs: `Ok(())` when the file is atomically replaced and durably committed.
+ * Side effects: Writes a temp file, fsyncs it, renames it into place, and fsyncs the parent directory.
+ * Error handling: Returns contextual errors for create, serialize, write, fsync, and rename failures.
+ * Ties to other methods: Used for both manifests and `index.json` writes in the commit pipeline.
+ * Why this exists: Without fsync, a power loss can leave a missing or truncated file after an atomic rename.
+ */
+fn write_json_atomic_durable<T: serde::Serialize>(
+    path: &Path,
+    value: &T,
+    durability_root: &Path,
+) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("versioned::write_json_atomic_durable missing parent directory")?;
+    create_dir_all_durable(parent, durability_root).with_context(|| {
+        format!(
+            "versioned::write_json_atomic_durable failed to create durable parent {:?}",
+            parent
+        )
+    })?;
+
     let raw = serde_json::to_string_pretty(value)
-        .context("versioned::write_json_atomic failed to serialize JSON")?;
-    fs::write(&tmp, raw).with_context(|| {
-        format!(
-            "versioned::write_json_atomic failed to write temp file {:?}",
-            tmp
+        .context("versioned::write_json_atomic_durable failed to serialize JSON")?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .context("versioned::write_json_atomic_durable failed to create temp file")?;
+    temp.write_all(raw.as_bytes())
+        .context("versioned::write_json_atomic_durable failed writing JSON bytes")?;
+    temp.flush()
+        .context("versioned::write_json_atomic_durable failed to flush temp file")?;
+    temp.as_file()
+        .sync_all()
+        .context("versioned::write_json_atomic_durable failed to fsync temp file")?;
+    temp.persist(path).map_err(|e| {
+        anyhow::anyhow!(
+            "versioned::write_json_atomic_durable failed to persist {:?}: {}",
+            path,
+            e
         )
     })?;
-    fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "versioned::write_json_atomic failed to rename {:?} -> {:?}",
-            tmp, path
-        )
-    })?;
+    sync_dir(parent)?;
     Ok(())
 }
 

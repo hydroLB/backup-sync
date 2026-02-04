@@ -153,6 +153,70 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.toggle-track {
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  position: relative;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+.toggle-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(245, 248, 255, 0.92);
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
+}
+.toggle input:checked + .toggle-track {
+  background: rgba(77, 210, 255, 0.18);
+  border-color: rgba(77, 210, 255, 0.55);
+}
+.toggle input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(20px);
+  background: var(--accent-strong);
+}
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+.toggle input:disabled + .toggle-track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .metric-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
