@@ -11,7 +11,7 @@ Backup Sync is a simple desktop backup app for space efficient, versioned backup
 - `docs` holds standards, perf baselines, and release notes
 
 ## System overview
-- Every 30 minutes, the daemon scans each configured folder and builds a snapshot manifest.
+- By default every 30 minutes (configurable), the daemon scans each configured folder and builds a snapshot manifest.
 - A new version is created only when the snapshot differs from the latest manifest (add, modify, delete).
 - File contents are stored in `.backup_sync/v1/blobs/sha256/...` keyed by SHA-256; manifests map relative paths to blob hashes plus metadata.
 - Each folder keeps N versions (default 5). When retention prunes old manifests, unreferenced blobs are garbage collected.
@@ -36,10 +36,9 @@ Quickstart (dev):
 2. Choose a backup destination (external drive/partition path).
 3. Add one or more folders to back up.
 4. Set “Backups to keep” per folder (default 5).
-5. Use:
-   - Start/Stop to pause or resume background writes (safe mode)
-   - Back up now for an immediate run
-   - Restore… to pick a folder + version and restore to a new directory or in place
+5. Use the Running toggle to pause or resume background writes (safe mode).
+6. Adjust the schedule via the interval (minutes) control.
+7. Use Restore version to pick a folder + version and restore to a new directory or in place.
 
 ### CLI
 - Status snapshot: `cargo run -p cli -- status`

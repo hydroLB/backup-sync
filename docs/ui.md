@@ -4,6 +4,10 @@
 
 Main screen:
 
+- Status
+  - Running toggle (pauses/resumes background writes using safe mode)
+  - Interval (minutes) editor for the scheduled scan cadence
+
 - Destination
   - Current destination path (external drive or partition)
   - Button: Choose…
@@ -16,13 +20,9 @@ Main screen:
     - Remove
   - Button: Add folder…
 
-- Actions
-  - Start/Stop (pause or resume background writes using safe mode)
-  - Back up now
-  - Restore…
-
 - Optional
   - Show log (collapsible log tail)
+  - Restore version button (opens folder + version restore flow)
 
 ## Component list
 
@@ -30,7 +30,8 @@ Frontend:
 - `crates/gui/frontend/src/components/minimal/MinimalMain.tsx`
   - Destination selector (Tauri directory picker)
   - Folder list editor (add/remove + keep versions per folder)
-  - Start/Stop, Back up now, Restore actions
+  - Running toggle and interval editor
+  - Restore version action
   - Log tail (hidden until toggled)
 - `crates/gui/frontend/src/components/minimal/RestoreModal.tsx`
   - Folder selector
@@ -39,7 +40,5 @@ Frontend:
 
 Backend commands:
 - `load_config_cmd`, `save_config_cmd`
-- `run_now_cmd`
 - `list_versions_cmd`, `restore_version_cmd`
 - `toggle_safe_mode_cmd` (also updates the running daemon when reachable)
-
