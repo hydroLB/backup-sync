@@ -1,4 +1,4 @@
-import { open } from '@tauri-apps/api/dialog';
+import { openDialog } from '../../../services/dialog';
 import { tauriAvailable } from '../../../services/ipc';
 
 /**
@@ -11,6 +11,38 @@ import { tauriAvailable } from '../../../services/ipc';
  * Why: Centralize picker behavior and IPC checks.
  */
 export function usePickers(popup: (msg: string) => void) {
+  /**
+   * Purpose: Pick a backup destination directory and return its path.
+   *
+   * Inputs: None.
+   * Outputs: The selected destination path, or `null` when canceled.
+   * Side effects: Opens an OS-native folder picker via Tauri.
+   * Error handling: Emits an actionable popup message and returns `null` on failure.
+   * Ties to other methods: Used by `pickDestination` and the minimal destination flow.
+   * Why this exists: Allow callers to open the picker immediately and perform work after selection.
+   */
+  const pickDestinationPath = async (): Promise<string | null> => {
+    try {
+      if (!tauriAvailable()) {
+        popup('Picker unavailable (IPC). Launch the app build to choose destination.');
+        return null;
+      }
+      const selection = await openDialog({
+        directory: true,
+        multiple: false,
+        title: 'Choose a backup destination',
+      });
+      if (typeof selection === 'string') {
+        return selection;
+      }
+      return null;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      popup(`[usePickers::pickDestinationPath] Picker failed: ${reason}`);
+      return null;
+    }
+  };
+
   /**
    * Purpose: Pick a file or directory and attach it to a destination.
    *
@@ -30,7 +62,7 @@ export function usePickers(popup: (msg: string) => void) {
         popup('Picker unavailable (IPC). Launch the app build to select paths.');
         return;
       }
-      const selection = await open({
+      const selection = await openDialog({
         directory: kind === 'Directory',
         multiple: false,
         title: kind === 'Directory' ? 'Choose folder to protect' : 'Choose file to protect',
@@ -58,26 +90,18 @@ export function usePickers(popup: (msg: string) => void) {
    */
   const pickDestination = async (onChosen: (path: string) => void) => {
     try {
-      if (!tauriAvailable()) {
-        popup('Picker unavailable (IPC). Launch the app build to choose destination.');
+      const selection = await pickDestinationPath();
+      if (!selection) {
+        popup('No destination selected or picker was closed.');
         return;
       }
-      const selection = await open({
-        directory: true,
-        multiple: false,
-        title: 'Choose a backup destination',
-      });
-      if (typeof selection === 'string') {
-        onChosen(selection);
-        popup(`Destination set to ${selection}`);
-      } else {
-        popup('No destination selected or picker was closed.');
-      }
+      onChosen(selection);
+      popup(`Destination set to ${selection}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[usePickers::pickDestination] Picker failed: ${reason}`);
     }
   };
 
-  return { pickPathForDest, pickDestination };
+  return { pickPathForDest, pickDestination, pickDestinationPath };
 }

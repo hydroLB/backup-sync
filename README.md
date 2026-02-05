@@ -23,8 +23,7 @@ Details: see `docs/storage.md` and `docs/ui.md`.
 1. Install Rust stable, Node 18 or newer, and npm.
 2. Enable git hooks with `make hooks`.
 3. Build everything with `make build`.
-4. Optional: set `BACKUP_SYNC_PASSPHRASE` to enable session locking for privileged actions, for example `export BACKUP_SYNC_PASSPHRASE="change-me"`.
-5. Run the desktop app with `make run`.
+4. Run the desktop app with `make run`.
 
 Quickstart (dev):
 - `./start` (builds prerequisites and launches the desktop app)
@@ -58,14 +57,8 @@ State file path:
 
 UI tuning knobs live in `crates/gui/frontend/src/config/uiTuning.ts`.
 Backend config defaults and guardrails are centralized in `crates/core/src/config/registry.rs`.
-
-Auth passphrase:
-- If `BACKUP_SYNC_PASSPHRASE` is set and non-empty, the Settings UI will require it to unlock privileged actions.
-- If unset, session locking is disabled and privileged actions are available without an unlock step.
-
 Security notes:
 - Run the daemon as your user account and avoid elevated privileges unless required by your platform.
-- Store `BACKUP_SYNC_PASSPHRASE` in a secure environment file or secret manager, not in the repo.
 
 Example config:
 ```toml
@@ -101,7 +94,6 @@ ipc_timeout_seconds = 5
 service_command_timeout_seconds = 15
 service_command_retry_delay_ms = 300
 service_command_poll_interval_ms = 50
-auth_unlock_seconds = 900
 gui_start_hidden = false
 tray_tooltip_refresh_seconds = 10
 log_tail_lines = 200

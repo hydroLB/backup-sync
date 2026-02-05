@@ -1,8 +1,6 @@
 use crate::api::{config_api, status_api};
-use crate::commands::auth;
 use crate::commands::error::ErrorEnvelope;
-use crate::commands::security;
-use tauri::State;
+use tauri::async_runtime;
 use tracing::warn;
 
 #[tauri::command]
@@ -33,9 +31,8 @@ pub fn load_config_cmd() -> Result<backup_core::Config, ErrorEnvelope> {
 pub fn save_config_cmd(
     cfg: backup_core::Config,
     correlation_id: Option<String>,
-    auth_state: State<auth::SessionAuth>,
 ) -> Result<(), ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
+    let _ = correlation_id;
     config_api::save_config(&cfg).map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_SAVE",
@@ -55,9 +52,8 @@ pub fn save_config_cmd(
 pub async fn toggle_safe_mode_cmd(
     desired: Option<bool>,
     correlation_id: Option<String>,
-    auth_state: State<'_, auth::SessionAuth>,
 ) -> Result<bool, ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
+    let _ = correlation_id;
     let mut cfg = config_api::get_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -72,8 +68,10 @@ pub async fn toggle_safe_mode_cmd(
             format!("config::toggle_safe_mode_cmd failed to save config: {}", e),
         )
     })?;
-    if let Err(e) = status_api::set_safe_mode(next).await {
-        warn!("config::toggle_safe_mode_cmd failed to update daemon safe mode: {e}");
-    }
+    async_runtime::spawn(async move {
+        if let Err(e) = status_api::set_safe_mode(next).await {
+            warn!("config::toggle_safe_mode_cmd failed to update daemon safe mode: {e}");
+        }
+    });
     Ok(next)
 }

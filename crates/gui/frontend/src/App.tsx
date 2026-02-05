@@ -1,10 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import StatusCard from './components/status/StatusCard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { RunNow } from './components/RunNow';
 import ActionLogFlyout, { ActionLogEntry } from './components/status/ActionLogFlyout';
 import { UI_TUNING } from './config/uiTuning';
 import { MinimalMain } from './components/minimal/MinimalMain';
+import { prewarmNativeApis } from './services/nativePrewarm';
+
+type IdleCallbackHandle = number;
+type IdleCallbackFn = (deadline: unknown) => void;
+type IdleCallbackOptions = { timeout?: number };
 
 /**
  * Purpose: Render the top-level application shell and coordinate shared UI state.
@@ -25,6 +30,28 @@ export default function App() {
       return false;
     }
   }, []);
+
+  useEffect(() => {
+    const run = () => {
+      void prewarmNativeApis();
+    };
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: IdleCallbackFn, opts?: IdleCallbackOptions) => IdleCallbackHandle;
+      cancelIdleCallback?: (id: IdleCallbackHandle) => void;
+    };
+    if (typeof window !== 'undefined' && typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(run, { timeout: 2000 });
+      return () => {
+        try {
+          w.cancelIdleCallback?.(id);
+        } catch {
+          // ignore
+        }
+      };
+    }
+    const id = setTimeout(run, 50);
+    return () => clearTimeout(id);
+  }, []);
   /**
    * Purpose: Append a new action entry to the in-memory activity feed.
    *
@@ -34,8 +61,11 @@ export default function App() {
    * Side effects: Updates React state for the action log.
    * Why: Keeps operator feedback visible without touching persistent state.
    */
-  const recordAction = (msg: string, kind: 'ok' | 'error' | 'info' = 'info') => {
+  const recordAction = useCallback((msg: string, kind: 'ok' | 'error' | 'info' = 'info') => {
     try {
+      if (!legacy) {
+        return;
+      }
       setActionLog((prev) => {
         const next = [...prev, { msg, kind, ts: Date.now() / 1000 }];
         return next.slice(-UI_TUNING.actionLogLimit);
@@ -44,7 +74,7 @@ export default function App() {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`[App.recordAction] Failed to append action log entry: ${reason}`);
     }
-  };
+  }, [legacy]);
 
   try {
     if (legacy) {

@@ -4,6 +4,5 @@ export * from './backup';
 export * from './restore';
 export * from './logs';
 export * from './system';
-export * from './auth';
 export * from './correlation';
 export * from './ipc';

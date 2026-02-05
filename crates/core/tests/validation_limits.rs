@@ -54,20 +54,20 @@ fn base_config(backup_root: std::path::PathBuf, watched: Vec<WatchedPath>) -> Co
 }
 
 #[test]
-/// Purpose: Ensures validation rejects configs without watched paths.
+/// Purpose: Ensures validation allows configs without watched paths.
 ///
 /// Inputs: a temp directory and an empty watched list.
-/// Outputs: a failed validation result.
+/// Outputs: a successful validation result.
 /// Ties to: config validation error handling.
 /// Side effects: None.
-/// Why: prevent empty configurations from running.
-fn validate_rejects_empty_watched_list() {
+/// Why: allow users to set destinations and schedules before selecting folders.
+fn validate_allows_empty_watched_list() {
     let dir = tempdir()
-        .expect("validation_limits::validate_rejects_empty_watched_list failed to create temp dir");
+        .expect("validation_limits::validate_allows_empty_watched_list failed to create temp dir");
     let cfg = base_config(dir.path().join("backups"), vec![]);
     assert!(
-        validate::validate(&cfg).is_err(),
-        "expected validation to fail when watched list is empty"
+        validate::validate(&cfg).is_ok(),
+        "expected validation to succeed when watched list is empty"
     );
 }
 

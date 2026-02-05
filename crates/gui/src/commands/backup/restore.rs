@@ -1,5 +1,5 @@
+use crate::commands::correlation;
 use crate::commands::error::ErrorEnvelope;
-use crate::commands::{auth::SessionAuth, security};
 use backup_core::backup::versioned::restore::{
     list_versions, restore_version, RestoreMode, RestoreRequest,
 };
@@ -44,10 +44,8 @@ pub struct RestoreResultDto {
 #[tauri::command]
 pub async fn list_versions_cmd(
     correlation_id: Option<String>,
-    auth_state: tauri::State<'_, SessionAuth>,
 ) -> Result<Vec<FolderVersionsDto>, ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
-    let cid = security::cid("restore_list", correlation_id);
+    let cid = correlation::cid("restore_list", correlation_id);
     let cfg = load_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -92,10 +90,8 @@ pub async fn list_versions_cmd(
 pub async fn restore_version_cmd(
     args: RestoreArgs,
     correlation_id: Option<String>,
-    auth_state: tauri::State<'_, SessionAuth>,
 ) -> Result<RestoreResultDto, ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
-    let cid = security::cid("restore", correlation_id);
+    let cid = correlation::cid("restore", correlation_id);
     let cfg = load_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",

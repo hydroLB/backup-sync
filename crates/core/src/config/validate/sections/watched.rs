@@ -8,19 +8,11 @@ use super::destinations::DestinationIndex;
 /// Purpose: Validates watched list presence and enabled state.
 ///
 /// Inputs: the config and label prefix.
-/// Outputs: `Ok(())` when at least one watched path is present and enabled.
-/// Ties to: daemon and CLI startup flows.
+/// Outputs: `Ok(())` when the watched list is well-formed for persistence.
+/// Ties to: daemon and GUI config save flows.
 /// Side effects: None.
-/// Why: avoid running backup cycles with no work configured.
-pub(crate) fn validate_presence(cfg: &Config, label: &str) -> Result<()> {
-    if cfg.watched.is_empty() {
-        bail!(
-            "{label} no watched paths configured; run `backup-sync init` or add a folder in the app"
-        );
-    }
-    if !cfg.watched.iter().any(|w| w.enabled) {
-        bail!("{label} all watched paths are disabled; enable at least one to run backups");
-    }
+/// Why: allow users to configure destinations and schedules before selecting folders.
+pub(crate) fn validate_presence(_cfg: &Config, _label: &str) -> Result<()> {
     Ok(())
 }
 
@@ -53,8 +45,13 @@ pub(crate) fn validate_paths(
     label: &str,
     destinations: &DestinationIndex<'_>,
 ) -> Result<()> {
+    if cfg.watched.is_empty() {
+        return Ok(());
+    }
     if !cfg.watched.iter().any(|w| w.path.exists()) {
-        bail!("{label} none of the watched paths exist on disk; add an existing folder or file");
+        tracing::warn!(
+            "{label} none of the watched paths exist on disk; backups will be idle until one is available"
+        );
     }
 
     // prevent recursive/overlapping paths and duplicates

@@ -1,5 +1,5 @@
+use crate::commands::correlation;
 use crate::commands::error::ErrorEnvelope;
-use crate::commands::{auth::SessionAuth, security};
 use backup_core::{
     backup::versioned, load_config, platform::paths, state::store::StateStore, validate,
 };
@@ -74,12 +74,8 @@ fn load_state_store(
 /// Ties to: GUI run now actions and state persistence.
 /// Side effects: Reads config/state, performs backup IO, and writes state updates.
 /// Why: provide an on demand run path for the UI.
-pub async fn run_now_cmd(
-    correlation_id: Option<String>,
-    auth_state: tauri::State<'_, SessionAuth>,
-) -> Result<(), ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
-    let cid = security::cid("run", correlation_id);
+pub async fn run_now_cmd(correlation_id: Option<String>) -> Result<(), ErrorEnvelope> {
+    let cid = correlation::cid("run", correlation_id);
     eprintln!("[cid={}] run_now start", cid);
     let cfg = load_and_validate_config(&cid)?;
     if cfg.safe_mode {
@@ -153,7 +149,7 @@ pub struct SimulationResult {
 pub async fn run_simulate_cmd(
     correlation_id: Option<String>,
 ) -> Result<SimulationResult, ErrorEnvelope> {
-    let cid = security::cid("sim", correlation_id);
+    let cid = correlation::cid("sim", correlation_id);
     eprintln!("[cid={}] simulate start", cid);
     Ok(SimulationResult {
         items: 0,

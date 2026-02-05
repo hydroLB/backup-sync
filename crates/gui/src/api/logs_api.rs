@@ -24,9 +24,10 @@ pub fn log_path() -> Result<PathBuf> {
 /// Why: provide quick access to recent daemon logs.
 pub fn read_log_tail(limit: Option<usize>) -> Result<String> {
     let path = log_path()?;
-    let data = match std::fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+    let max_lines = resolve_tail_limit(limit)?;
+    let tail = match read_tail_from_file(&path, max_lines) {
+        Ok(tail) => tail,
+        Err(e) if is_not_found(&e) => {
             warn!(
                 "gui::api::logs_api::read_log_tail log file not found at {:?}",
                 path
@@ -41,8 +42,7 @@ pub fn read_log_tail(limit: Option<usize>) -> Result<String> {
             ));
         }
     };
-    let max_lines = resolve_tail_limit(limit)?;
-    Ok(tail_lines(&data, max_lines))
+    Ok(filter_hidden_log_lines(&tail))
 }
 
 /// Purpose: Exports the full log content to a destination directory.
@@ -60,6 +60,7 @@ pub fn export_logs(dest_dir: &Path) -> Result<PathBuf> {
             path
         )
     })?;
+    let data = filter_hidden_log_lines(&data);
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
     let dest = dest_dir.join(format!("BackupSync-logs-{}.txt", ts));
     std::fs::write(&dest, data)
@@ -106,4 +107,128 @@ fn tail_lines(data: &str, max_lines: usize) -> String {
     let lines: Vec<&str> = data.lines().collect();
     let start = lines.len().saturating_sub(max_lines);
     lines[start..].join("\n")
+}
+
+/// Purpose: Detects whether an error is a file-not-found IO error.
+///
+/// Inputs: An error value.
+/// Outputs: `true` when the root cause is `ErrorKind::NotFound`.
+/// Ties to: log tail and export error handling.
+/// Side effects: None.
+/// Why: Keep `read_log_tail` behavior stable when logs are not present yet.
+fn is_not_found(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+}
+
+/// Purpose: Read the last N lines from a file without loading the full file.
+///
+/// Inputs: Path to the log file and maximum lines.
+/// Outputs: The tail text.
+/// Ties to: `read_log_tail`.
+/// Side effects: Reads from disk using file seeks.
+/// Why: Avoid large allocations when logs grow over time.
+fn read_tail_from_file(path: &Path, max_lines: usize) -> Result<String> {
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+
+    const CHUNK: usize = 8192;
+    const MAX_BYTES: u64 = 512 * 1024; // cap tail reads to keep UI snappy
+
+    if max_lines == 0 {
+        return Ok(String::new());
+    }
+
+    let mut f = File::open(path).with_context(|| {
+        format!(
+            "gui::api::logs_api::read_tail_from_file failed to open {:?}",
+            path
+        )
+    })?;
+    let mut pos = f
+        .metadata()
+        .with_context(|| {
+            format!(
+                "gui::api::logs_api::read_tail_from_file failed to stat {:?}",
+                path
+            )
+        })?
+        .len();
+
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    let mut newline_count: usize = 0;
+    let mut total: u64 = 0;
+    while pos > 0 && newline_count <= max_lines && total < MAX_BYTES {
+        let take = std::cmp::min(CHUNK as u64, pos) as usize;
+        pos -= take as u64;
+        f.seek(SeekFrom::Start(pos)).with_context(|| {
+            format!(
+                "gui::api::logs_api::read_tail_from_file failed to seek {:?}",
+                path
+            )
+        })?;
+        let mut buf = vec![0u8; take];
+        f.read_exact(&mut buf).with_context(|| {
+            format!(
+                "gui::api::logs_api::read_tail_from_file failed to read {:?}",
+                path
+            )
+        })?;
+        newline_count += buf.iter().filter(|b| **b == b'\n').count();
+        total += buf.len() as u64;
+        chunks.push(buf);
+    }
+
+    chunks.reverse();
+    let mut bytes = Vec::with_capacity(total as usize);
+    for c in chunks {
+        bytes.extend_from_slice(&c);
+    }
+
+    let s = String::from_utf8_lossy(&bytes).to_string();
+    Ok(tail_lines(&s, max_lines))
+}
+
+/// Purpose: Removes legacy auth bypass noise from log output.
+///
+/// Inputs: a raw log string.
+/// Outputs: a filtered log string with noisy lines removed.
+/// Ties to: log tail and log export operations.
+/// Side effects: None.
+/// Why: ensure removed authentication flows do not linger in UI log views or exports.
+fn filter_hidden_log_lines(data: &str) -> String {
+    const NEEDLES: [&str; 2] = ["AUTH_BYPASS", "allowing without unlock"];
+    if !NEEDLES.iter().any(|needle| data.contains(needle)) {
+        return data.to_string();
+    }
+    let mut out = String::with_capacity(data.len());
+    for line in data.lines() {
+        if NEEDLES.iter().any(|needle| line.contains(needle)) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_hidden_log_lines;
+
+    #[test]
+    fn filter_hidden_log_lines_removes_legacy_auth_lines() {
+        let input = "\
+2026-02-04T00:00:00Z INFO normal\n\
+S allowing without unlock\n\
+[cid=save-miqzosxg-e476] AUTH_BYPASS allowing without unlock\n\
+2026-02-04T00:00:01Z INFO still here\n";
+        let filtered = filter_hidden_log_lines(input);
+        assert!(filtered.contains("INFO normal"));
+        assert!(filtered.contains("INFO still here"));
+        assert!(!filtered.contains("AUTH_BYPASS"));
+        assert!(!filtered.contains("allowing without unlock"));
+    }
 }

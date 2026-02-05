@@ -89,6 +89,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   const [cfg, setCfg] = useState<Config | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [runningBusy, setRunningBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [logTail, setLogTail] = useState<string>('');
   const [restoreOpen, setRestoreOpen] = useState(false);
@@ -190,35 +191,44 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
    * Ties to other methods: Uses `setSafeMode` to update the running daemon when reachable.
    * Why this exists: Present a single running toggle instead of Start/Stop action buttons.
    */
+  const applyRunningChange = async (running: boolean) => {
+    const desiredSafeMode = !running;
+    const previousSafeMode = cfg?.safe_mode ?? false;
+    setCfg((prev) => (prev ? { ...prev, safe_mode: desiredSafeMode } : prev));
+    try {
+      const nextSafeMode = await setSafeMode(desiredSafeMode);
+      setCfg((prev) => (prev ? { ...prev, safe_mode: nextSafeMode } : prev));
+      onEvent(nextSafeMode ? 'Paused.' : 'Running.', 'ok');
+    } catch (error) {
+      setCfg((prev) => (prev ? { ...prev, safe_mode: previousSafeMode } : prev));
+      throw error;
+    }
+  };
+
   const setRunning = async (running: boolean) => {
     if (!cfg) return;
     try {
-      setBusy(true);
-      const desiredSafeMode = !running;
-      const nextSafeMode = await setSafeMode(desiredSafeMode);
-      const next: Config = { ...cfg, safe_mode: nextSafeMode };
-      setCfg(next);
-      onEvent(nextSafeMode ? 'Paused.' : 'Running.', 'ok');
+      setRunningBusy(true);
+      await applyRunningChange(running);
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       onEvent(`Failed to change running state: ${reason}`, 'error');
     } finally {
-      setBusy(false);
+      setRunningBusy(false);
     }
   };
 
   const chooseDestination = async () => {
     if (!cfg) return;
+    const picked = await pickers.pickDestinationPath();
+    if (!picked) return;
     const { cfg: normalized, dest } = ensurePrimaryDestination(cfg);
-    if (normalized !== cfg) setCfg(normalized);
-    await pickers.pickDestination(async (path) => {
-      const next: Config = {
-        ...normalized,
-        backup_root: path,
-        destinations: [{ ...dest, path }],
-      };
-      await persist(next);
-    });
+    const next: Config = {
+      ...normalized,
+      backup_root: picked,
+      destinations: [{ ...dest, path: picked }],
+    };
+    await persist(next);
   };
 
   const addFolder = async () => {
@@ -290,93 +300,83 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
 
   return (
     <div className="app">
-      <div
-        className="hero"
-        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-      >
-        <div style={{ display: 'grid', gap: 4 }}>
+      <div className="hero hero-row">
+        <div className="hero-left">
           <h1>Local Backup Manager</h1>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={!cfg.safe_mode}
-                disabled={busy}
-                aria-label="Running"
-                onChange={(e) => setRunning(e.target.checked)}
-              />
-              <span className="toggle-track" aria-hidden="true">
-                <span className="toggle-thumb" />
-              </span>
-              <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                {cfg.safe_mode ? 'Paused' : 'Running'}
-              </span>
-            </label>
-            <div className="pill" style={{ width: 'fit-content' }} title="Backup schedule interval">
-              Every
-              <input
-                type="number"
-                min={1}
-                max={60 * 24 * 30}
-                value={intervalMinutesDraft}
-                disabled={busy}
-                aria-label="Backup interval minutes"
-                onFocus={() => setIntervalEditing(true)}
-                onBlur={() => {
-                  setIntervalEditing(false);
-                  commitIntervalMinutes(intervalMinutesDraft);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  setIntervalEditing(false);
-                  commitIntervalMinutes(intervalMinutesDraft);
-                }}
-                onChange={(e) => setIntervalMinutesDraft(e.target.value)}
-                style={{
-                  width: 84,
-                  height: 28,
-                  padding: '0 8px',
-                  borderRadius: 10,
-                  border: '1px solid var(--border)',
-                  background: 'rgba(255,255,255,0.06)',
-                  color: 'var(--text)',
-                  fontSize: 13,
-                  textAlign: 'center',
-                }}
-              />
-              min
+          <div className="hero-controls">
+            <div className="control-strip" aria-label="Backup controls">
+              <label className="toggle toggle-stack">
+                <input
+                  type="checkbox"
+                  checked={!cfg.safe_mode}
+                  disabled={busy || runningBusy}
+                  aria-label="Running"
+                  onChange={(e) => setRunning(e.target.checked)}
+                />
+                <span className="toggle-track" aria-hidden="true">
+                  <span className="toggle-thumb" />
+                </span>
+                <span className="toggle-status">{cfg.safe_mode ? 'Paused' : 'Running'}</span>
+              </label>
+              <div className="pill schedule-pill" title="Backup schedule interval">
+                <span>Every</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={60 * 24 * 30}
+                  value={intervalMinutesDraft}
+                  disabled={busy}
+                  aria-label="Backup interval minutes"
+                  className="schedule-input"
+                  onFocus={() => setIntervalEditing(true)}
+                  onBlur={(e) => {
+                    const value = e.currentTarget.value;
+                    void (async () => {
+                      try {
+                        await commitIntervalMinutes(value);
+                      } finally {
+                        setIntervalEditing(false);
+                      }
+                    })();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }}
+                  onChange={(e) => setIntervalMinutesDraft(e.target.value)}
+                />
+                <span>min</span>
+              </div>
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button
-            className="btn"
-            onClick={() => setRestoreOpen(true)}
-            disabled={busy || watchedDirs.length === 0}
-            title="Pick a folder and version to restore."
-          >
-            Restore version
-          </button>
-          <button className="btn secondary" onClick={() => setShowLog((v) => !v)} disabled={busy}>
-            {showLog ? 'Hide log' : 'Show log'}
-          </button>
+        <div className="hero-actions">
+          <div className="action-strip" aria-label="Header actions">
+            <button
+              className="btn"
+              onClick={() => setRestoreOpen(true)}
+              disabled={busy || watchedDirs.length === 0}
+              title="Pick a folder and version to restore."
+            >
+              Restore version
+            </button>
+            <button
+              className="btn secondary"
+              onClick={() => setShowLog((v) => !v)}
+              disabled={busy}
+            >
+              {showLog ? 'Hide log' : 'Show log'}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 10 }}>
+      <div className="grid">
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Destination</h3>
-          <div className="pill" title={primary.path} style={{ justifyContent: 'space-between' }}>
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                maxWidth: 720,
-              }}
-            >
-              {primary.path || 'Choose a destination'}
-            </span>
+          <h2 className="section-heading">Destination</h2>
+          <div className="pill pill-row mt-3" title={primary.path}>
+            <span className="pill-main truncate">{primary.path || 'Choose a destination'}</span>
             <button className="btn secondary" onClick={chooseDestination} disabled={busy}>
               Choose…
             </button>
@@ -384,47 +384,31 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         </div>
 
         <div className="card">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 10,
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 0 }}>Folders</h3>
+          <div className="section-title">
+            <h2 className="section-heading">Folders</h2>
             <button className="btn secondary" onClick={addFolder} disabled={busy}>
               Add folder…
             </button>
           </div>
           {watchedDirs.length === 0 ? (
-            <p style={{ marginTop: 10, color: 'var(--muted)', fontSize: 13 }}>
+            <p className="mt-3 text-sm muted">
               Add one or more folders to back up.
             </p>
           ) : (
-            <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
+            <div className="stack folder-list">
               {watchedDirs.map((w) => (
                 <div
                   key={w.path}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 220px 96px',
-                    gap: 8,
-                    alignItems: 'center',
-                  }}
+                  className="folder-row"
                 >
                   <div className="pill" title={w.path}>
-                    <span
-                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    >
-                      {w.path}
-                    </span>
+                    <span className="pill-main truncate">{w.path}</span>
                   </div>
-                  <div style={{ display: 'grid', gap: 4 }}>
-                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>Backups to keep</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="stack-sm">
+                    <span className="muted text-xs">Backups to keep</span>
+                    <div className="stepper">
                       <button
-                        className="btn secondary"
+                        className="btn secondary stepper-btn"
                         type="button"
                         onClick={() =>
                           updateKeep(
@@ -433,12 +417,12 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
                           )
                         }
                         disabled={busy}
-                        style={{ minWidth: 44, height: 38, padding: 0 }}
                         aria-label="Decrease backups to keep"
                       >
                         -
                       </button>
                       <input
+                        className="stepper-input"
                         type="number"
                         min={0}
                         max={1000}
@@ -449,22 +433,9 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
                           updateKeep(w.path, n);
                         }}
                         disabled={busy}
-                        style={{
-                          width: 92,
-                          height: 38,
-                          padding: '0 10px',
-                          borderRadius: 10,
-                          border: '1px solid var(--border)',
-                          background: 'rgba(255,255,255,0.06)',
-                          color: 'var(--text)',
-                          fontSize: 16,
-                          textAlign: 'center',
-                          appearance: 'textfield',
-                          MozAppearance: 'textfield',
-                        }}
                       />
                       <button
-                        className="btn secondary"
+                        className="btn secondary stepper-btn"
                         type="button"
                         onClick={() =>
                           updateKeep(
@@ -473,7 +444,6 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
                           )
                         }
                         disabled={busy}
-                        style={{ minWidth: 44, height: 38, padding: 0 }}
                         aria-label="Increase backups to keep"
                       >
                         +
@@ -495,32 +465,13 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
 
         {showLog && (
           <div className="card">
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 10,
-              }}
-            >
-              <h3 style={{ marginTop: 0, marginBottom: 0 }}>Log</h3>
+            <div className="section-title">
+              <h2 className="section-heading">Log</h2>
               <button className="btn secondary" onClick={refreshLog} disabled={busy}>
                 Refresh
               </button>
             </div>
-            <pre
-              style={{
-                marginTop: 10,
-                marginBottom: 0,
-                padding: 10,
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'rgba(0,0,0,0.25)',
-                maxHeight: 260,
-                overflow: 'auto',
-                fontSize: 12,
-              }}
-            >
+            <pre className="log-pre">
               {logTail || '(no logs yet)'}
             </pre>
           </div>

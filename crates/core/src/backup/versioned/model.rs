@@ -1,3 +1,4 @@
+use crate::fs::snapshots::SourceSnapshotInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -54,6 +55,10 @@ pub struct Manifest {
     pub schema_version: u32,
     pub source_path: String,
     pub created_at_unix: i64,
+    #[serde(default)]
+    pub source_snapshot: Option<SourceSnapshotInfo>,
+    #[serde(default)]
+    pub source_snapshot_error: Option<String>,
     #[serde(default)]
     pub read_failures: Vec<ReadFailure>,
     pub entries: BTreeMap<String, ManifestEntry>,

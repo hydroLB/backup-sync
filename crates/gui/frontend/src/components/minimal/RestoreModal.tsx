@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { open } from '@tauri-apps/api/dialog';
 import { FolderVersionsDto, RestoreModeDto } from '../../services/types';
 import { listVersions, restoreVersion } from '../../services/restore';
+import { openDialog } from '../../services/dialog';
 
 type Props = {
   open: boolean;
@@ -70,7 +70,7 @@ export function RestoreModal({ open: isOpen, onClose, onEvent }: Props) {
 
   const pickTargetDir = async () => {
     try {
-      const selection = await open({
+      const selection = await openDialog({
         directory: true,
         multiple: false,
         title: 'Choose a restore destination folder',
@@ -129,47 +129,27 @@ export function RestoreModal({ open: isOpen, onClose, onEvent }: Props) {
   if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 12,
-        zIndex: 50,
-      }}
-      onClick={onClose}
-    >
+    <div className="modal-overlay" onClick={onClose}>
       <div
-        className="card"
-        style={{ width: 640, maxWidth: '100%' }}
+        className="card modal-card"
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Restore</h3>
+        <div className="modal-header">
+          <h2 className="section-heading">Restore</h2>
           <button className="btn secondary" onClick={onClose} disabled={busy}>
             Close
           </button>
         </div>
-        <p style={{ marginTop: 8, marginBottom: 10, color: 'var(--muted)', fontSize: 13 }}>
+        <p className="modal-help">
           Choose a folder and version to restore. Restore in place will also delete files that
           should not exist in that version.
         </p>
 
         {loading && <div className="pill">Loading versions…</div>}
 
-        <div style={{ display: 'grid', gap: 10 }}>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Folder</span>
+        <div className="stack">
+          <label>
+            <span>Folder</span>
             <select
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
@@ -183,8 +163,8 @@ export function RestoreModal({ open: isOpen, onClose, onEvent }: Props) {
             </select>
           </label>
 
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Version</span>
+          <label>
+            <span>Version</span>
             <select
               value={versionId}
               onChange={(e) => setVersionId(e.target.value)}
@@ -198,8 +178,8 @@ export function RestoreModal({ open: isOpen, onClose, onEvent }: Props) {
             </select>
           </label>
 
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Restore mode</span>
+          <label>
+            <span>Restore mode</span>
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value as RestoreModeDto)}
@@ -211,20 +191,9 @@ export function RestoreModal({ open: isOpen, onClose, onEvent }: Props) {
           </label>
 
           {mode === 'to_directory' && (
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div
-                className="pill"
-                title={targetDir || ''}
-                style={{ justifyContent: 'space-between' }}
-              >
-                <span
-                  style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    maxWidth: 520,
-                  }}
-                >
+            <div className="stack">
+              <div className="pill pill-row" title={targetDir || ''}>
+                <span className="pill-main truncate">
                   {targetDir || 'Choose a restore destination folder'}
                 </span>
                 <button

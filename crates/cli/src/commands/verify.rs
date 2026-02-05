@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
-use backup_core::{
-    load_config, platform::paths, state::store::StateStore, verify_backups as core_verify,
-};
+use backup_core::{backup::versioned, load_config, platform::paths, state::store::StateStore};
+use chrono::Utc;
 
 /// Purpose: Verifies backups by rehashing the most recent copies.
 ///
@@ -16,16 +15,33 @@ pub async fn verify_backups() -> Result<()> {
         paths::state_file_path().context("cli::verify_backups failed to resolve state path")?;
     let (mut state, store) = StateStore::load_or_default(state_path)
         .context("cli::verify_backups failed to load state")?;
-    if state.files.is_empty() {
-        println!("No backups recorded yet.");
-        return Ok(());
-    }
-    let (ok, bad) = core_verify(&mut state, &cfg.hashing)
-        .context("cli::verify_backups failed during verification")?;
+    let now = Utc::now().timestamp();
+    let res = versioned::scrub_versioned_store(
+        &cfg,
+        &cfg.hashing,
+        versioned::ScrubMode::Full,
+        cfg.runtime.scrub_sample_blobs,
+        cfg.runtime.scrub_sample_versions_per_source,
+        now as u64,
+    )
+    .context("cli::verify_backups failed during scrub")?;
+    let bad = res.hash_mismatches + res.missing_blobs + res.manifests_bad;
+    let ok = res.blobs_hashed.saturating_sub(res.hash_mismatches);
+    state.last_verify_ts = Some(now);
+    state.last_verify_issues = Some(bad);
+    state.last_verify_status = Some(if bad == 0 {
+        "ok (full)".into()
+    } else {
+        "issues_detected (full)".into()
+    });
+    state.last_scrub_full_ts = Some(now);
     store
         .persist(&state)
         .context("cli::verify_backups failed to persist state")?;
-    println!("Verification complete: {ok} ok, {bad} issues");
+    println!(
+        "Scrub complete: mode=full hashed={} ok={} missing={} mismatches={} manifest_issues={}",
+        res.blobs_hashed, ok, res.missing_blobs, res.hash_mismatches, res.manifests_bad
+    );
     if bad > 0 {
         anyhow::bail!("cli::verify_backups detected {bad} backup integrity issues");
     }

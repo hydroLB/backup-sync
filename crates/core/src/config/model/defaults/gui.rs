@@ -1,14 +1,3 @@
-/// Purpose: Supplies the default GUI auth unlock duration in seconds.
-///
-/// Inputs: None.
-/// Outputs: The auth unlock duration in seconds.
-/// Ties to: GUI session unlock timing.
-/// Side effects: None.
-/// Why: Keep unlock duration configurable without code changes.
-pub(crate) fn default_auth_unlock_seconds() -> u64 {
-    15 * 60
-}
-
 /// Purpose: Supplies the default tray tooltip refresh interval in seconds.
 ///
 /// Inputs: None.

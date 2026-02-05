@@ -3,6 +3,7 @@ use super::model::{
     VersionInfo,
 };
 use crate::config::model::{Config, Destination, WatchedKind, WatchedPath};
+use crate::fs::snapshots::prepare_source_view;
 use crate::logging::redact_path;
 use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -164,9 +165,8 @@ where
             }
         }
     }
-    Err(last_err
-        .unwrap_or_else(|| anyhow::anyhow!("{label} failed (no error captured)")))
-    .with_context(|| format!("{label} failed after {max_attempts} attempts"))
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("{label} failed (no error captured)")))
+        .with_context(|| format!("{label} failed after {max_attempts} attempts"))
 }
 
 pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
@@ -234,7 +234,21 @@ fn backup_one_folder(
 
     let mut index = load_index(&source_root, &desc.source_path)?;
     let prev = latest_manifest(&manifests_root, &index)?;
-    let mut snapshot = scan_snapshot(cfg, watched, &prev, &retry_delays)?;
+    let source_view = prepare_source_view(
+        &watched.path,
+        cfg.runtime.source_snapshots_enabled,
+        cfg.runtime.source_snapshot_timeout_seconds,
+    )?;
+    if let Some(err) = source_view.snapshot_error() {
+        tracing::warn!(
+            source_path = %redact_path(&watched.path),
+            error = %err,
+            "versioned backup could not obtain a snapshot view; scanning live filesystem"
+        );
+    }
+    let mut snapshot = scan_snapshot(cfg, watched, source_view.scan_path(), &prev, &retry_delays)?;
+    snapshot.source_snapshot = source_view.snapshot().cloned();
+    snapshot.source_snapshot_error = source_view.snapshot_error().map(|s| s.to_string());
     let mut had_read_failures = !snapshot.read_failures.is_empty();
     let changed = match &prev {
         None => true,
@@ -291,8 +305,8 @@ fn backup_one_folder(
             continue;
         }
         let src_path = match watched.kind {
-            WatchedKind::File => desc.source_path.clone(),
-            WatchedKind::Directory => desc.source_path.join(Path::new(&rel_path)),
+            WatchedKind::File => source_view.scan_path().to_path_buf(),
+            WatchedKind::Directory => source_view.scan_path().join(Path::new(&rel_path)),
         };
         match write_blob(
             &src_path,
@@ -315,7 +329,9 @@ fn backup_one_folder(
                 });
                 if let Some(prev_manifest) = prev.as_ref() {
                     if let Some(prev_entry) = prev_manifest.entries.get(&rel_path) {
-                        snapshot.entries.insert(rel_path.clone(), prev_entry.clone());
+                        snapshot
+                            .entries
+                            .insert(rel_path.clone(), prev_entry.clone());
                     } else {
                         snapshot.entries.remove(&rel_path);
                     }
@@ -340,12 +356,14 @@ fn backup_one_folder(
         });
     }
 
-    write_json_atomic_durable(&manifest_path, &snapshot, &desc.destination_root).with_context(|| {
-        format!(
-            "versioned::backup_one_folder failed to write manifest {:?}",
-            manifest_path
-        )
-    })?;
+    write_json_atomic_durable(&manifest_path, &snapshot, &desc.destination_root).with_context(
+        || {
+            format!(
+                "versioned::backup_one_folder failed to write manifest {:?}",
+                manifest_path
+            )
+        },
+    )?;
 
     index.schema_version = STORE_SCHEMA_VERSION;
     index.source_path = desc.source_path.to_string_lossy().into_owned();
@@ -436,7 +454,7 @@ fn write_blob(
 
     let label = format!("versioned::write_blob {:?} -> {:?}", src_path, blob_path);
     let (written, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
-        write_blob_once(src_path, blob_path, timeout_seconds, durability_root)
+        write_blob_once(src_path, blob_path, timeout_seconds)
     })?;
     Ok((1, written))
 }
@@ -444,20 +462,14 @@ fn write_blob(
 /**
  * Summary: Single-attempt blob write (used by retry wrapper).
  *
- * Inputs: Source file path, destination blob path, timeout in seconds, and `durability_root`.
+ * Inputs: Source file path, destination blob path, and timeout in seconds.
  * Outputs: Number of bytes written to the blob temp file.
  * Side effects: Reads from source, writes temp file, fsyncs, renames, and fsyncs the parent directory.
  * Error handling: Returns contextual errors for IO, timeout, fsync, and rename operations.
  * Ties to other methods: Called by `write_blob` via `retry_with_backoff`.
  * Why this exists: Allow clean retry semantics without partial blob files surviving failed attempts.
  */
-fn write_blob_once(
-    src_path: &Path,
-    blob_path: &Path,
-    timeout_seconds: u64,
-    durability_root: &Path,
-) -> Result<u64> {
-    let _ = durability_root;
+fn write_blob_once(src_path: &Path, blob_path: &Path, timeout_seconds: u64) -> Result<u64> {
     let start = Instant::now();
     let mut file = fs::File::open(src_path).with_context(|| {
         format!(
@@ -468,8 +480,8 @@ fn write_blob_once(
     let parent = blob_path
         .parent()
         .context("versioned::write_blob_once missing blob parent")?;
-    let mut temp =
-        tempfile::NamedTempFile::new_in(parent).context("versioned::write_blob_once temp create")?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .context("versioned::write_blob_once temp create")?;
     let mut buf = vec![0u8; 64 * 1024];
     let mut written: u64 = 0;
     loop {
@@ -520,6 +532,7 @@ fn write_blob_once(
 fn scan_snapshot(
     cfg: &Config,
     watched: &WatchedPath,
+    scan_path: &Path,
     prev: &Option<Manifest>,
     retry_delays: &[Duration],
 ) -> Result<Manifest> {
@@ -548,7 +561,7 @@ fn scan_snapshot(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "file".to_string());
             match scan_one_file(
-                &watched.path,
+                scan_path,
                 &name,
                 cfg.hashing.timeout_seconds,
                 retry_delays,
@@ -558,9 +571,10 @@ fn scan_snapshot(
                     entries.insert(name.clone(), e);
                 }
                 Err(error) => {
+                    let phase = classify_scan_failure(&error);
                     read_failures.push(ReadFailure {
                         rel_path: name.clone(),
-                        phase: ReadFailurePhase::Hash,
+                        phase,
                         attempts: (retry_delays.len() + 1) as u32,
                         message: format!("{error:#}"),
                     });
@@ -573,7 +587,7 @@ fn scan_snapshot(
             }
         }
         WatchedKind::Directory => {
-            for item in walkdir::WalkDir::new(&watched.path)
+            for item in walkdir::WalkDir::new(scan_path)
                 .follow_links(false)
                 .into_iter()
             {
@@ -582,7 +596,7 @@ fn scan_snapshot(
                     Err(e) => {
                         let rel_str = e
                             .path()
-                            .and_then(|p| p.strip_prefix(&watched.path).ok())
+                            .and_then(|p| p.strip_prefix(scan_path).ok())
                             .map(normalize_rel)
                             .unwrap_or_else(|| "<walk_error>".to_string());
                         read_failures.push(ReadFailure {
@@ -596,7 +610,7 @@ fn scan_snapshot(
                     }
                 };
                 let path = item.path();
-                let rel = path.strip_prefix(&watched.path).unwrap_or(path);
+                let rel = path.strip_prefix(scan_path).unwrap_or(path);
                 if rel.as_os_str().is_empty() {
                     continue;
                 }
@@ -634,9 +648,10 @@ fn scan_snapshot(
                             entries.insert(rel_str.clone(), entry);
                         }
                         Err(error) => {
+                            let phase = classify_scan_failure(&error);
                             read_failures.push(ReadFailure {
                                 rel_path: rel_str.clone(),
-                                phase: ReadFailurePhase::Hash,
+                                phase,
                                 attempts: (retry_delays.len() + 1) as u32,
                                 message: format!("{error:#}"),
                             });
@@ -656,11 +671,23 @@ fn scan_snapshot(
         schema_version: STORE_SCHEMA_VERSION,
         source_path: watched.path.to_string_lossy().into_owned(),
         created_at_unix: chrono::Utc::now().timestamp(),
+        source_snapshot: None,
+        source_snapshot_error: None,
         read_failures,
         entries,
     })
 }
 
+/**
+ * Summary: Carry forward previous manifest entries for an unreadable subtree.
+ *
+ * Inputs: Current `entries` map, optional previous manifest, and a relative path prefix.
+ * Outputs: Adds any missing prior entries under the prefix to `entries`.
+ * Side effects: Mutates the provided `entries` map.
+ * Error handling: None.
+ * Ties to other methods: Used by `scan_snapshot` when `walkdir` yields permission or IO errors.
+ * Why this exists: Prevent transient directory read failures from being interpreted as deletions.
+ */
 fn carry_forward_prev_prefix(
     entries: &mut BTreeMap<String, ManifestEntry>,
     prev: Option<&Manifest>,
@@ -677,8 +704,29 @@ fn carry_forward_prev_prefix(
     };
     for e in prev.entries.values() {
         if e.rel_path == rel_prefix || e.rel_path.starts_with(&prefix) {
-            entries.entry(e.rel_path.clone()).or_insert_with(|| e.clone());
+            entries
+                .entry(e.rel_path.clone())
+                .or_insert_with(|| e.clone());
         }
+    }
+}
+
+/**
+ * Summary: Classify a scan failure into a stable phase for reporting.
+ *
+ * Inputs: A scan-related error.
+ * Outputs: A `ReadFailurePhase` value indicating the most likely failure phase.
+ * Side effects: None.
+ * Error handling: None.
+ * Ties to other methods: Used by `scan_snapshot` when recording `read_failures`.
+ * Why this exists: Keep failure reporting useful without plumbing custom error types everywhere.
+ */
+fn classify_scan_failure(error: &anyhow::Error) -> ReadFailurePhase {
+    let msg = format!("{error:#}");
+    if msg.contains("failed to stat file") || msg.contains("metadata") {
+        ReadFailurePhase::Metadata
+    } else {
+        ReadFailurePhase::Hash
     }
 }
 
@@ -686,13 +734,17 @@ fn scan_one_file(
     abs_path: &Path,
     rel_path: &str,
     timeout_seconds: u64,
+    retry_delays: &[Duration],
     prev: &HashMap<&str, &ManifestEntry>,
 ) -> Result<ManifestEntry> {
-    let meta = fs::metadata(abs_path).with_context(|| {
-        format!(
-            "versioned::scan_one_file failed to stat file {:?}",
-            abs_path
-        )
+    let label = format!("versioned::scan_one_file metadata {:?}", abs_path);
+    let (meta, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
+        fs::metadata(abs_path).with_context(|| {
+            format!(
+                "versioned::scan_one_file failed to stat file {:?}",
+                abs_path
+            )
+        })
     })?;
     let (mtime_unix, mtime_nanos) = meta
         .modified()
@@ -718,7 +770,7 @@ fn scan_one_file(
             });
         }
     }
-    let hash = sha256_file(abs_path, timeout_seconds)?;
+    let hash = sha256_file(abs_path, timeout_seconds, retry_delays)?;
     Ok(ManifestEntry {
         kind: ManifestEntryKind::File,
         rel_path: rel_path.to_string(),
@@ -779,6 +831,54 @@ fn write_index(source_root: &Path, index: &VersionIndex, durability_root: &Path)
     write_json_atomic_durable(&path, index, durability_root).with_context(|| {
         format!(
             "versioned::write_index failed to write version index {:?}",
+            path
+        )
+    })
+}
+
+#[derive(serde::Serialize)]
+struct LastScanReport<'a> {
+    schema_version: u32,
+    source_path: &'a str,
+    created_at_unix: i64,
+    committed_version_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_snapshot: Option<&'a crate::fs::snapshots::SourceSnapshotInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_snapshot_error: Option<&'a str>,
+    read_failures: &'a [ReadFailure],
+}
+
+/**
+ * Summary: Persist the last scan report for a watched source.
+ *
+ * Inputs: `source_root` destination store source directory, scanned `snapshot`, optional committed
+ * version id, and `durability_root` for directory fsync bounds.
+ * Outputs: `Ok(())` when the report is durably written.
+ * Side effects: Writes `last_scan_report.json` under the source directory.
+ * Error handling: Returns contextual errors for serialization, IO, fsync, and rename operations.
+ * Ties to other methods: Called by `backup_one_folder` after scans and commits (or skipped commits).
+ * Why this exists: Make read failures visible and inspectable even when a version cannot be safely created.
+ */
+fn write_scan_report(
+    source_root: &Path,
+    snapshot: &Manifest,
+    committed_version_id: Option<&str>,
+    durability_root: &Path,
+) -> Result<()> {
+    let path = source_root.join("last_scan_report.json");
+    let report = LastScanReport {
+        schema_version: snapshot.schema_version,
+        source_path: snapshot.source_path.as_str(),
+        created_at_unix: snapshot.created_at_unix,
+        committed_version_id,
+        source_snapshot: snapshot.source_snapshot.as_ref(),
+        source_snapshot_error: snapshot.source_snapshot_error.as_deref(),
+        read_failures: snapshot.read_failures.as_slice(),
+    };
+    write_json_atomic_durable(&path, &report, durability_root).with_context(|| {
+        format!(
+            "versioned::write_scan_report failed to write scan report {:?}",
             path
         )
     })
@@ -847,23 +947,41 @@ fn write_json_atomic_durable<T: serde::Serialize>(
     Ok(())
 }
 
-fn sha256_file(path: &Path, timeout_seconds: u64) -> Result<String> {
+fn sha256_file(path: &Path, timeout_seconds: u64, retry_delays: &[Duration]) -> Result<String> {
+    let label = format!("versioned::sha256_file {:?}", path);
+    let (hash, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
+        sha256_file_once(path, timeout_seconds)
+    })?;
+    Ok(hash)
+}
+
+/**
+ * Summary: Compute a SHA-256 hash for a file in a single attempt.
+ *
+ * Inputs: File path and timeout in seconds.
+ * Outputs: Hex-encoded SHA-256 hash string.
+ * Side effects: Reads file contents from disk.
+ * Error handling: Returns contextual errors on open/read failures and a timeout error when exceeded.
+ * Ties to other methods: Used by `sha256_file` which applies retry/backoff around this function.
+ * Why this exists: Allow retry to restart hashing cleanly after transient read errors.
+ */
+fn sha256_file_once(path: &Path, timeout_seconds: u64) -> Result<String> {
     let start = Instant::now();
     let mut file = fs::File::open(path)
-        .with_context(|| format!("versioned::sha256_file failed to open {:?}", path))?;
+        .with_context(|| format!("versioned::sha256_file_once failed to open {:?}", path))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
             anyhow::bail!(
-                "versioned::sha256_file timed out after {}s hashing {:?}",
+                "versioned::sha256_file_once timed out after {}s hashing {:?}",
                 timeout_seconds,
                 path
             );
         }
         let n = file
             .read(&mut buf)
-            .with_context(|| format!("versioned::sha256_file failed reading {:?}", path))?;
+            .with_context(|| format!("versioned::sha256_file_once failed reading {:?}", path))?;
         if n == 0 {
             break;
         }

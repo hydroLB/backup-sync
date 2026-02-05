@@ -1,5 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { open } from '@tauri-apps/api/dialog';
+import React, { useState } from 'react';
 import { doctorReport, installService } from '../services';
 import { Config, Destination } from './settings/types';
 import { formatBytes } from '../utils/format';
@@ -20,9 +19,7 @@ import { useWatchActions } from './settings/useWatchActions';
 import { tauriAvailable } from '../services/ipc';
 import { UI_TUNING } from '../config/uiTuning';
 import { AccessProbe, SimulationResult } from '../services/types';
-import AuthLockModal from './settings/AuthLockModal';
-import { authStatus, lockSession, unlockSession, AuthStatus } from '../services/auth';
-import { IpcError } from '../services/ipc';
+import { openDialog } from '../services/dialog';
 
 /**
  * Purpose: Render the settings panel and onboarding flows.
@@ -64,12 +61,16 @@ export const SettingsPanel: React.FC = () => {
     runtime: {
       prune_interval_cycles: 10,
       verify_interval_seconds: 24 * 3600,
+      scrub_full_interval_seconds: 7 * 24 * 3600,
+      scrub_sample_blobs: 200,
+      scrub_sample_versions_per_source: 2,
       watcher_debounce_seconds: 2,
       ipc_timeout_seconds: 5,
       service_command_timeout_seconds: 15,
       service_command_retry_delay_ms: 300,
       service_command_poll_interval_ms: 50,
-      auth_unlock_seconds: 15 * 60,
+      source_snapshots_enabled: false,
+      source_snapshot_timeout_seconds: 20,
       tray_tooltip_refresh_seconds: 10,
       log_tail_lines: 200,
       simulation_sample_limit: 10,
@@ -98,111 +99,7 @@ export const SettingsPanel: React.FC = () => {
   } = state;
   const [accessResult, setAccessResult] = useState<AccessProbe | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
-  const [authInfo, setAuthInfo] = useState<AuthStatus>({ unlocked: false, seconds_left: null });
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authVisible, setAuthVisible] = useState<boolean>(false);
-  const [passcode, setPasscode] = useState<string>('');
-  const pendingAuthAction = useRef<null | (() => void)>(null);
   const onboarding = useOnboardingState(cfg, destStatus?.writable);
-  /**
-   * Purpose: Refresh the auth status from the backend.
-   *
-   * Inputs: None.
-   * Outputs: Updates auth state and error messages.
-   * Ties to: Settings auth guard and unlock modal state.
-   * Side effects: Invokes IPC to fetch auth status and updates state.
-   * Why: Keep auth state accurate before privileged actions.
-   */
-  const refreshAuthStatus = async () => {
-    try {
-      const status = await authStatus();
-      setAuthInfo(status);
-      setAuthError(null);
-    } catch (error) {
-      const reason =
-        error instanceof IpcError && error.code === 'TAURI_UNAVAILABLE'
-          ? 'IPC unavailable. Launch the desktop app (./start) instead of a browser.'
-          : error instanceof Error
-            ? error.message
-            : String(error);
-      setAuthInfo({ unlocked: false, seconds_left: null });
-      setAuthError(reason);
-    }
-  };
-  /**
-   * Purpose: Require auth before running a privileged action.
-   *
-   * Inputs: Label and action function.
-   * Outputs: Runs the action or opens the auth modal.
-   * Ties to: Save, service, and diagnostics actions.
-   * Side effects: Updates auth modal state and queues pending actions.
-   * Why: Prevent unauthorized changes without blocking the UI flow.
-   */
-  const guardAuth = (label: string, action: () => void | Promise<void>) => {
-    try {
-      if (authInfo.unlocked) {
-        void action();
-        return;
-      }
-      pendingAuthAction.current = () => {
-        void action();
-      };
-      setAuthError(`[SettingsPanel::guardAuth] ${label} requires unlock`);
-      setAuthVisible(true);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      setAuthError(`[SettingsPanel::guardAuth] Failed to guard auth: ${reason}`);
-    }
-  };
-  /**
-   * Purpose: Unlock the session using the entered passcode.
-   *
-   * Inputs: Current passcode entry.
-   * Outputs: Updates auth state and resumes any pending action.
-   * Ties to: `unlockSession` and guarded actions.
-   * Side effects: Invokes IPC, updates auth state, and clears pending actions.
-   * Why: Provide a single unlock handler with consistent error handling.
-   */
-  const handleUnlock = async () => {
-    try {
-      if (!passcode.trim()) {
-        setAuthError('[SettingsPanel::handleUnlock] Passcode is required.');
-        return;
-      }
-      const msg = await unlockSession(passcode);
-      setPasscode('');
-      await refreshAuthStatus();
-      setAuthVisible(false);
-      setStatus(msg);
-      const pending = pendingAuthAction.current;
-      pendingAuthAction.current = null;
-      if (pending) {
-        pending();
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      setAuthError(`[SettingsPanel::handleUnlock] ${reason}`);
-    }
-  };
-  /**
-   * Purpose: Lock the current session.
-   *
-   * Inputs: None.
-   * Outputs: Updates auth state and status message.
-   * Ties to: `lockSession` and auth status refresh.
-   * Side effects: Invokes IPC and updates local auth state.
-   * Why: Allow users to revoke privileged access explicitly.
-   */
-  const handleLock = async () => {
-    try {
-      await lockSession();
-      await refreshAuthStatus();
-      setStatus('Session locked.');
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      setAuthError(`[SettingsPanel::handleLock] ${reason}`);
-    }
-  };
   /**
    * Purpose: Surface a status message to the settings UI.
    *
@@ -292,20 +189,18 @@ export const SettingsPanel: React.FC = () => {
    * Why: Make diagnostics export available from settings.
    */
   const exportDoctor = async () => {
-    guardAuth('Export doctor report', async () => {
-      try {
-        if (!window.confirm('Run a doctor report and save it to your Desktop?')) {
-          return;
-        }
-        setDoctorMsg('Running doctor...');
-        const path = await doctorReport();
-        setDoctorMsg(`Doctor report saved to ${path}`);
-      } catch (e) {
-        const msg = `[SettingsPanel::exportDoctor] Failed to export doctor report: ${String(e)}`;
-        setDoctorMsg(msg);
-        popup(msg);
+    try {
+      if (!window.confirm('Run a doctor report and save it to your Desktop?')) {
+        return;
       }
-    });
+      setDoctorMsg('Running doctor...');
+      const path = await doctorReport();
+      setDoctorMsg(`Doctor report saved to ${path}`);
+    } catch (e) {
+      const msg = `[SettingsPanel::exportDoctor] Failed to export doctor report: ${String(e)}`;
+      setDoctorMsg(msg);
+      popup(msg);
+    }
   };
 
   /**
@@ -350,7 +245,7 @@ export const SettingsPanel: React.FC = () => {
         return;
       }
       const destId = (cfg.destinations && cfg.destinations[0]?.id) || 'default';
-      const selection = await open({
+      const selection = await openDialog({
         directory: kind === 'Directory',
         multiple: false,
         title: kind === 'Directory' ? 'Choose folder to protect' : 'Choose file to protect',
@@ -428,7 +323,7 @@ export const SettingsPanel: React.FC = () => {
         popup('Picker unavailable (IPC). Launch the Tauri app build to select paths.');
         return;
       }
-      const selection = await open({
+      const selection = await openDialog({
         directory: kind === 'Directory',
         multiple: false,
         title: kind === 'Directory' ? 'Choose folder to protect' : 'Choose file to protect',
@@ -528,17 +423,15 @@ export const SettingsPanel: React.FC = () => {
    * Why: Make service enablement accessible in settings.
    */
   const enableStartOnLogin = async () => {
-    guardAuth('Enable start on login', async () => {
-      try {
-        setStartOnLoginMsg('Enabling start on login...');
-        await installService();
-        setStartOnLoginMsg('Enabled. The helper will start on login.');
-      } catch (e) {
-        const msg = `[SettingsPanel::enableStartOnLogin] Failed to enable start on login: ${String(e)}`;
-        setStartOnLoginMsg(msg);
-        popup(msg);
-      }
-    });
+    try {
+      setStartOnLoginMsg('Enabling start on login...');
+      await installService();
+      setStartOnLoginMsg('Enabled. The helper will start on login.');
+    } catch (e) {
+      const msg = `[SettingsPanel::enableStartOnLogin] Failed to enable start on login: ${String(e)}`;
+      setStartOnLoginMsg(msg);
+      popup(msg);
+    }
   };
 
   const canFinishOnboarding = cfg.watched.length > 0 && !!destStatus?.writable;
@@ -633,42 +526,8 @@ export const SettingsPanel: React.FC = () => {
     addWatchedPath: addWatched,
   } = useWatchActions(cfg, saveCfg, setStatus, () => {});
 
-  useEffect(() => {
-    refreshAuthStatus();
-  }, []);
-
   return (
     <div className="card settings-panel">
-      <div className="inline-actions" style={{ marginBottom: 8, alignItems: 'center' }}>
-        <div
-          className="pill"
-          style={{
-            borderColor: authInfo.unlocked ? '#7bffae' : '#ffb86b',
-            color: authInfo.unlocked ? '#7bffae' : '#ffb86b',
-          }}
-        >
-          {authInfo.unlocked ? 'Session unlocked' : 'Session locked'}
-        </div>
-        {authInfo.seconds_left != null && authInfo.unlocked && (
-          <span className="muted">
-            Time left: {Math.max(1, Math.round(authInfo.seconds_left / 60))}m
-          </span>
-        )}
-        {authInfo.unlocked ? (
-          <button className="btn secondary" onClick={handleLock}>
-            Lock
-          </button>
-        ) : (
-          <button className="btn secondary" onClick={() => setAuthVisible(true)}>
-            Unlock
-          </button>
-        )}
-      </div>
-      {authError && (
-        <div className="muted" style={{ marginBottom: 8 }}>
-          {authError}
-        </div>
-      )}
       {onboarding.showOnboarding ? (
         <OnboardingOverlay
           step={onboarding.step as 1 | 2 | 3 | 4}
@@ -772,7 +631,7 @@ export const SettingsPanel: React.FC = () => {
           <div className="sticky-actions">
             <button
               className="btn"
-              onClick={() => guardAuth('Save settings', () => saveCfg(cfg, 'Settings saved'))}
+              onClick={() => saveCfg(cfg, 'Settings saved')}
               disabled={saving}
             >
               Save settings
@@ -796,22 +655,10 @@ export const SettingsPanel: React.FC = () => {
           <SaveBar
             disabled={saving}
             status={validation ?? status}
-            onSave={() => guardAuth('Save settings', () => saveCfg(cfg, 'Settings saved'))}
+            onSave={() => saveCfg(cfg, 'Settings saved')}
           />
         </div>
       )}
-      <AuthLockModal
-        visible={authVisible}
-        passcode={passcode}
-        unlockSeconds={cfg.runtime.auth_unlock_seconds}
-        onChange={setPasscode}
-        onUnlock={handleUnlock}
-        onClose={() => {
-          setAuthVisible(false);
-          setPasscode('');
-          pendingAuthAction.current = null;
-        }}
-      />
     </div>
   );
 };

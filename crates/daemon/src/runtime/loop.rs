@@ -72,6 +72,7 @@ pub async fn run(cfg: Config, mut state: StoredState, store: StateStore) -> Resu
     };
 
     let verify_task = {
+        let cfg = cfg.clone();
         let shared_state = shared_state.clone();
         let store = store.clone();
         let verify_interval = cfg.runtime.verify_interval_seconds;
@@ -80,7 +81,8 @@ pub async fn run(cfg: Config, mut state: StoredState, store: StateStore) -> Resu
             let mut interval = tokio::time::interval(Duration::from_secs(verify_interval));
             loop {
                 interval.tick().await;
-                if let Err(e) = cycle::run_verify_cycle(&store, &shared_state, &hashing).await {
+                if let Err(e) = cycle::run_verify_cycle(&cfg, &store, &shared_state, &hashing).await
+                {
                     error!("daemon::runtime::run periodic verify failed: {e:?}");
                 }
             }
