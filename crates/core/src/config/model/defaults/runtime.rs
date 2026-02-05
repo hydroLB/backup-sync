@@ -20,6 +20,39 @@ pub(crate) fn default_verify_interval_seconds() -> u64 {
     24 * 3600
 }
 
+/// Purpose: Supplies the default interval between full blob scrubs.
+///
+/// Inputs: none.
+/// Outputs: the full scrub interval in seconds.
+/// Ties to: daemon scrub scheduling for bit-rot detection.
+/// Side effects: None.
+/// Why: full re-hash is IO-heavy; run it periodically while using sampled scrubs in between.
+pub(crate) fn default_scrub_full_interval_seconds() -> u64 {
+    7 * 24 * 3600
+}
+
+/// Purpose: Supplies the default number of blobs to hash in a sampled scrub.
+///
+/// Inputs: none.
+/// Outputs: number of blobs to hash per sampled scrub run.
+/// Ties to: daemon scrub scheduling for fast-path integrity checks.
+/// Side effects: None.
+/// Why: keep sampled scrubs bounded while still providing ongoing bit-rot detection coverage.
+pub(crate) fn default_scrub_sample_blobs() -> usize {
+    200
+}
+
+/// Purpose: Supplies the default number of versions per source to inspect in a sampled scrub.
+///
+/// Inputs: none.
+/// Outputs: number of newest versions to inspect per source.
+/// Ties to: sampled scrub manifest cross-checks.
+/// Side effects: None.
+/// Why: ensure the fast path still validates manifests without scanning the entire history each run.
+pub(crate) fn default_scrub_sample_versions_per_source() -> usize {
+    2
+}
+
 /// Purpose: Supplies the default watcher debounce duration.
 ///
 /// Inputs: none.
@@ -73,4 +106,26 @@ pub(crate) fn default_service_command_retry_delay_ms() -> u64 {
 /// Why: Avoid hardcoded sleep intervals during service command polling.
 pub(crate) fn default_service_command_poll_interval_ms() -> u64 {
     50
+}
+
+/// Purpose: Supplies the default enablement flag for source snapshots.
+///
+/// Inputs: none.
+/// Outputs: false by default.
+/// Ties to: optional consistent reads during versioned backup scanning and blob writes.
+/// Side effects: None.
+/// Why: snapshots may require privileges and are not universally available; opt-in avoids surprises.
+pub(crate) fn default_source_snapshots_enabled() -> bool {
+    false
+}
+
+/// Purpose: Supplies the default timeout for source snapshot operations in seconds.
+///
+/// Inputs: none.
+/// Outputs: the timeout in seconds.
+/// Ties to: snapshot create, mount, and cleanup commands when enabled.
+/// Side effects: None.
+/// Why: keep OS-level snapshot operations bounded so backup cycles cannot hang indefinitely.
+pub(crate) fn default_source_snapshot_timeout_seconds() -> u64 {
+    20
 }

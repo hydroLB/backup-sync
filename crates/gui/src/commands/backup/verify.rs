@@ -1,5 +1,5 @@
-use crate::commands::{error::ErrorEnvelope, security};
-use backup_core::{load_config, platform::paths, state::store::StateStore, verify_backups};
+use crate::commands::{correlation, error::ErrorEnvelope};
+use backup_core::{backup::versioned, load_config, platform::paths, state::store::StateStore};
 use chrono::Utc;
 use dirs::desktop_dir;
 use serde::Serialize;
@@ -29,7 +29,7 @@ pub struct VerifyResult {
 /// Side effects: Reads config/state, hashes backup files, and writes updated state.
 /// Why: allow users to verify backup integrity on demand.
 pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, ErrorEnvelope> {
-    let cid = security::cid("verify", correlation_id);
+    let cid = correlation::cid("verify", correlation_id);
     eprintln!("[cid={}] verify start", cid);
     let cfg = load_config().map_err(|e| {
         ErrorEnvelope::new(
@@ -55,12 +55,31 @@ pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, 
             format!("backup::verify::verify_cmd failed to load state: {}", e),
         )
     })?;
-    let (ok, bad) = verify_backups(&mut state, &cfg.hashing).map_err(|e| {
+    let now = Utc::now().timestamp();
+    let res = versioned::scrub_versioned_store(
+        &cfg,
+        &cfg.hashing,
+        versioned::ScrubMode::Full,
+        cfg.runtime.scrub_sample_blobs,
+        cfg.runtime.scrub_sample_versions_per_source,
+        now as u64,
+    )
+    .map_err(|e| {
         ErrorEnvelope::new(
             "VERIFY_FAILED",
             format!("[cid={}] backup::verify::verify_cmd failed: {}", cid, e),
         )
     })?;
+    let bad = res.hash_mismatches + res.missing_blobs + res.manifests_bad;
+    let ok = res.blobs_hashed.saturating_sub(res.hash_mismatches);
+    state.last_verify_ts = Some(now);
+    state.last_verify_issues = Some(bad);
+    state.last_verify_status = Some(if bad == 0 {
+        "ok (full)".into()
+    } else {
+        "issues_detected (full)".into()
+    });
+    state.last_scrub_full_ts = Some(now);
     store.persist(&state).map_err(|e| {
         ErrorEnvelope::new(
             "STATE_SAVE",
@@ -91,7 +110,7 @@ pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, 
 pub async fn export_health_report_cmd(
     correlation_id: Option<String>,
 ) -> Result<String, ErrorEnvelope> {
-    let cid = security::cid("health", correlation_id);
+    let cid = correlation::cid("health", correlation_id);
     eprintln!("[cid={}] export health start", cid);
     let cfg = load_config().map_err(|e| {
         ErrorEnvelope::new(

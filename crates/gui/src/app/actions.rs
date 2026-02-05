@@ -1,5 +1,4 @@
 use crate::commands;
-use crate::commands::auth::SessionAuth;
 use crate::tray;
 use tauri::async_runtime;
 use tauri::{Manager, SystemTrayEvent, WindowEvent};
@@ -70,11 +69,9 @@ pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent) {
 /// Ties to: tray run now actions.
 /// Side effects: Triggers a backup run and logs failures to stderr.
 /// Why: keep tray actions non-blocking.
-fn spawn_run_now(app: &tauri::AppHandle) {
-    let handle = app.app_handle();
+fn spawn_run_now(_app: &tauri::AppHandle) {
     async_runtime::spawn(async move {
-        let auth = handle.state::<SessionAuth>();
-        if let Err(e) = commands::backup::run::run_now_cmd(None, auth).await {
+        if let Err(e) = commands::backup::run::run_now_cmd(None).await {
             eprintln!("run_now tray action failed: {:?}", e);
         }
     });
@@ -102,11 +99,9 @@ fn spawn_verify() {
 /// Ties to: tray service installation actions.
 /// Side effects: Runs service installation commands and logs failures.
 /// Why: keep service setup off the UI thread.
-fn spawn_install_service(app: &tauri::AppHandle) {
-    let handle = app.app_handle();
+fn spawn_install_service(_app: &tauri::AppHandle) {
     async_runtime::spawn(async move {
-        let auth = handle.state::<SessionAuth>();
-        if let Err(e) = commands::service::install_service_cmd(None, auth).await {
+        if let Err(e) = commands::service::install_service_cmd(None).await {
             eprintln!("install service failed: {:?}", e);
         }
     });
@@ -164,11 +159,9 @@ fn spawn_export_health() {
 /// Ties to: tray diagnostics actions.
 /// Side effects: Writes a doctor report file and logs failures.
 /// Why: keep diagnostics export off the UI thread.
-fn spawn_doctor(app: &tauri::AppHandle) {
-    let handle = app.app_handle();
+fn spawn_doctor(_app: &tauri::AppHandle) {
     async_runtime::spawn(async move {
-        let auth = handle.state::<SessionAuth>();
-        if let Err(e) = commands::support::diagnostics::doctor_report_cmd(None, auth).await {
+        if let Err(e) = commands::support::diagnostics::doctor_report_cmd(None).await {
             eprintln!("doctor report failed: {:?}", e);
         }
     });
@@ -181,11 +174,9 @@ fn spawn_doctor(app: &tauri::AppHandle) {
 /// Ties to: tray restart actions.
 /// Side effects: Runs restart commands and logs failures.
 /// Why: keep restart operations asynchronous.
-fn spawn_restart(app: &tauri::AppHandle) {
-    let handle = app.app_handle();
+fn spawn_restart(_app: &tauri::AppHandle) {
     async_runtime::spawn(async move {
-        let auth = handle.state::<SessionAuth>();
-        if let Err(e) = commands::service::restart_daemon_cmd(None, auth) {
+        if let Err(e) = commands::service::restart_daemon_cmd(None) {
             eprintln!("restart daemon failed: {:?}", e);
         }
     });
@@ -198,11 +189,9 @@ fn spawn_restart(app: &tauri::AppHandle) {
 /// Ties to: tray safe mode toggle actions.
 /// Side effects: Writes the config file to toggle safe mode.
 /// Why: isolate config writes from the UI thread.
-fn spawn_toggle_safe_mode(app: &tauri::AppHandle) {
-    let handle = app.app_handle();
+fn spawn_toggle_safe_mode(_app: &tauri::AppHandle) {
     async_runtime::spawn(async move {
-        let auth = handle.state::<SessionAuth>();
-        if let Err(e) = commands::config::toggle_safe_mode_cmd(None, None, auth).await {
+        if let Err(e) = commands::config::toggle_safe_mode_cmd(None, None).await {
             eprintln!("toggle safe mode failed: {:?}", e);
         }
     });

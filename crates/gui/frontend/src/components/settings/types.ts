@@ -37,12 +37,16 @@ export type PlanningTuning = {
 export type RuntimeTuning = {
   prune_interval_cycles: number;
   verify_interval_seconds: number;
+  scrub_full_interval_seconds: number;
+  scrub_sample_blobs: number;
+  scrub_sample_versions_per_source: number;
   watcher_debounce_seconds: number;
   ipc_timeout_seconds: number;
   service_command_timeout_seconds: number;
   service_command_retry_delay_ms: number;
   service_command_poll_interval_ms: number;
-  auth_unlock_seconds: number;
+  source_snapshots_enabled: boolean;
+  source_snapshot_timeout_seconds: number;
   tray_tooltip_refresh_seconds: number;
   log_tail_lines: number;
   simulation_sample_limit: number;

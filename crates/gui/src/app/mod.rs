@@ -1,4 +1,3 @@
-use crate::commands::auth::SessionAuth;
 use tauri::async_runtime;
 use tauri::Manager;
 
@@ -35,7 +34,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     builder
-        .manage(SessionAuth::default())
         .setup(move |app| {
             // Keep tray tooltip updated with daemon status.
             let handle = app.app_handle();
@@ -79,9 +77,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::commands::access::test_access_cmd,
             crate::commands::support::diagnostics::doctor_report_cmd,
             crate::commands::support::diagnostics::export_diagnostic_bundle_cmd,
-            crate::commands::auth::unlock_session_cmd,
-            crate::commands::auth::lock_session_cmd,
-            crate::commands::auth::auth_status_cmd,
             crate::commands::config::toggle_safe_mode_cmd
         ])
         .run(tauri::generate_context!())?;

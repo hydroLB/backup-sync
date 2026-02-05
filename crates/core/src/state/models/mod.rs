@@ -49,6 +49,8 @@ pub struct StoredState {
     pub last_verify_ts: Option<i64>,
     pub last_verify_status: Option<String>,
     pub last_verify_issues: Option<usize>,
+    #[serde(default)]
+    pub last_scrub_full_ts: Option<i64>,
     pub recent_activity: Vec<ActivityItem>,
     pub safe_mode: bool,
 }

@@ -6,9 +6,21 @@ use backup_core::config::model::{
     Config, Destination, ExecutionTuning, HashingTuning, PlanningTuning, RuntimeTuning,
     WatchedKind, WatchedPath,
 };
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
 
 fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
     Config {
@@ -193,4 +205,132 @@ fn versioned_restore_to_directory_and_in_place() {
         "versioned_backup::versioned_restore_to_directory_and_in_place failed to read restored",
     );
     assert_eq!(restored_in_place, "v1");
+}
+
+#[test]
+fn restore_preflight_missing_blob_does_not_mutate_in_place_target() {
+    let tmp = tempdir().expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to create",
+    );
+    let source = tmp.path().join("source");
+    let dest = tmp.path().join("dest");
+    fs::create_dir_all(&source).expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to create source",
+    );
+    fs::create_dir_all(&dest).expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to create dest",
+    );
+
+    let file = source.join("a.txt");
+    fs::write(&file, "v1").expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to write v1",
+    );
+    let cfg = build_cfg(&source, &dest, 5);
+    run_backup_cycle(&cfg).expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target cycle 1 failed",
+    );
+
+    fs::write(&file, "v2").expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to write v2",
+    );
+    let extra = source.join("extra.txt");
+    fs::write(&extra, "extra").expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to write extra",
+    );
+    run_backup_cycle(&cfg).expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target cycle 2 failed",
+    );
+
+    let versions = versions_for(&cfg, &source);
+    let v1_id = versions.first().cloned().expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target missing v1 id",
+    );
+
+    let store_root = dest.join(".backup_sync").join("v1");
+    let hash = sha256_hex(b"v1");
+    let blob_path = store_root
+        .join("blobs")
+        .join("sha256")
+        .join(&hash[0..2])
+        .join(hash);
+    fs::remove_file(&blob_path).expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to delete blob",
+    );
+
+    let req = RestoreRequest {
+        source_path: source.clone(),
+        version_id: v1_id,
+        mode: RestoreMode::InPlace,
+        target_dir: None,
+    };
+    assert!(
+        restore_version(&cfg, &req).is_err(),
+        "restore should fail when a required blob is missing"
+    );
+
+    assert!(
+        extra.exists(),
+        "in-place restore preflight failure must not remove existing files"
+    );
+    let still = fs::read_to_string(&file).expect(
+        "versioned_backup::restore_preflight_missing_blob_does_not_mutate_in_place_target failed to read a.txt",
+    );
+    assert_eq!(still, "v2");
+}
+
+#[test]
+fn restore_preflight_space_check_does_not_mutate_to_directory_target() {
+    let tmp = tempdir().expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to create",
+    );
+    let source = tmp.path().join("source");
+    let dest = tmp.path().join("dest");
+    fs::create_dir_all(&source).expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to create source",
+    );
+    fs::create_dir_all(&dest).expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to create dest",
+    );
+
+    let file = source.join("a.txt");
+    fs::write(&file, "v1").expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to write v1",
+    );
+    let mut cfg = build_cfg(&source, &dest, 5);
+    run_backup_cycle(&cfg).expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target cycle 1 failed",
+    );
+
+    // Force a preflight space failure by requiring an impossible minimum.
+    cfg.min_free_space_bytes = Some(u64::MAX);
+
+    let versions = versions_for(&cfg, &source);
+    let v1_id = versions.first().cloned().expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target missing v1 id",
+    );
+
+    let out_dir = tmp.path().join("restore-out");
+    fs::create_dir_all(&out_dir).expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to create out dir",
+    );
+    let sentinel = out_dir.join("keep.txt");
+    fs::write(&sentinel, "keep").expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to write sentinel",
+    );
+
+    let req = RestoreRequest {
+        source_path: source.clone(),
+        version_id: v1_id,
+        mode: RestoreMode::ToDirectory,
+        target_dir: Some(out_dir.clone()),
+    };
+    assert!(
+        restore_version(&cfg, &req).is_err(),
+        "restore should fail when free space check fails"
+    );
+
+    let still = fs::read_to_string(&sentinel).expect(
+        "versioned_backup::restore_preflight_space_check_does_not_mutate_to_directory_target failed to read sentinel",
+    );
+    assert_eq!(still, "keep");
 }

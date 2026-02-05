@@ -3,6 +3,7 @@ use super::store::{blob_path, blobs_root, sha256_hex, sources_root, store_root};
 use crate::config::model::{Config, Destination, WatchedKind};
 use anyhow::{Context, Result};
 use filetime::{set_file_mtime, FileTime};
+use fs2::free_space;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
@@ -27,6 +28,14 @@ pub struct RestoreResult {
     pub files_written: usize,
     pub files_removed: usize,
     pub dirs_created: usize,
+}
+
+#[derive(Debug, Clone)]
+struct PlannedFile {
+    rel_path: String,
+    blob_path: PathBuf,
+    mtime_unix: i64,
+    mtime_nanos: u32,
 }
 
 pub fn list_versions(cfg: &Config) -> Result<Vec<(PathBuf, Vec<VersionInfo>)>> {
@@ -69,20 +78,30 @@ pub fn list_versions(cfg: &Config) -> Result<Vec<(PathBuf, Vec<VersionInfo>)>> {
     Ok(out)
 }
 
-pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResult> {
+/**
+ * Summary: Load a versioned manifest for a watched directory and compute restore plan inputs.
+ *
+ * Inputs: Store roots plus a restore request.
+ * Outputs: Parsed manifest object.
+ * Side effects: Reads the manifest JSON from the destination store.
+ * Error handling: Returns contextual errors for missing watched paths, destinations, and parse failures.
+ * Ties to other methods: Called by `restore_version` before preflight and restore execution.
+ * Why this exists: Keep `restore_version` readable while centralizing store path calculations.
+ */
+fn load_manifest_for_request(cfg: &Config, req: &RestoreRequest) -> Result<(Manifest, PathBuf)> {
     let watched = cfg
         .watched
         .iter()
         .find(|w| w.enabled && w.path == req.source_path)
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "versioned::restore_version source path not configured: {:?}",
+                "versioned::load_manifest_for_request source path not configured: {:?}",
                 req.source_path
             )
         })?;
     if !matches!(watched.kind, WatchedKind::Directory) {
         anyhow::bail!(
-            "versioned::restore_version only directory watched paths are supported: {:?}",
+            "versioned::load_manifest_for_request only directory watched paths are supported: {:?}",
             watched.path
         );
     }
@@ -96,66 +115,51 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
         .get(watched.destination_id.as_str())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "versioned::restore_version missing destination id {} for {:?}",
+                "versioned::load_manifest_for_request missing destination id {} for {:?}",
                 watched.destination_id,
                 watched.path
             )
         })?;
 
     let store_root = store_root(&dest.path);
-    let blobs_root = blobs_root(&store_root);
     let source_id = sha256_hex(req.source_path.to_string_lossy().as_bytes());
     let manifests_root = sources_root(&store_root).join(&source_id).join("manifests");
     let manifest_path = manifests_root.join(format!("{}.json", req.version_id));
     let raw = fs::read_to_string(&manifest_path).with_context(|| {
         format!(
-            "versioned::restore_version failed to read manifest {:?}",
+            "versioned::load_manifest_for_request failed to read manifest {:?}",
             manifest_path
         )
     })?;
     let manifest: Manifest = serde_json::from_str(&raw).with_context(|| {
         format!(
-            "versioned::restore_version failed to parse manifest {:?}",
+            "versioned::load_manifest_for_request failed to parse manifest {:?}",
             manifest_path
         )
     })?;
+    Ok((manifest, store_root))
+}
 
-    let restore_root = match req.mode {
-        RestoreMode::InPlace => req.source_path.clone(),
-        RestoreMode::ToDirectory => req
-            .target_dir
-            .clone()
-            .context("versioned::restore_version missing target_dir for ToDirectory")?,
-    };
-    fs::create_dir_all(&restore_root).with_context(|| {
-        format!(
-            "versioned::restore_version failed to create restore root {:?}",
-            restore_root
-        )
-    })?;
-
-    let mut result = RestoreResult::default();
-    if req.mode == RestoreMode::InPlace {
-        result.files_removed += remove_extraneous(&restore_root, &manifest)?;
-    }
-
-    for entry in manifest.entries.values() {
-        if entry.kind != ManifestEntryKind::Dir {
-            continue;
-        }
-        let dir_path = restore_root.join(&entry.rel_path);
-        if !dir_path.exists() {
-            fs::create_dir_all(&dir_path).with_context(|| {
-                format!(
-                    "versioned::restore_version failed to create directory {:?}",
-                    dir_path
-                )
-            })?;
-            result.dirs_created += 1;
-        }
-    }
-
+/**
+ * Summary: Preflight a restore by verifying blob availability and destination free space.
+ *
+ * Inputs: Manifest to restore, blob store root, free-space check directory, and config.
+ * Outputs: `(planned_files, total_bytes)` for subsequent restore execution.
+ * Side effects: Reads filesystem metadata for blobs and free space.
+ * Error handling: Returns a detailed error listing missing blobs or insufficient space.
+ * Ties to other methods: Called by `restore_version` before any filesystem mutations.
+ * Why this exists: Prevent partial restores and ensure predictable failures before touching the target.
+ */
+fn preflight_restore(
+    cfg: &Config,
+    manifest: &Manifest,
+    blobs_root: &Path,
+    free_space_dir: &Path,
+) -> Result<(Vec<PlannedFile>, u64)> {
     let mut missing: Vec<String> = Vec::new();
+    let mut planned: Vec<PlannedFile> = Vec::new();
+    let mut total_bytes: u64 = 0;
+
     for entry in manifest.entries.values() {
         if entry.kind != ManifestEntryKind::File {
             continue;
@@ -167,30 +171,317 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
             }
             Some(h) => h,
         };
-        let blob = blob_path(&blobs_root, hash);
+        let blob = blob_path(blobs_root, hash);
         if !blob.exists() {
             missing.push(format!("{}: missing blob {}", entry.rel_path, hash));
             continue;
         }
-        let out_path = restore_root.join(&entry.rel_path);
-        if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "versioned::restore_version failed to create parent dir {:?}",
-                    parent
-                )
-            })?;
-        }
-        write_file_atomic_from_blob(&blob, &out_path)?;
-        restore_mtime(&out_path, entry.mtime_unix, entry.mtime_nanos)?;
-        result.files_written += 1;
+        total_bytes = total_bytes.saturating_add(entry.len);
+        planned.push(PlannedFile {
+            rel_path: entry.rel_path.clone(),
+            blob_path: blob,
+            mtime_unix: entry.mtime_unix,
+            mtime_nanos: entry.mtime_nanos,
+        });
     }
 
     if !missing.is_empty() {
         anyhow::bail!(
-            "versioned::restore_version cannot restore due to missing content:\n{}",
+            "versioned::preflight_restore cannot restore due to missing content:\n{}",
             missing.join("\n")
         );
+    }
+
+    ensure_restore_free_space(cfg, free_space_dir, total_bytes)?;
+    Ok((planned, total_bytes))
+}
+
+/**
+ * Summary: Enforce restore free-space guardrails before writing.
+ *
+ * Inputs: Config for thresholds, target directory for free-space probing, and required bytes.
+ * Outputs: `Ok(())` when sufficient space is available.
+ * Side effects: Reads filesystem free-space statistics.
+ * Error handling: Returns a clear error that includes required bytes and configured thresholds.
+ * Ties to other methods: Used by `preflight_restore` to ensure restores cannot fill disks unexpectedly.
+ * Why this exists: Restores can write large amounts of data; failing mid-way due to disk full is unsafe.
+ */
+fn ensure_restore_free_space(cfg: &Config, dir: &Path, required_bytes: u64) -> Result<()> {
+    let free = free_space(dir).with_context(|| {
+        format!(
+            "versioned::ensure_restore_free_space failed to read free space for {:?}",
+            dir
+        )
+    })?;
+    let needed = required_bytes.saturating_add(cfg.execution.free_space_safety_buffer_bytes);
+    if free < needed {
+        anyhow::bail!(
+            "versioned::ensure_restore_free_space insufficient space at {:?} (need {} bytes incl. safety buffer, have {})",
+            dir,
+            needed,
+            free
+        );
+    }
+    if let Some(min_free) = cfg.min_free_space_bytes {
+        if free < min_free {
+            anyhow::bail!(
+                "versioned::ensure_restore_free_space free space {} below configured minimum {} at {:?}",
+                free,
+                min_free,
+                dir
+            );
+        }
+    }
+    Ok(())
+}
+
+/**
+ * Summary: Restore a manifest into a staging directory tree.
+ *
+ * Inputs: Stage root, manifest directory entries, and planned files with blob pointers.
+ * Outputs: Restore counters for directories created and files written.
+ * Side effects: Creates directories, writes files from blobs, and sets mtimes.
+ * Error handling: Returns contextual errors for directory creation, blob reads, and atomic writes.
+ * Ties to other methods: Called by transactional restore flows before swapping into place.
+ * Why this exists: Building a complete restore tree first enables atomic swap and prevents partial restores.
+ */
+fn build_restore_tree(
+    stage_root: &Path,
+    manifest: &Manifest,
+    planned_files: &[PlannedFile],
+) -> Result<RestoreResult> {
+    let mut result = RestoreResult::default();
+    fs::create_dir_all(stage_root).with_context(|| {
+        format!(
+            "versioned::build_restore_tree failed to create stage root {:?}",
+            stage_root
+        )
+    })?;
+
+    for entry in manifest.entries.values() {
+        if entry.kind != ManifestEntryKind::Dir {
+            continue;
+        }
+        let dir_path = stage_root.join(&entry.rel_path);
+        if !dir_path.exists() {
+            fs::create_dir_all(&dir_path).with_context(|| {
+                format!(
+                    "versioned::build_restore_tree failed to create directory {:?}",
+                    dir_path
+                )
+            })?;
+            result.dirs_created += 1;
+        }
+    }
+
+    for pf in planned_files {
+        let out_path = stage_root.join(&pf.rel_path);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "versioned::build_restore_tree failed to create parent dir {:?}",
+                    parent
+                )
+            })?;
+        }
+        write_file_atomic_from_blob(&pf.blob_path, &out_path)?;
+        restore_mtime(&out_path, pf.mtime_unix, pf.mtime_nanos)?;
+        result.files_written += 1;
+    }
+
+    Ok(result)
+}
+
+/**
+ * Summary: Count files in a target directory that are not present in the manifest.
+ *
+ * Inputs: Target root and manifest describing the desired version contents.
+ * Outputs: Count of extraneous files relative to the manifest.
+ * Side effects: Walks the target directory tree and reads filesystem metadata.
+ * Error handling: Returns contextual errors for directory walks.
+ * Ties to other methods: Used by `restore_version` to populate `files_removed` without mutating the target.
+ * Why this exists: Transactional restore swaps whole trees; this preserves useful reporting without risky deletes.
+ */
+fn count_extraneous_files(root: &Path, manifest: &Manifest) -> Result<usize> {
+    let expected_files: HashSet<&str> = manifest
+        .entries
+        .values()
+        .filter(|e| e.kind == ManifestEntryKind::File)
+        .map(|e| e.rel_path.as_str())
+        .collect();
+
+    let mut extraneous = 0usize;
+    for item in walkdir::WalkDir::new(root).min_depth(1).follow_links(false) {
+        let item = item.with_context(|| {
+            format!(
+                "versioned::count_extraneous_files failed walking restore root {:?}",
+                root
+            )
+        })?;
+        if !item.file_type().is_file() {
+            continue;
+        }
+        let rel = item.path().strip_prefix(root).unwrap_or(item.path());
+        let rel_s = rel.to_string_lossy().replace('\\', "/");
+        if !expected_files.contains(rel_s.as_str()) {
+            extraneous += 1;
+        }
+    }
+    Ok(extraneous)
+}
+
+/**
+ * Summary: Transactionally swap a staged directory tree into the target location.
+ *
+ * Inputs: The staged directory path, the final target path, and a token for backup naming.
+ * Outputs: The path of any backup directory created (so callers can delete it after success).
+ * Side effects: Renames directories to perform an atomic swap where supported by the OS/filesystem.
+ * Error handling: Attempts rollback if the final rename fails after moving the original aside.
+ * Ties to other methods: Called by `restore_version` for both in-place and restore-to-dir flows.
+ * Why this exists: Renaming a fully-built tree into place is the closest thing to transactional restore.
+ */
+fn swap_staged_tree_into_place(
+    stage_root: &Path,
+    target_root: &Path,
+    token: &str,
+) -> Result<Option<PathBuf>> {
+    let parent = target_root
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let backup_root = parent.join(format!(".backup_sync_restore_prev_{token}"));
+
+    if target_root.exists() {
+        fs::rename(target_root, &backup_root).with_context(|| {
+            format!(
+                "versioned::swap_staged_tree_into_place failed to move existing target {:?} to {:?}",
+                target_root, backup_root
+            )
+        })?;
+    }
+
+    if let Err(e) = fs::rename(stage_root, target_root) {
+        // Best-effort rollback if we already moved the original aside.
+        if backup_root.exists() && !target_root.exists() {
+            let _ = fs::rename(&backup_root, target_root);
+        }
+        return Err(anyhow::anyhow!(
+            "versioned::swap_staged_tree_into_place failed to move staged restore {:?} into {:?}: {}",
+            stage_root,
+            target_root,
+            e
+        ));
+    }
+
+    if backup_root.exists() {
+        Ok(Some(backup_root))
+    } else {
+        Ok(None)
+    }
+}
+
+/**
+ * Summary: Generate a token suitable for unique staging and backup directory names.
+ *
+ * Inputs: none.
+ * Outputs: A token string.
+ * Side effects: Reads time and process id.
+ * Error handling: None.
+ * Ties to other methods: Used by transactional restore flows to avoid collisions.
+ * Why this exists: Restore operations must not collide across concurrent runs.
+ */
+fn restore_token() -> String {
+    format!(
+        "{}-{}",
+        chrono::Utc::now().format("%Y%m%d-%H%M%S-%f"),
+        std::process::id()
+    )
+}
+
+pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResult> {
+    /*
+     * Summary: Restore a watched directory to a specific version with preflight + transactional swap.
+     *
+     * Inputs: Parsed config and a restore request describing source, version, mode, and optional target.
+     * Outputs: A `RestoreResult` summarizing files written/removed and directories created.
+     * Side effects: Creates staging directories, reads blobs from the destination store, and renames target trees.
+     * Error handling: Fails before any target mutation if blobs are missing or space is insufficient; swap failures
+     * attempt rollback and return contextual errors.
+     * Ties to other methods: Uses `preflight_restore`, `build_restore_tree`, and `swap_staged_tree_into_place`.
+     * Why this exists: Restores are high-risk; preflight + transactional swap prevents partial restores.
+     */
+    let (manifest, store_root) = load_manifest_for_request(cfg, req)?;
+    let blobs_root = blobs_root(&store_root);
+
+    let restore_root = match req.mode {
+        RestoreMode::InPlace => req.source_path.clone(),
+        RestoreMode::ToDirectory => req
+            .target_dir
+            .clone()
+            .context("versioned::restore_version missing target_dir for ToDirectory")?,
+    };
+
+    if restore_root.exists() && !restore_root.is_dir() {
+        anyhow::bail!(
+            "versioned::restore_version restore_root exists and is not a directory: {:?}",
+            restore_root
+        );
+    }
+
+    let parent = restore_root
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "versioned::restore_version failed to create restore parent dir {:?}",
+            parent
+        )
+    })?;
+
+    let (planned_files, _bytes) = preflight_restore(cfg, &manifest, &blobs_root, parent)?;
+
+    let token = restore_token();
+    let stage_root = parent.join(format!(".backup_sync_restore_stage_{token}"));
+
+    // Ensure we do not accidentally collide with a prior failed restore.
+    if stage_root.exists() {
+        anyhow::bail!(
+            "versioned::restore_version staging directory already exists: {:?}",
+            stage_root
+        );
+    }
+
+    let files_removed = if req.mode == RestoreMode::InPlace && restore_root.exists() {
+        count_extraneous_files(&restore_root, &manifest)?
+    } else {
+        0
+    };
+
+    let mut result = match build_restore_tree(&stage_root, &manifest, &planned_files) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&stage_root);
+            return Err(e);
+        }
+    };
+
+    result.files_removed = files_removed;
+
+    let backup_root = swap_staged_tree_into_place(&stage_root, &restore_root, &token)?;
+    if let Some(backup_root) = backup_root {
+        if req.mode == RestoreMode::InPlace {
+            match fs::remove_dir_all(&backup_root) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        backup_dir = %backup_root.display(),
+                        error = %e,
+                        "versioned in-place restore succeeded but failed to remove backup directory"
+                    );
+                }
+            }
+        }
     }
 
     Ok(result)
@@ -245,53 +536,6 @@ fn write_file_atomic_from_blob(blob_path: &Path, out_path: &Path) -> Result<()> 
         )
     })?;
     Ok(())
-}
-
-fn remove_extraneous(root: &Path, manifest: &Manifest) -> Result<usize> {
-    let expected_files: HashSet<String> = manifest
-        .entries
-        .values()
-        .filter(|e| e.kind == ManifestEntryKind::File)
-        .map(|e| e.rel_path.clone())
-        .collect();
-
-    let mut expected_dirs: HashSet<String> = HashSet::new();
-    for e in manifest.entries.values() {
-        if e.kind == ManifestEntryKind::Dir {
-            expected_dirs.insert(e.rel_path.clone());
-        } else {
-            let mut current = Path::new(&e.rel_path);
-            while let Some(parent) = current.parent() {
-                if parent.as_os_str().is_empty() {
-                    break;
-                }
-                expected_dirs.insert(parent.to_string_lossy().replace('\\', "/"));
-                current = parent;
-            }
-        }
-    }
-
-    let mut removed = 0usize;
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for item in walkdir::WalkDir::new(root).min_depth(1).follow_links(false) {
-        let item = item?;
-        paths.push(item.path().to_path_buf());
-    }
-    paths.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
-
-    for path in paths {
-        let rel = path.strip_prefix(root).unwrap_or(&path);
-        let rel_s = rel.to_string_lossy().replace('\\', "/");
-        if path.is_file() {
-            if !expected_files.contains(rel_s.as_str()) {
-                fs::remove_file(&path).ok();
-                removed += 1;
-            }
-        } else if path.is_dir() && !expected_dirs.contains(rel_s.as_str()) {
-            fs::remove_dir_all(&path).ok();
-        }
-    }
-    Ok(removed)
 }
 
 fn restore_mtime(path: &Path, mtime_unix: i64, mtime_nanos: u32) -> Result<()> {

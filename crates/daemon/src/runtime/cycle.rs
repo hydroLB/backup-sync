@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use backup_core::{
     backup::versioned,
     fs::watching::{debounce::debounce_and_take, debounce_duration, DirtySet},
-    verify_backups, Config, HashingTuning, StateStore, StoredState,
+    Config, HashingTuning, StateStore, StoredState,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -120,28 +120,71 @@ pub(crate) async fn apply_safe_mode(
 /// Side effects: Reads backup files for hashing, mutates state, and writes state to disk.
 /// Why: keep verification results up to date for UI and logs.
 pub async fn run_verify_cycle(
+    cfg: &Config,
     store: &StateStore,
     shared_state: &Arc<Mutex<StoredState>>,
     hashing: &HashingTuning,
 ) -> Result<()> {
     let cid = logging::cid("verify");
     let mut guard = shared_state.lock().await;
-    match verify_backups(&mut guard, hashing) {
-        Ok((ok, bad)) => {
+    let now = chrono::Utc::now().timestamp();
+    let full_due = match guard.last_scrub_full_ts {
+        None => true,
+        Some(ts) => now.saturating_sub(ts) >= cfg.runtime.scrub_full_interval_seconds as i64,
+    };
+    let mode = if full_due {
+        versioned::ScrubMode::Full
+    } else {
+        versioned::ScrubMode::Sampled
+    };
+    match versioned::scrub_versioned_store(
+        cfg,
+        hashing,
+        mode,
+        cfg.runtime.scrub_sample_blobs,
+        cfg.runtime.scrub_sample_versions_per_source,
+        now as u64,
+    ) {
+        Ok(res) => {
+            let bad = res.hash_mismatches + res.missing_blobs + res.manifests_bad;
+            let ok = res.blobs_hashed.saturating_sub(res.hash_mismatches);
+            let mode_label = match res.mode {
+                versioned::ScrubMode::Sampled => "sampled",
+                versioned::ScrubMode::Full => "full",
+            };
+            guard.last_verify_ts = Some(now);
+            guard.last_verify_issues = Some(bad);
+            guard.last_verify_status = Some(if bad == 0 {
+                format!("ok ({mode_label})")
+            } else {
+                format!("issues_detected ({mode_label})")
+            });
+            if res.mode == versioned::ScrubMode::Full {
+                guard.last_scrub_full_ts = Some(now);
+            }
             logging::log_info(
                 "verify_complete",
                 &cid,
                 None,
-                &format!("ok={} issues={}", ok, bad),
+                &format!(
+                    "mode={mode_label} manifests_checked={} manifests_bad={} referenced_blobs={} hashed={} ok={} missing={} mismatches={}",
+                    res.manifests_checked,
+                    res.manifests_bad,
+                    res.referenced_blobs,
+                    res.blobs_hashed,
+                    ok,
+                    res.missing_blobs,
+                    res.hash_mismatches
+                ),
             );
         }
         Err(e) => {
-            guard.last_verify_ts = Some(chrono::Utc::now().timestamp());
+            guard.last_verify_ts = Some(now);
             guard.last_verify_status = Some(format!("failed: {e}"));
             guard.last_verify_issues = None;
             logging::log_warn("verify_failed", &cid, None, &format!("verify error: {e:?}"));
         }
-    }
+    };
     store
         .persist(&guard)
         .context("daemon::runtime::run_verify_cycle failed to persist state after verify")?;

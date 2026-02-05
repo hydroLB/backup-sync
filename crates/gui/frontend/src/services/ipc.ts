@@ -177,7 +177,32 @@ export async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>)
   if (!hasTauri()) {
     throw new IpcError('Tauri IPC unavailable; run the desktop app build', 'TAURI_UNAVAILABLE');
   }
-  const { invoke } = await import('@tauri-apps/api/tauri');
+  const { invoke } = await loadTauriInvoke();
   const timeoutMs = UI_TUNING.system.ipcTimeoutMs;
   return await withTimeout(invoke<T>(cmd, args), timeoutMs, `IPC ${cmd}`);
+}
+
+type TauriModule = typeof import('@tauri-apps/api/tauri');
+let tauriModulePromise: Promise<TauriModule> | null = null;
+
+/**
+ * Purpose: Load the Tauri invoke module with caching.
+ *
+ * Inputs: None.
+ * Outputs: The Tauri API module.
+ * Side effects: Dynamically imports the Tauri module on first use.
+ * Error handling: Throws a contextualized error when the module fails to load.
+ * Ties to other methods: Used by `safeInvoke` and `prewarmNativeApis`.
+ * Why this exists: Avoid repeated dynamic imports on hot IPC paths.
+ */
+export async function loadTauriInvoke(): Promise<TauriModule> {
+  try {
+    if (!tauriModulePromise) {
+      tauriModulePromise = import('@tauri-apps/api/tauri');
+    }
+    return await tauriModulePromise;
+  } catch (error) {
+    tauriModulePromise = null;
+    throw wrapError('[loadTauriInvoke] Failed to load Tauri invoke module', error);
+  }
 }

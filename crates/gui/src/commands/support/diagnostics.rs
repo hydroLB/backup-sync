@@ -1,5 +1,5 @@
+use crate::commands::error::ErrorEnvelope;
 use crate::commands::status::get_status;
-use crate::commands::{auth::SessionAuth, error::ErrorEnvelope, security};
 use backup_core::config::load::default_config;
 use backup_core::{load_config, platform::paths, state::store::StateStore};
 use chrono::Utc;
@@ -21,12 +21,8 @@ use zip::ZipWriter;
 /// Ties to: GUI diagnostics commands.
 /// Side effects: Reads config/state data, writes a report file, and emits logs.
 /// Why: provide a quick diagnostic snapshot for users.
-pub async fn doctor_report_cmd(
-    correlation_id: Option<String>,
-    auth_state: tauri::State<'_, SessionAuth>,
-) -> Result<String, ErrorEnvelope> {
+pub async fn doctor_report_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
     let cid = correlation_id.unwrap_or_else(|| format!("doctor-{}", Utc::now().timestamp_millis()));
-    security::ensure_unlocked(&auth_state, Some(cid.clone()))?;
     eprintln!("[cid={}] doctor report start", cid);
     let cfg = load_config().map_err(|e| {
         ErrorEnvelope::new(
@@ -209,7 +205,6 @@ struct RedactedConfig {
     service_command_timeout_seconds: u64,
     service_command_retry_delay_ms: u64,
     service_command_poll_interval_ms: u64,
-    auth_unlock_seconds: u64,
     tray_tooltip_refresh_seconds: u64,
     log_tail_lines: usize,
     simulation_sample_limit: usize,
@@ -245,7 +240,6 @@ fn build_redacted(cfg: &backup_core::Config) -> RedactedConfig {
         service_command_timeout_seconds: cfg.runtime.service_command_timeout_seconds,
         service_command_retry_delay_ms: cfg.runtime.service_command_retry_delay_ms,
         service_command_poll_interval_ms: cfg.runtime.service_command_poll_interval_ms,
-        auth_unlock_seconds: cfg.runtime.auth_unlock_seconds,
         tray_tooltip_refresh_seconds: cfg.runtime.tray_tooltip_refresh_seconds,
         log_tail_lines: cfg.runtime.log_tail_lines,
         simulation_sample_limit: cfg.runtime.simulation_sample_limit,
@@ -290,7 +284,6 @@ fn build_diff(cfg: &backup_core::Config) -> serde_json::Value {
         "service_command_timeout_seconds": (cfg.runtime.service_command_timeout_seconds, defaults.runtime.service_command_timeout_seconds),
         "service_command_retry_delay_ms": (cfg.runtime.service_command_retry_delay_ms, defaults.runtime.service_command_retry_delay_ms),
         "service_command_poll_interval_ms": (cfg.runtime.service_command_poll_interval_ms, defaults.runtime.service_command_poll_interval_ms),
-        "auth_unlock_seconds": (cfg.runtime.auth_unlock_seconds, defaults.runtime.auth_unlock_seconds),
         "tray_tooltip_refresh_seconds": (cfg.runtime.tray_tooltip_refresh_seconds, defaults.runtime.tray_tooltip_refresh_seconds),
         "log_tail_lines": (cfg.runtime.log_tail_lines, defaults.runtime.log_tail_lines),
         "simulation_sample_limit": (cfg.runtime.simulation_sample_limit, defaults.runtime.simulation_sample_limit),
@@ -428,10 +421,8 @@ fn write_zip_entry<W: Write + Seek>(
 /// Why: provide a comprehensive bundle for support.
 pub async fn export_diagnostic_bundle_cmd(
     correlation_id: Option<String>,
-    auth_state: tauri::State<'_, SessionAuth>,
 ) -> Result<String, ErrorEnvelope> {
     let cid = correlation_id.unwrap_or_else(|| format!("diag-{}", Utc::now().timestamp_millis()));
-    security::ensure_unlocked(&auth_state, Some(cid.clone()))?;
     eprintln!("[cid={}] diagnostic bundle start", cid);
     let cfg = load_config().map_err(|e| {
         ErrorEnvelope::new(

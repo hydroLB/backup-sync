@@ -6,6 +6,12 @@ pub struct RuntimeTuning {
     pub prune_interval_cycles: u64,
     #[serde(default = "crate::config::model::defaults::default_verify_interval_seconds")]
     pub verify_interval_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_scrub_full_interval_seconds")]
+    pub scrub_full_interval_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_scrub_sample_blobs")]
+    pub scrub_sample_blobs: usize,
+    #[serde(default = "crate::config::model::defaults::default_scrub_sample_versions_per_source")]
+    pub scrub_sample_versions_per_source: usize,
     #[serde(default = "crate::config::model::defaults::default_watcher_debounce_seconds")]
     pub watcher_debounce_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_ipc_timeout_seconds")]
@@ -16,8 +22,10 @@ pub struct RuntimeTuning {
     pub service_command_retry_delay_ms: u64,
     #[serde(default = "crate::config::model::defaults::default_service_command_poll_interval_ms")]
     pub service_command_poll_interval_ms: u64,
-    #[serde(default = "crate::config::model::defaults::default_auth_unlock_seconds")]
-    pub auth_unlock_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_source_snapshots_enabled")]
+    pub source_snapshots_enabled: bool,
+    #[serde(default = "crate::config::model::defaults::default_source_snapshot_timeout_seconds")]
+    pub source_snapshot_timeout_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_tray_tooltip_refresh_seconds")]
     pub tray_tooltip_refresh_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_log_tail_lines")]
@@ -41,6 +49,11 @@ impl Default for RuntimeTuning {
             prune_interval_cycles: crate::config::model::defaults::default_prune_interval_cycles(),
             verify_interval_seconds:
                 crate::config::model::defaults::default_verify_interval_seconds(),
+            scrub_full_interval_seconds:
+                crate::config::model::defaults::default_scrub_full_interval_seconds(),
+            scrub_sample_blobs: crate::config::model::defaults::default_scrub_sample_blobs(),
+            scrub_sample_versions_per_source:
+                crate::config::model::defaults::default_scrub_sample_versions_per_source(),
             watcher_debounce_seconds:
                 crate::config::model::defaults::default_watcher_debounce_seconds(),
             ipc_timeout_seconds: crate::config::model::defaults::default_ipc_timeout_seconds(),
@@ -50,7 +63,10 @@ impl Default for RuntimeTuning {
                 crate::config::model::defaults::default_service_command_retry_delay_ms(),
             service_command_poll_interval_ms:
                 crate::config::model::defaults::default_service_command_poll_interval_ms(),
-            auth_unlock_seconds: crate::config::model::defaults::default_auth_unlock_seconds(),
+            source_snapshots_enabled:
+                crate::config::model::defaults::default_source_snapshots_enabled(),
+            source_snapshot_timeout_seconds:
+                crate::config::model::defaults::default_source_snapshot_timeout_seconds(),
             tray_tooltip_refresh_seconds:
                 crate::config::model::defaults::default_tray_tooltip_refresh_seconds(),
             log_tail_lines: crate::config::model::defaults::default_log_tail_lines(),

@@ -1,8 +1,6 @@
 use crate::commands::error::ErrorEnvelope;
 use crate::commands::status::get_status;
-use crate::commands::{auth::SessionAuth, security};
 use backup_core::{load_config, validate};
-use tauri::State;
 
 mod common;
 mod platform;
@@ -17,11 +15,8 @@ pub use common::ServiceStatus;
 /// Side effects: Writes service manifests and runs platform enable commands.
 /// Why: enable background execution without manual terminal steps.
 #[tauri::command]
-pub async fn install_service_cmd(
-    correlation_id: Option<String>,
-    auth_state: State<'_, SessionAuth>,
-) -> Result<String, ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
+pub async fn install_service_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
+    let _ = correlation_id;
 
     // Installing a service that immediately crash-loops due to missing/invalid config is noisy
     // and makes it harder to diagnose first-run issues.
@@ -110,11 +105,8 @@ pub async fn check_service_cmd() -> Result<ServiceStatus, ErrorEnvelope> {
 /// Side effects: Runs platform restart commands for the daemon.
 /// Why: allow users to recover the daemon without leaving the UI.
 #[tauri::command]
-pub fn restart_daemon_cmd(
-    correlation_id: Option<String>,
-    auth_state: State<'_, SessionAuth>,
-) -> Result<String, ErrorEnvelope> {
-    security::ensure_unlocked(&auth_state, correlation_id.clone())?;
+pub fn restart_daemon_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
+    let _ = correlation_id;
     #[cfg(target_os = "macos")]
     let result = platform::macos::restart_daemon();
     #[cfg(target_os = "linux")]

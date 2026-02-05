@@ -274,6 +274,39 @@ fn validate_runtime_limits(cfg: &Config, limits: &ValidationLimits, label: &str)
     }
     ensure_nonzero_u64(
         label,
+        "runtime.scrub_full_interval_seconds",
+        cfg.runtime.scrub_full_interval_seconds,
+    )?;
+    if cfg.runtime.scrub_full_interval_seconds > limits.max_verify_interval_seconds {
+        bail!(
+            "{label} runtime.scrub_full_interval_seconds too large (>{})",
+            limits.max_verify_interval_seconds
+        );
+    }
+    ensure_nonzero_usize(
+        label,
+        "runtime.scrub_sample_blobs",
+        cfg.runtime.scrub_sample_blobs,
+    )?;
+    if cfg.runtime.scrub_sample_blobs > limits.max_scrub_sample_blobs {
+        bail!(
+            "{label} runtime.scrub_sample_blobs too large (>{})",
+            limits.max_scrub_sample_blobs
+        );
+    }
+    ensure_nonzero_usize(
+        label,
+        "runtime.scrub_sample_versions_per_source",
+        cfg.runtime.scrub_sample_versions_per_source,
+    )?;
+    if cfg.runtime.scrub_sample_versions_per_source > limits.max_scrub_sample_versions_per_source {
+        bail!(
+            "{label} runtime.scrub_sample_versions_per_source too large (>{})",
+            limits.max_scrub_sample_versions_per_source
+        );
+    }
+    ensure_nonzero_u64(
+        label,
         "runtime.watcher_debounce_seconds",
         cfg.runtime.watcher_debounce_seconds,
     )?;
@@ -332,13 +365,13 @@ fn validate_runtime_limits(cfg: &Config, limits: &ValidationLimits, label: &str)
 
     ensure_nonzero_u64(
         label,
-        "runtime.auth_unlock_seconds",
-        cfg.runtime.auth_unlock_seconds,
+        "runtime.source_snapshot_timeout_seconds",
+        cfg.runtime.source_snapshot_timeout_seconds,
     )?;
-    if cfg.runtime.auth_unlock_seconds > limits.max_auth_unlock_seconds {
+    if cfg.runtime.source_snapshot_timeout_seconds > limits.max_source_snapshot_timeout_seconds {
         bail!(
-            "{label} runtime.auth_unlock_seconds too large (>{} seconds)",
-            limits.max_auth_unlock_seconds
+            "{label} runtime.source_snapshot_timeout_seconds too large (>{} seconds)",
+            limits.max_source_snapshot_timeout_seconds
         );
     }
 

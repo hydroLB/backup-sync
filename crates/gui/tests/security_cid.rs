@@ -1,11 +1,11 @@
-use gui::commands::security::cid;
+use gui::commands::correlation::cid;
 
 #[test]
 /// Purpose: Ensure correlation ids include prefixes and remain unique.
 ///
 /// Inputs: None.
 /// Outputs: Asserts prefix and uniqueness of correlation ids.
-/// Ties to: `gui::commands::security::cid`.
+/// Ties to: `gui::commands::correlation::cid`.
 /// Side effects: None.
 /// Why: Keep traceability consistent across GUI command calls.
 fn cid_prefix_and_unique() {
