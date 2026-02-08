@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatBytes } from '../../utils/format';
+import { HardeningReport } from '../../services/types';
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -10,6 +11,9 @@ type Props = {
   hasWatched: boolean;
   destStatus: DestinationStatus;
   canFinish: boolean;
+  hardeningSatisfied: boolean;
+  hardeningBusy: boolean;
+  hardeningReport: HardeningReport | null;
   retention: number;
   watchedPaths: string[];
   summary: string;
@@ -17,9 +21,9 @@ type Props = {
   safeMode?: boolean;
   statusMessage?: string;
   startOnLoginMsg?: string;
+  onRunHardening: (checkSnapshots: boolean) => void;
   onChangeRetention: (value: number) => void;
   onAddFolder: () => void;
-  onAddFile: () => void;
   onQuickAddDesktop: () => void;
   onQuickAddDocuments: () => void;
   onQuickAddDownloads: () => void;
@@ -48,13 +52,16 @@ const OnboardingOverlay: React.FC<Props> = ({
   hasWatched,
   destStatus,
   canFinish,
+  hardeningSatisfied,
+  hardeningBusy,
+  hardeningReport,
   summary,
   freeMessage,
   safeMode,
   statusMessage,
   startOnLoginMsg,
+  onRunHardening,
   onAddFolder,
-  onAddFile,
   onQuickAddDesktop,
   onQuickAddDocuments,
   onQuickAddDownloads,
@@ -115,17 +122,14 @@ const OnboardingOverlay: React.FC<Props> = ({
         return (
           <>
             <p className="muted">
-              Add at least one folder or file. We’ll keep you here until something is selected.
+              Add at least one folder. We’ll keep you here until something is selected.
             </p>
-            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+            <div className="inline-actions inline-actions-wrap">
               <button className="btn" onClick={onAddFolder}>
-                Add folder
-              </button>
-              <button className="btn secondary" onClick={onAddFile}>
-                Add file
+                Add path…
               </button>
             </div>
-            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+            <div className="inline-actions inline-actions-wrap">
               <button className="btn secondary" onClick={onQuickAddDesktop}>
                 Quick add Desktop
               </button>
@@ -159,7 +163,7 @@ const OnboardingOverlay: React.FC<Props> = ({
               Pick a backup destination. We’ll create the folder and block finishing until it’s
               writable.
             </p>
-            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+            <div className="inline-actions inline-actions-wrap">
               <button className="btn" onClick={onPickDestination}>
                 Choose destination
               </button>
@@ -191,7 +195,7 @@ const OnboardingOverlay: React.FC<Props> = ({
         return (
           <>
             <p className="muted">How many old versions do you want to keep per file?</p>
-            <div className="slider-wrap" style={{ display: 'grid', gap: 8 }}>
+            <div className="slider-wrap onboarding-slider">
               <div className="slider-track">
                 <input
                   type="range"
@@ -227,8 +231,49 @@ const OnboardingOverlay: React.FC<Props> = ({
           <p className="muted">
             Enable background mode so backups run even when the window is closed.
           </p>
-          <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
-            <button className="btn secondary" onClick={onStartOnLogin}>
+          <div className="watched-list">
+            <div className="muted">Safety checks (required before enabling scheduling):</div>
+            <div className="inline-actions inline-actions-wrap mt-2">
+              <button
+                className="btn secondary"
+                onClick={() => onRunHardening(false)}
+                disabled={hardeningBusy}
+              >
+                {hardeningBusy ? 'Running checks…' : 'Run safety checks'}
+              </button>
+              <button
+                className="btn secondary"
+                onClick={() => onRunHardening(true)}
+                disabled={hardeningBusy}
+                title="Optional: probe OS snapshot support. This can be slow or require permissions on some systems."
+              >
+                {hardeningBusy ? 'Running…' : 'Run checks + snapshots'}
+              </button>
+            </div>
+            <div className="muted mt-2">
+              {hardeningReport ? (
+                <>
+                  Result: {hardeningReport.ok ? 'Passed' : 'Failed'} ({hardeningReport.message})
+                  {!hardeningReport.ok && hardeningReport.destinations?.length > 0 && (
+                    <> • Dest: {hardeningReport.destinations[0]!.message}</>
+                  )}
+                  {!hardeningReport.ok && hardeningReport.watched_issues?.length > 0 && (
+                    <> • Watched: {hardeningReport.watched_issues[0]!.issue}</>
+                  )}
+                </>
+              ) : hardeningSatisfied ? (
+                'Result: Passed.'
+              ) : (
+                'Not run yet.'
+              )}
+            </div>
+          </div>
+          <div className="inline-actions inline-actions-wrap">
+            <button
+              className="btn secondary"
+              onClick={onStartOnLogin}
+              disabled={!hardeningSatisfied}
+            >
               Enable start on login
             </button>
             <button className="btn secondary" onClick={onFinish} disabled={!canFinish}>
@@ -247,8 +292,10 @@ const OnboardingOverlay: React.FC<Props> = ({
             Safe mode: {safeMode ? 'On (scan/verify only)' : 'Off (normal backups)'}
           </div>
           {!canFinish && (
-            <div style={{ color: 'var(--danger)' }}>
-              Add a watched item and destination before finishing.
+            <div className="text-danger">
+              {hasWatched && (destStatus?.writable ?? false)
+                ? 'Run safety checks before finishing setup.'
+                : 'Add a watched item and destination before finishing.'}
             </div>
           )}
         </>
@@ -267,10 +314,8 @@ const OnboardingOverlay: React.FC<Props> = ({
         <div className="section-title">
           <div>
             <div className="pill step-pill">First-run guide</div>
-            <h3 style={{ margin: '6px 0 2px' }}>Let’s finish setup</h3>
-            <p className="muted" style={{ margin: 0 }}>
-              We’ll block the app until the essentials are valid.
-            </p>
+            <h3 className="onboarding-title">Let’s finish setup</h3>
+            <p className="muted mb-0">We’ll block the app until the essentials are valid.</p>
           </div>
           <div className="pill step-pill">{step} / 4</div>
         </div>

@@ -11,6 +11,8 @@ use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tracing::{error, info, span, Level};
 
+const FIXED_AUTOMATIC_INTERVAL_SECONDS: u64 = 30 * 60;
+
 /// Purpose: Runs the daemon main loop with watchers, IPC, and scheduled tasks.
 ///
 /// Inputs: the config, initial state, and state store.
@@ -32,7 +34,7 @@ pub async fn run(cfg: Config, mut state: StoredState, store: StateStore) -> Resu
     }
     let _watcher = start_watcher(watcher_paths, dirty.clone())
         .context("daemon::runtime::run failed to start file watcher")?;
-    let scheduler = IntervalScheduler::new_secs(cfg.interval_seconds);
+    let scheduler = IntervalScheduler::new_secs(FIXED_AUTOMATIC_INTERVAL_SECONDS);
     let ipc_handle = ipc::spawn_server(
         shared_state.clone(),
         cfg.destinations.clone(),

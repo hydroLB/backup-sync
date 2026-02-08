@@ -24,6 +24,8 @@ fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
         execution,
         planning: PlanningTuning::default(),
         runtime: RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched: vec![WatchedPath {
             path: source.to_path_buf(),
@@ -37,6 +39,7 @@ fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
             path: dest.to_path_buf(),
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     }
 }

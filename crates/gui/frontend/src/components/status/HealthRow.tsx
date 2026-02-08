@@ -46,14 +46,10 @@ const HealthRow: React.FC<Props> = ({
           </div>
         </div>
         {safe_mode && (
-          <div className="pill" style={{ borderColor: '#ffd27b', color: '#ffd27b', marginTop: 8 }}>
-            Safe mode: scan/verify only (no writes)
-          </div>
+          <div className="pill pill-warning mt-2">Safe mode: scan/verify only (no writes)</div>
         )}
         {free_bytes != null && free_bytes < low_space_threshold && (
-          <div className="pill" style={{ borderColor: '#ff7b7b', color: '#ffb0b0', marginTop: 8 }}>
-            Low disk space at backup destination
-          </div>
+          <div className="pill pill-danger mt-2">Low disk space at backup destination</div>
         )}
       </>
     );

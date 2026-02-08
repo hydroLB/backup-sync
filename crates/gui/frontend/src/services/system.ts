@@ -1,6 +1,6 @@
 import { correlationId } from './correlation';
-import { safeInvoke, wrapError } from './ipc';
-import { AccessProbe, DestinationCheck, ServiceStatusDto } from './types';
+import { safeInvoke, safeInvokeWithTimeout, wrapError } from './ipc';
+import { AccessProbe, DestinationCheck, HardeningReport, ServiceStatusDto } from './types';
 import { UI_TUNING } from '../config/uiTuning';
 
 /**
@@ -131,6 +131,37 @@ export async function testAccess(): Promise<AccessProbe> {
     return await safeInvoke<AccessProbe>('test_access_cmd');
   } catch (error) {
     throw wrapError('[testAccess] Failed to test access permissions', error);
+  }
+}
+
+/**
+ * Purpose: Run first-run hardening checks to validate prerequisites for scheduling.
+ *
+ * Inputs: Flags controlling snapshot probing.
+ * Outputs: A `HardeningReport` payload.
+ * Ties to: Onboarding and minimal UI gating.
+ * Side effects: Invokes IPC calls that may create and remove a tiny probe file under the destination store.
+ * Why: Avoid enabling background writes before filesystem access is known-good.
+ */
+export async function hardeningCheck(opts?: {
+  check_snapshots?: boolean;
+  require_snapshots?: boolean;
+}): Promise<HardeningReport> {
+  try {
+    // Hardening can legitimately take longer than the global IPC timeout on slow disks.
+    // Keep this bounded so the UI never appears "stuck" indefinitely.
+    return await safeInvokeWithTimeout<HardeningReport>(
+      'hardening_check_cmd',
+      {
+        request: {
+          check_snapshots: !!opts?.check_snapshots,
+          require_snapshots: !!opts?.require_snapshots,
+        },
+      },
+      15_000,
+    );
+  } catch (error) {
+    throw wrapError('[hardeningCheck] Failed to run hardening checks', error);
   }
 }
 

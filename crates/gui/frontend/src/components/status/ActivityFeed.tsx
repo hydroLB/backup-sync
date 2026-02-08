@@ -26,10 +26,10 @@ const ActivityFeed: React.FC<Props> = ({ items }) => {
     return (
       <div>
         <div className="section-title">
-          <h4 style={{ margin: 0 }}>Activity</h4>
+          <h4 className="heading-compact">Activity</h4>
           <span className="pill">{items?.length || 0} items</span>
         </div>
-        <div className="watch-list" style={{ marginTop: 6 }}>
+        <div className="watch-list mt-2">
           {(items || []).slice(0, ACTIVITY_FEED_LIMIT).map((a) => (
             <div key={`${a.path}-${a.ts}`} className="watch-card">
               <div className="watch-card__title">

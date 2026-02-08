@@ -17,6 +17,8 @@ pub struct Status {
     pub last_files_backed_up: usize,
     pub last_error: Option<String>,
     pub last_dirty_count: usize,
+    #[serde(default)]
+    pub last_safety_warning: Option<backup_core::SafetyWarning>,
     pub uptime_secs: Option<i64>,
     pub version: Option<String>,
     pub free_bytes: Option<u64>,
@@ -25,6 +27,36 @@ pub struct Status {
     pub last_verify_issues: Option<usize>,
     pub recent_activity: Vec<backup_core::ActivityItem>,
     pub safe_mode: bool,
+    #[serde(default)]
+    pub destination_paused: bool,
+    #[serde(default)]
+    pub destination_pause_reason: Option<String>,
+    #[serde(default)]
+    pub destination_unavailable_ids: Vec<String>,
+    #[serde(default)]
+    pub destination_last_unavailable_ts: Option<i64>,
+    #[serde(default)]
+    pub destination_last_recovered_ts: Option<i64>,
+    #[serde(default)]
+    pub replication_last_run_ts: Option<i64>,
+    #[serde(default)]
+    pub replication_last_status: Option<String>,
+    #[serde(default)]
+    pub replication_last_error: Option<String>,
+    #[serde(default)]
+    pub replication_last_bytes_copied: u64,
+    #[serde(default)]
+    pub replication_last_blobs_copied: usize,
+    #[serde(default)]
+    pub replication_last_manifests_copied: usize,
+    #[serde(default)]
+    pub replication_last_manifests_deleted: usize,
+    #[serde(default)]
+    pub replication_last_pairs_ok: usize,
+    #[serde(default)]
+    pub replication_last_pairs_failed: usize,
+    #[serde(default)]
+    pub replication_last_targets_failed: Vec<String>,
     pub destinations: Vec<DestinationStatus>,
 }
 
@@ -40,7 +72,13 @@ pub struct DestinationStatus {
     pub id: String,
     pub label: Option<String>,
     pub path: std::path::PathBuf,
+    #[serde(default)]
+    pub reachable: bool,
+    #[serde(default)]
+    pub writable: bool,
     pub free_bytes: Option<u64>,
+    #[serde(default)]
+    pub message: String,
 }
 
 const DEFAULT_IPC_TIMEOUT: Duration = Duration::from_secs(2);
@@ -51,6 +89,7 @@ const STATUS_REQUEST_BYTES: &[u8] = br#"{"type":"Status"}"#;
 #[serde(tag = "type", content = "payload")]
 enum Request {
     SetSafeMode { enabled: bool },
+    ClearSafetyWarning,
 }
 
 #[derive(Deserialize)]
@@ -244,6 +283,61 @@ pub async fn set_safe_mode(enabled: bool) -> Result<()> {
     if !ack.ok {
         return Err(anyhow!(
             "status_api::set_safe_mode daemon returned ok=false"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+pub async fn clear_safety_warning() -> Result<()> {
+    let socket = super::socket_path()?;
+    if !socket.exists() {
+        return Err(anyhow!(
+            "status_api::clear_safety_warning daemon IPC socket not found at {:?}",
+            socket
+        ));
+    }
+    let op_timeout = resolve_ipc_timeout();
+    let stream = timeout(op_timeout, UnixStream::connect(&socket))
+        .await
+        .with_context(|| {
+            format!(
+                "status_api::clear_safety_warning timed out connecting to daemon socket {:?}",
+                socket
+            )
+        })?
+        .with_context(|| {
+            format!(
+                "status_api::clear_safety_warning failed to connect to {:?}",
+                socket
+            )
+        })?;
+
+    let request = serde_json::to_vec(&Request::ClearSafetyWarning)
+        .context("status_api::clear_safety_warning failed to serialize request")?;
+    let ack: AckReply = request_over_stream(stream, &request, op_timeout).await?;
+    if !ack.ok {
+        return Err(anyhow!(
+            "status_api::clear_safety_warning daemon returned ok=false"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub async fn clear_safety_warning() -> Result<()> {
+    let op_timeout = resolve_ipc_timeout();
+    let mut stream = ClientOptions::new()
+        .open(r"\\.\pipe\backup_sync_ipc")
+        .with_context(|| {
+            "status_api::clear_safety_warning failed to connect to named pipe \\\\.\\pipe\\backup_sync_ipc"
+        })?;
+    let request = serde_json::to_vec(&Request::ClearSafetyWarning)
+        .context("status_api::clear_safety_warning failed to serialize request")?;
+    let ack: AckReply = request_over_stream(&mut stream, &request, op_timeout).await?;
+    if !ack.ok {
+        return Err(anyhow!(
+            "status_api::clear_safety_warning daemon returned ok=false"
         ));
     }
     Ok(())

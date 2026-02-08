@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../ui/Button';
 
 type Props = {
   status: string;
@@ -29,22 +30,22 @@ const EmptyState: React.FC<Props> = ({
       <div className="empty-hero">
         <h3>Protect your first folder</h3>
         <p>Tap once, we handle the rest. You can always add more later.</p>
-        <button className="btn big-cta" onClick={onAddFolder}>
+        <Button className="big-cta" onClick={onAddFolder}>
           Protect my files
-        </button>
+        </Button>
         <div className="divider" />
         <div className="quick-grid">
-          <button className="btn secondary" onClick={onQuickAddDesktop}>
+          <Button tone="secondary" onClick={onQuickAddDesktop}>
             Add Desktop
-          </button>
-          <button className="btn secondary" onClick={onQuickAddDocuments}>
+          </Button>
+          <Button tone="secondary" onClick={onQuickAddDocuments}>
             Add Documents
-          </button>
-          <button className="btn secondary" onClick={onQuickAddDownloads}>
+          </Button>
+          <Button tone="secondary" onClick={onQuickAddDownloads}>
             Add Downloads
-          </button>
+          </Button>
         </div>
-        {status && <div style={{ marginTop: 8 }}>{status}</div>}
+        {status && <div className="mt-2">{status}</div>}
       </div>
     );
   } catch (error) {

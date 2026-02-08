@@ -10,10 +10,12 @@
 export const UI_TUNING = {
   planTooLargeCode: 'PLAN_TOO_LARGE',
   statusRefreshMs: 10_000,
+  liveHealthRefreshMs: 20_000,
   toastDismissMs: 4_000,
   lowSpaceThresholdBytes: 2 * 1024 * 1024 * 1024,
   resumeOnSpaceStorageKey: 'resume_on_space',
   onboardingDoneStorageKey: 'onboarding_done',
+  hardeningDoneStorageKey: 'hardening_done',
   runNow: {
     maxLogLines: 30,
     logPreviewMaxHeightPx: 200,

@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-engine")]
+
 use backup_core::{
     backup::{execution::BackupExecutor, planning, retention::policy::enforce},
     config::model::{
@@ -38,6 +40,8 @@ fn unchanged_files_not_backed_up_twice() {
         execution: ExecutionTuning::default(),
         planning: PlanningTuning::default(),
         runtime: backup_core::config::model::RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched: vec![WatchedPath {
             path: file.clone(),
@@ -51,6 +55,7 @@ fn unchanged_files_not_backed_up_twice() {
             path: dir.path().join("backups"),
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     };
     let (mut state, _) = StateStore::load_or_default(dir.path().join("state.json"))

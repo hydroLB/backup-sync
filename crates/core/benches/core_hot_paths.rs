@@ -1,5 +1,7 @@
-use backup_core::backup::retention;
-use backup_core::fs::hashing::hash_file;
+use backup_core::backup::versioned;
+use backup_core::config::model::{Destination, WatchedKind, WatchedPath};
+use backup_core::config::registry::config_defaults;
+use backup_core::hashing::sha256_file_hex;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use std::fs::{self, File};
 use std::io::Write;
@@ -22,22 +24,22 @@ fn create_payload(dir: &TempDir, name: &str, bytes: usize) -> PathBuf {
     path
 }
 
-/// Purpose: Build a temp directory with retention-style filenames.
+/// Purpose: Build a deterministic watched tree for versioned simulation benchmarks.
 ///
-/// Inputs: `count` as total files, `dir` as the temp directory.
-/// Outputs: A vector of file paths in the directory.
-/// Ties to: `retention::enforce` benchmark inputs.
+/// Inputs: `dir` as the temp directory and `count` as file count.
+/// Outputs: Path to the watched directory.
+/// Ties to: `versioned::simulate_backup_cycle_with_sample_limit` benchmark input.
 /// Side effects: Writes files to the filesystem.
-/// Why: Model realistic retention workloads with sortable timestamps.
-fn create_retention_files(dir: &TempDir, count: usize) -> Vec<PathBuf> {
-    let mut paths = Vec::with_capacity(count);
+/// Why: Keep benchmark inputs stable while exercising scanning and hashing.
+fn create_watched_tree(dir: &TempDir, count: usize) -> PathBuf {
+    let watched = dir.path().join("watched");
+    fs::create_dir_all(&watched).expect("bench::create_watched_tree failed to create watched dir");
+    let buf = vec![0xCD; 4 * 1024];
     for i in 0..count {
-        let name = format!("20240101-{:06}__file.txt", i);
-        let path = dir.path().join(name);
-        File::create(&path).expect("bench::create_retention_files failed to create file");
-        paths.push(path);
+        let path = watched.join(format!("f_{i:05}.bin"));
+        fs::write(&path, &buf).expect("bench::create_watched_tree failed to write file");
     }
-    paths
+    watched
 }
 
 /// Purpose: Benchmark the file hashing hot path.
@@ -52,35 +54,54 @@ fn bench_hashing(c: &mut Criterion) {
     let temp = TempDir::new().expect("bench::bench_hashing failed to create temp dir");
     let path = create_payload(&temp, "payload.bin", 16 * 1024 * 1024);
     group.throughput(Throughput::Bytes(16 * 1024 * 1024));
-    group.bench_function(BenchmarkId::from_parameter("hash_file"), |b| {
+    group.bench_function(BenchmarkId::from_parameter("sha256_file_hex"), |b| {
         b.iter(|| {
-            let _ = hash_file(&path).expect("bench::bench_hashing hash_file failed");
+            let _ = sha256_file_hex(&path).expect("bench::bench_hashing sha256_file_hex failed");
         });
     });
     group.finish();
 }
 
-/// Purpose: Benchmark retention pruning behavior.
+/// Purpose: Benchmark the versioned simulation hot path.
 ///
 /// Inputs: Criterion harness instance.
 /// Outputs: Criterion measurements recorded by the runner.
-/// Ties to: `backup::retention::enforce` pruning logic.
-/// Side effects: Creates and deletes files in a temp directory.
-/// Why: Track retention performance with realistic file counts.
-fn bench_retention(c: &mut Criterion) {
-    let mut group = c.benchmark_group("retention");
-    group.bench_function("enforce_200_keep_100", |b| {
+/// Ties to: `backup::versioned` scanning and hashing logic.
+/// Side effects: Reads destination store metadata; hashes watched files.
+/// Why: Track the end-to-end scan+diff cost that dominates steady-state cycles.
+fn bench_versioned_simulate(c: &mut Criterion) {
+    let mut group = c.benchmark_group("versioned");
+    group.bench_function("simulate_200_files", |b| {
         b.iter_batched(
             || {
-                let dir = TempDir::new().expect("bench::bench_retention failed to create temp dir");
-                let files = create_retention_files(&dir, 200);
-                (dir, files)
+                let dir = TempDir::new().expect("bench::bench_versioned_simulate temp dir");
+                let watched = create_watched_tree(&dir, 200);
+                let dest = dir.path().join("dest");
+                fs::create_dir_all(&dest).expect("bench::bench_versioned_simulate dest dir");
+                let mut cfg = config_defaults().expect("bench::bench_versioned_simulate defaults");
+                cfg.backup_root = dest.clone();
+                cfg.runtime.source_snapshots_enabled = false;
+                cfg.destinations = vec![Destination {
+                    id: "primary".to_string(),
+                    path: dest.clone(),
+                    label: Some("Primary".to_string()),
+                    max_backups_per_file: None,
+                    replicate_to: vec![],
+                }];
+                cfg.watched = vec![WatchedPath {
+                    path: watched,
+                    kind: WatchedKind::Directory,
+                    enabled: true,
+                    destination_id: "primary".to_string(),
+                    max_backups_per_file: Some(5),
+                }];
+                versioned::run_backup_cycle(&cfg)
+                    .expect("bench::bench_versioned_simulate seed run");
+                (dir, cfg)
             },
-            |(dir, files)| {
-                let _ = retention::enforce(100, files)
-                    .expect("bench::bench_retention retention::enforce failed");
-                fs::read_dir(dir.path())
-                    .expect("bench::bench_retention failed to list retention dir");
+            |(_dir, cfg)| {
+                let _ = versioned::simulate_backup_cycle_with_sample_limit(&cfg, 0)
+                    .expect("bench::bench_versioned_simulate simulate failed");
             },
             BatchSize::SmallInput,
         );
@@ -97,7 +118,7 @@ fn bench_retention(c: &mut Criterion) {
 /// Why: Keep a single entry point for criterion registration.
 fn core_hot_paths(c: &mut Criterion) {
     bench_hashing(c);
-    bench_retention(c);
+    bench_versioned_simulate(c);
 }
 
 criterion_group!(benches, core_hot_paths);

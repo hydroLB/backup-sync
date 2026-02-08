@@ -1,15 +1,8 @@
-use backup_core::{
-    backup::{
-        execution::BackupExecutor,
-        planning::{enforce_plan_limits, PlannedItem},
-    },
-    config::{
-        model::{Config, ExecutionTuning, HashingTuning, PlanningTuning, WatchedKind, WatchedPath},
-        validate,
-    },
-    state::models::StoredState,
+use backup_core::config::{
+    model::{Config, ExecutionTuning, HashingTuning, PlanningTuning, WatchedKind, WatchedPath},
+    validate,
 };
-use std::{fs, time::SystemTime};
+use std::fs;
 use tempfile::tempdir;
 
 /// Purpose: Builds a baseline config for validation tests with a single destination.
@@ -42,6 +35,8 @@ fn base_config(backup_root: std::path::PathBuf, watched: Vec<WatchedPath>) -> Co
         execution: ExecutionTuning::default(),
         planning: PlanningTuning::default(),
         runtime: backup_core::config::model::RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched,
         destinations: vec![backup_core::config::model::Destination {
@@ -49,6 +44,7 @@ fn base_config(backup_root: std::path::PathBuf, watched: Vec<WatchedPath>) -> Co
             path: backup_root,
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     }
 }
@@ -115,24 +111,9 @@ fn validate_rejects_backup_root_that_is_file() {
 /// Ties to: `enforce_plan_limits` guardrails.
 /// Side effects: None.
 /// Why: keep cycles bounded to avoid runaway IO.
+#[cfg(feature = "legacy-engine")]
 fn plan_limit_is_enforced() {
-    let item = PlannedItem {
-        src: std::path::PathBuf::from("/tmp/file"),
-        len: 1,
-        mtime: 0,
-        reason: "test".into(),
-        precomputed_hash: None,
-        key: "k".into(),
-        destination_root: std::path::PathBuf::from("/tmp/dest"),
-        max_copies: 1,
-    };
-    let mut plan = Vec::new();
-    let tuning = PlanningTuning::default();
-    plan.resize(tuning.max_plan_items + 1, item);
-    assert!(
-        enforce_plan_limits(&plan, &tuning).is_err(),
-        "plan should fail when exceeding MAX_PLAN_ITEMS"
-    );
+    legacy::plan_limit_is_enforced_impl();
 }
 
 #[test]
@@ -179,53 +160,91 @@ fn unwritable_destination_is_rejected() {
 /// Ties to: `BackupExecutor::ensure_free_space` guard logic.
 /// Side effects: None.
 /// Why: prevent starting copies when the target has insufficient space.
+#[cfg(feature = "legacy-engine")]
 fn min_free_space_blocks_execution() {
-    let backups = tempdir()
-        .expect("validation_limits::min_free_space_blocks_execution failed to create backups dir");
-    let src_dir = tempdir()
-        .expect("validation_limits::min_free_space_blocks_execution failed to create src dir");
-    let src = src_dir.path().join("file.txt");
-    fs::write(&src, "hello")
-        .expect("validation_limits::min_free_space_blocks_execution failed to write source file");
-    let meta = fs::metadata(&src).expect(
-        "validation_limits::min_free_space_blocks_execution failed to read source metadata",
-    );
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    legacy::min_free_space_blocks_execution_impl();
+}
 
-    let plan = vec![PlannedItem {
-        src: src.clone(),
-        len: meta.len(),
-        mtime,
-        reason: "test".into(),
-        precomputed_hash: None,
-        key: src.to_string_lossy().into_owned(),
-        destination_root: backups.path().to_path_buf(),
-        max_copies: 1,
-    }];
-    let mut state = StoredState::default();
-    let exec = BackupExecutor {
-        max_parallel_copies: 1,
-        max_bytes_per_second: None,
-        min_free_space_bytes: Some(u64::MAX / 2),
-        tuning: ExecutionTuning::default(),
-        hashing: HashingTuning::default(),
+#[cfg(feature = "legacy-engine")]
+mod legacy {
+    use super::*;
+    use backup_core::backup::{
+        execution::BackupExecutor,
+        planning::{enforce_plan_limits, PlannedItem},
     };
-    let result = exec
-        .execute(&plan, &mut state)
-        .expect("validation_limits::min_free_space_blocks_execution failed to execute plan");
-    assert_eq!(result.backed_up, 0);
-    assert_eq!(result.errors, 1);
-    let err = state.last_error.as_deref().unwrap_or_default();
-    assert!(
-        err.contains("below configured minimum"),
-        "unexpected error: {}",
-        err
-    );
+    use backup_core::state::models::StoredState;
+    use std::time::SystemTime;
+
+    pub fn plan_limit_is_enforced_impl() {
+        let item = PlannedItem {
+            src: std::path::PathBuf::from("/tmp/file"),
+            len: 1,
+            mtime: 0,
+            reason: "test".into(),
+            precomputed_hash: None,
+            key: "k".into(),
+            destination_root: std::path::PathBuf::from("/tmp/dest"),
+            max_copies: 1,
+        };
+        let mut plan = Vec::new();
+        let tuning = PlanningTuning::default();
+        plan.resize(tuning.max_plan_items + 1, item);
+        assert!(
+            enforce_plan_limits(&plan, &tuning).is_err(),
+            "plan should fail when exceeding MAX_PLAN_ITEMS"
+        );
+    }
+
+    pub fn min_free_space_blocks_execution_impl() {
+        let backups = tempdir().expect(
+            "validation_limits::min_free_space_blocks_execution failed to create backups dir",
+        );
+        let src_dir = tempdir()
+            .expect("validation_limits::min_free_space_blocks_execution failed to create src dir");
+        let src = src_dir.path().join("file.txt");
+        fs::write(&src, "hello").expect(
+            "validation_limits::min_free_space_blocks_execution failed to write source file",
+        );
+        let meta = fs::metadata(&src).expect(
+            "validation_limits::min_free_space_blocks_execution failed to read source metadata",
+        );
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let plan = vec![PlannedItem {
+            src: src.clone(),
+            len: meta.len(),
+            mtime,
+            reason: "test".into(),
+            precomputed_hash: None,
+            key: src.to_string_lossy().into_owned(),
+            destination_root: backups.path().to_path_buf(),
+            max_copies: 1,
+        }];
+        let mut state = StoredState::default();
+        let exec = BackupExecutor {
+            max_parallel_copies: 1,
+            max_bytes_per_second: None,
+            min_free_space_bytes: Some(u64::MAX / 2),
+            tuning: ExecutionTuning::default(),
+            hashing: HashingTuning::default(),
+        };
+        let result = exec
+            .execute(&plan, &mut state)
+            .expect("validation_limits::min_free_space_blocks_execution failed to execute plan");
+        assert_eq!(result.backed_up, 0);
+        assert_eq!(result.errors, 1);
+        let err = state.last_error.as_deref().unwrap_or_default();
+        assert!(
+            err.contains("below configured minimum"),
+            "unexpected error: {}",
+            err
+        );
+    }
 }
 
 #[test]

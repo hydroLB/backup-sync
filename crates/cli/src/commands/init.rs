@@ -24,6 +24,7 @@ pub async fn init_wizard() -> Result<()> {
             path: cfg.backup_root.clone(),
             label: Some("Primary".into()),
             max_backups_per_file: Some(cfg.max_backups_per_file),
+            replicate_to: vec![],
         });
     }
 

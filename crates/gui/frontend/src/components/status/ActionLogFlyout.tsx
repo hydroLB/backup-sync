@@ -43,15 +43,11 @@ const ActionLogFlyout: React.FC<Props> = ({ items }) => {
         <button className="btn secondary" onClick={toggleOpen}>
           {open ? 'Hide activity' : 'What just happened?'}
         </button>
-        {latest && !open && (
-          <span className="muted" style={{ marginLeft: 8 }}>
-            Last: {latest.msg}
-          </span>
-        )}
+        {latest && !open && <span className="muted ml-2">Last: {latest.msg}</span>}
         {open && (
           <div className="action-log__panel">
-            <div className="section-title" style={{ marginBottom: 6 }}>
-              <h4 style={{ margin: 0 }}>Recent activity</h4>
+            <div className="section-title mb-6">
+              <h4 className="heading-compact">Recent activity</h4>
               <span className="pill">{items.length} events</span>
             </div>
             {items.length === 0 && (

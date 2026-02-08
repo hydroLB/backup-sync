@@ -1,7 +1,13 @@
+use crate::api::{config_api, status_api};
 use crate::commands;
 use crate::tray;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::api::dialog;
 use tauri::async_runtime;
 use tauri::{Manager, SystemTrayEvent, WindowEvent};
+
+static IS_QUITTING: AtomicBool = AtomicBool::new(false);
+static LAST_CLOSE_BACKUP_AT: AtomicBool = AtomicBool::new(false);
 
 /// Purpose: Shows and focuses the main window.
 ///
@@ -18,28 +24,24 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Purpose: Handles tray events by routing to the appropriate async actions.
+/// Purpose: Handles tray events by routing to the appropriate actions.
 ///
 /// Inputs: the app handle and the system tray event.
 /// Outputs: `()` after dispatching the event.
 /// Ties to: tray menu wiring in `app::run`.
-/// Side effects: May spawn async tasks and may exit the app.
-/// Why: keep the `tauri::Builder` wiring readable while keeping actions testable.
+/// Side effects: May show the main window or exit the app.
+/// Why: keep the `tauri::Builder` wiring readable and keep the tray UX minimal.
 pub(crate) fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
+    if IS_QUITTING.load(Ordering::Relaxed) {
+        return;
+    }
     match event {
-        SystemTrayEvent::LeftClick { .. } => show_main_window(app),
+        // macOS convention: left click opens the tray menu. Avoid forcing the main window
+        // to the foreground on every click.
+        SystemTrayEvent::DoubleClick { .. } => show_main_window(app),
         SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
             tray::SHOW => show_main_window(app),
-            tray::RUN_NOW => spawn_run_now(app),
-            tray::VERIFY => spawn_verify(),
-            tray::INSTALL => spawn_install_service(app),
-            tray::EXPORT_LOGS => spawn_export_logs(),
-            tray::CHECK_UPDATES => spawn_updates(),
-            tray::EXPORT_HEALTH => spawn_export_health(),
-            tray::DOCTOR => spawn_doctor(app),
-            tray::RESTART => spawn_restart(app),
-            tray::TOGGLE_SAFE_MODE => spawn_toggle_safe_mode(app),
-            tray::QUIT => app.exit(0),
+            tray::QUIT => confirm_and_quit(app),
             _ => {}
         },
         _ => {}
@@ -55,144 +57,175 @@ pub(crate) fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) 
 /// Why: avoid macOS-specific close quirks leaving a blank re-opened window.
 pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event.event() {
-        // Prevent Tauri/macOS from just hiding the window; force a full quit so it does not re-open blank.
+        if IS_QUITTING.load(Ordering::Relaxed) {
+            // Allow a real quit to close the window; don't convert it into a hide-to-tray.
+            return;
+        }
+        // Prevent the app from fully quitting on window close. The menu bar icon remains active.
         api.prevent_close();
-        // Ask Tauri to terminate cleanly so we don't leave stray tray icons/processes.
-        event.window().app_handle().exit(0);
+        let _ = event.window().hide();
+
+        // Best-effort "last backup" on window close (hide-to-tray) without blocking the UI thread.
+        // Guard to avoid repeated triggers from rapid close/reopen interactions.
+        if !LAST_CLOSE_BACKUP_AT.swap(true, Ordering::Relaxed) {
+            async_runtime::spawn(async move {
+                // Small debounce window; allow the close/hide to complete.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                if let Ok(cfg) = config_api::get_config() {
+                    if !cfg.safe_mode {
+                        let _ = commands::backup::run::run_now_cmd(Some("close-final".to_string())).await;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                LAST_CLOSE_BACKUP_AT.store(false, Ordering::Relaxed);
+            });
+        }
     }
 }
 
-/// Purpose: Spawns an async task to run a backup immediately.
+/// Purpose: Ask for confirmation before quitting because quitting pauses backups.
 ///
 /// Inputs: the Tauri app handle.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray run now actions.
-/// Side effects: Triggers a backup run and logs failures to stderr.
-/// Why: keep tray actions non-blocking.
-fn spawn_run_now(_app: &tauri::AppHandle) {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::backup::run::run_now_cmd(None).await {
-            eprintln!("run_now tray action failed: {:?}", e);
-        }
-    });
+/// Outputs: `()` after handling the quit flow.
+/// Ties to: tray Quit action.
+/// Side effects: Shows a confirmation dialog, may pause backups, may stop the daemon service on macOS, and may exit the app.
+/// Why: avoid accidental shutdown of background backups and make the consequence explicit.
+fn confirm_and_quit(app: &tauri::AppHandle) {
+    if IS_QUITTING.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let handle = app.clone();
+    dialog::confirm(
+        Option::<&tauri::Window>::None,
+        "Quit Backup Sync?",
+        "Quitting will stop background backups. Are you sure you want to quit?",
+        move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            if IS_QUITTING.swap(true, Ordering::Relaxed) {
+                return;
+            }
+
+            // Disable tray quit item immediately to prevent duplicate clicks.
+            let tray_handle = handle.tray_handle();
+            let _ = tray_handle.get_item(tray::QUIT).set_enabled(false);
+            let _ = tray_handle.get_item(tray::QUIT).set_title("Quitting…");
+
+            if let Some(window) = handle.get_window("main") {
+                let _ = window.hide();
+            }
+
+            async_runtime::spawn(async move {
+                quit_sequence(handle).await;
+            });
+        },
+    );
 }
 
-/// Purpose: Spawns an async task to verify backups.
+/// Summary: Run one last backup before quitting with a time bound.
+///
+/// Inputs: None.
+/// Outputs: `Ok(())` when the final backup completed; otherwise a user-facing failure string.
+/// Side effects: Performs backup IO and persists state updates.
+/// Error handling: Returns a string describing the failure so the caller can prompt the user.
+/// Ties to other methods: Used by `quit_sequence` prior to stopping background work.
+/// Why this exists: Avoid losing recent changes when the user quits from the menu bar.
+async fn run_final_backup_best_effort() -> Result<(), String> {
+    let timeout = std::time::Duration::from_secs(3);
+    match tokio::time::timeout(
+        timeout,
+        commands::backup::run::run_now_cmd(Some("quit-final".to_string())),
+    )
+    .await
+    {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(err.message),
+        Err(_) => Err(format!(
+            "Final backup did not finish within {} seconds.",
+            timeout.as_secs()
+        )),
+    }
+}
+
+/// Summary: Execute the full quit flow off the tray event thread.
+///
+/// Inputs: The application handle.
+/// Outputs: None.
+/// Side effects: Pauses the daemon, optionally runs a final backup, stops the background service on macOS, closes windows, and exits.
+/// Error handling: Prompts the user if the final backup fails and resumes scheduling if they cancel quit.
+/// Ties to other methods: Spawned by `confirm_and_quit` after user confirmation.
+/// Why this exists: Keep tray quit responsive and ensure a clean shutdown without re-opening the window.
+async fn quit_sequence(app: tauri::AppHandle) {
+    // Hard stop guard: ensure Quit actually terminates even if background tasks keep
+    // the process alive. This is only armed after the user confirms quitting.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(8));
+        std::process::exit(0);
+    });
+
+    let cfg_safe_mode = config_api::get_config()
+        .map(|cfg| cfg.safe_mode)
+        .unwrap_or(true);
+
+    if !cfg_safe_mode {
+        // Best-effort only; quitting is an explicit stop and should not hang.
+        let _ = run_final_backup_best_effort().await;
+    }
+
+    pause_backups_best_effort();
+    stop_background_daemon_best_effort_async().await;
+
+    if let Some(window) = app.get_window("main") {
+        let _ = window.close();
+    }
+    app.exit(0);
+}
+
+/// Purpose: Pause backups before quitting by enabling safe mode in config and daemon.
 ///
 /// Inputs: none.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray verify actions.
-/// Side effects: Triggers verification and logs failures to stderr.
-/// Why: keep verification off the main thread.
-fn spawn_verify() {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::backup::verify::verify_cmd(None).await {
-            eprintln!("verify tray action failed: {:?}", e);
+/// Outputs: `()` after best-effort attempts complete.
+/// Ties to: `confirm_and_quit`.
+/// Side effects: Writes configuration and attempts to update the running daemon over IPC.
+/// Why: quitting should stop background backups immediately and predictably.
+fn pause_backups_best_effort() {
+    if let Ok(mut cfg) = config_api::get_config() {
+        if !cfg.safe_mode {
+            cfg.safe_mode = true;
+            let _ = config_api::save_config(&cfg);
         }
+    }
+    async_runtime::spawn(async {
+        let _ = status_api::set_safe_mode(true).await;
     });
 }
 
-/// Purpose: Spawns an async task to install the background service.
-///
-/// Inputs: the Tauri app handle.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray service installation actions.
-/// Side effects: Runs service installation commands and logs failures.
-/// Why: keep service setup off the UI thread.
-fn spawn_install_service(_app: &tauri::AppHandle) {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::service::install_service_cmd(None).await {
-            eprintln!("install service failed: {:?}", e);
+#[cfg(target_os = "macos")]
+async fn stop_background_daemon_best_effort_async() {
+    use std::process::Command;
+
+    const LABEL: &str = "com.backup_sync.daemon";
+
+    let stop = async_runtime::spawn_blocking(move || {
+        let uid = Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if uid.is_empty() {
+            return;
         }
+        let target = format!("gui/{}/{}", uid, LABEL);
+        let _ = Command::new("launchctl")
+            .args(["bootout", "-k", &target])
+            .output();
     });
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), stop).await;
 }
 
-/// Purpose: Spawns an async task to export logs.
-///
-/// Inputs: none.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray export logs actions.
-/// Side effects: Writes an exported log file and logs failures.
-/// Why: keep log export non-blocking.
-fn spawn_export_logs() {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::logs::export_logs_cmd() {
-            eprintln!("export logs failed: {:?}", e);
-        }
-    });
-}
-
-/// Purpose: Spawns an async task to check for updates.
-///
-/// Inputs: none.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray update check actions.
-/// Side effects: Reads the update feed file and logs failures.
-/// Why: keep update checks asynchronous.
-fn spawn_updates() {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::updates::check_updates_cmd().await {
-            eprintln!("update check failed: {:?}", e);
-        }
-    });
-}
-
-/// Purpose: Spawns an async task to export a health report.
-///
-/// Inputs: none.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray health report actions.
-/// Side effects: Writes a health report file and logs failures.
-/// Why: keep report generation asynchronous.
-fn spawn_export_health() {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::backup::verify::export_health_report_cmd(None).await {
-            eprintln!("export health failed: {:?}", e);
-        }
-    });
-}
-
-/// Purpose: Spawns an async task to generate a doctor report.
-///
-/// Inputs: the Tauri app handle.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray diagnostics actions.
-/// Side effects: Writes a doctor report file and logs failures.
-/// Why: keep diagnostics export off the UI thread.
-fn spawn_doctor(_app: &tauri::AppHandle) {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::support::diagnostics::doctor_report_cmd(None).await {
-            eprintln!("doctor report failed: {:?}", e);
-        }
-    });
-}
-
-/// Purpose: Spawns an async task to restart the daemon.
-///
-/// Inputs: the Tauri app handle.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray restart actions.
-/// Side effects: Runs restart commands and logs failures.
-/// Why: keep restart operations asynchronous.
-fn spawn_restart(_app: &tauri::AppHandle) {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::service::restart_daemon_cmd(None) {
-            eprintln!("restart daemon failed: {:?}", e);
-        }
-    });
-}
-
-/// Purpose: Spawns a blocking task to toggle safe mode.
-///
-/// Inputs: the Tauri app handle.
-/// Outputs: `()` after spawning the task.
-/// Ties to: tray safe mode toggle actions.
-/// Side effects: Writes the config file to toggle safe mode.
-/// Why: isolate config writes from the UI thread.
-fn spawn_toggle_safe_mode(_app: &tauri::AppHandle) {
-    async_runtime::spawn(async move {
-        if let Err(e) = commands::config::toggle_safe_mode_cmd(None, None).await {
-            eprintln!("toggle safe mode failed: {:?}", e);
-        }
-    });
-}
+#[cfg(not(target_os = "macos"))]
+async fn stop_background_daemon_best_effort_async() {}

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { validateIgnorePatterns } from '../utils/validation';
 import { UI_TUNING } from '../config/uiTuning';
+import { Button } from './ui/Button';
+import { FormField } from './ui/FormField';
 
 type Props = {
   skip_hidden: boolean;
@@ -116,25 +118,25 @@ const PerformanceControls: React.FC<Props> = ({
   return (
     <>
       <div className="inline-actions">
-        <button className="btn secondary" onClick={() => applyPreset('quiet')}>
+        <Button tone="secondary" size="sm" onClick={() => applyPreset('quiet')}>
           Quiet
-        </button>
-        <button className="btn secondary" onClick={() => applyPreset('balanced')}>
+        </Button>
+        <Button tone="secondary" size="sm" onClick={() => applyPreset('balanced')}>
           Balanced
-        </button>
-        <button className="btn secondary" onClick={() => applyPreset('fast')}>
+        </Button>
+        <Button tone="secondary" size="sm" onClick={() => applyPreset('fast')}>
           Fast
-        </button>
-        <button className="btn secondary" onClick={applyCommonIgnores}>
+        </Button>
+        <Button tone="secondary" size="sm" onClick={applyCommonIgnores}>
           Add common ignores
-        </button>
-        <button className="btn secondary" onClick={toggleAdvanced}>
+        </Button>
+        <Button tone="secondary" size="sm" onClick={toggleAdvanced}>
           {showAdvanced ? 'Hide advanced' : 'Advanced'}
-        </button>
+        </Button>
       </div>
       {showAdvanced && (
         <>
-          <label style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <label className="label-row form-field">
             <input
               type="checkbox"
               checked={skip_hidden}
@@ -144,8 +146,7 @@ const PerformanceControls: React.FC<Props> = ({
               Skip hidden files/folders (recommended)
             </span>
           </label>
-          <label>
-            Ignore patterns (one glob per line)
+          <FormField label="Ignore patterns (one glob per line)">
             <textarea
               value={(ignore_patterns || []).join('\n')}
               onChange={(e) => {
@@ -157,33 +158,20 @@ const PerformanceControls: React.FC<Props> = ({
                   onChange({ ignore_patterns: next });
                 }
               }}
-              style={{
-                minHeight: 80,
-                background: 'rgba(255,255,255,0.04)',
-                color: 'var(--text)',
-                border: '1px solid var(--border)',
-                borderRadius: 10,
-                padding: 10,
-              }}
+              className="textarea-control"
             />
-            <div
-              className="muted"
-              style={{ marginTop: 4 }}
-              title="Use ** for folders, *.ext for files."
-            >
+            <div className="muted mt-1" title="Use ** for folders, *.ext for files.">
               Invalid globs will be blocked on save; use ** for folders, *.ext for files.
             </div>
-          </label>
-          <label>
-            Max parallel copies
+          </FormField>
+          <FormField label="Max parallel copies">
             <input
               type="number"
               value={max_parallel_copies}
               onChange={(e) => onChange({ max_parallel_copies: Number(e.target.value) || 1 })}
             />
-          </label>
-          <label>
-            Max bytes per second (0 = unlimited)
+          </FormField>
+          <FormField label="Max bytes per second (0 = unlimited)">
             <input
               type="number"
               value={max_bytes_per_second ?? 0}
@@ -192,9 +180,8 @@ const PerformanceControls: React.FC<Props> = ({
                 onChange({ max_bytes_per_second: val > 0 ? val : null });
               }}
             />
-          </label>
-          <label>
-            Minimum free space to continue (bytes, 0 = off)
+          </FormField>
+          <FormField label="Minimum free space to continue (bytes, 0 = off)">
             <input
               type="number"
               value={min_free_space_bytes ?? 0}
@@ -203,7 +190,7 @@ const PerformanceControls: React.FC<Props> = ({
                 onChange({ min_free_space_bytes: val > 0 ? val : null });
               }}
             />
-          </label>
+          </FormField>
         </>
       )}
     </>

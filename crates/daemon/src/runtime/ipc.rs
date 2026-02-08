@@ -26,6 +26,7 @@ use tokio::net::UnixListener;
 enum Request {
     Status,
     SetSafeMode { enabled: bool },
+    ClearSafetyWarning,
 }
 
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
@@ -35,7 +36,10 @@ struct DestinationStatus {
     id: String,
     label: Option<String>,
     path: PathBuf,
+    reachable: bool,
+    writable: bool,
     free_bytes: Option<u64>,
+    message: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +48,7 @@ struct StatusReply {
     last_files_backed_up: usize,
     last_error: Option<String>,
     last_dirty_count: usize,
+    last_safety_warning: Option<backup_core::SafetyWarning>,
     uptime_secs: Option<i64>,
     version: Option<String>,
     free_bytes: Option<u64>,
@@ -52,6 +57,21 @@ struct StatusReply {
     last_verify_issues: Option<usize>,
     recent_activity: Vec<backup_core::ActivityItem>,
     safe_mode: bool,
+    destination_paused: bool,
+    destination_pause_reason: Option<String>,
+    destination_unavailable_ids: Vec<String>,
+    destination_last_unavailable_ts: Option<i64>,
+    destination_last_recovered_ts: Option<i64>,
+    replication_last_run_ts: Option<i64>,
+    replication_last_status: Option<String>,
+    replication_last_error: Option<String>,
+    replication_last_bytes_copied: u64,
+    replication_last_blobs_copied: usize,
+    replication_last_manifests_copied: usize,
+    replication_last_manifests_deleted: usize,
+    replication_last_pairs_ok: usize,
+    replication_last_pairs_failed: usize,
+    replication_last_targets_failed: Vec<String>,
     destinations: Vec<DestinationStatus>,
 }
 
@@ -95,11 +115,30 @@ fn build_status_reply(
     let uptime_secs = state.start_ts.map(|ts| Utc::now().timestamp() - ts);
     let dest_status: Vec<_> = destinations
         .iter()
-        .map(|d| DestinationStatus {
-            id: d.id.clone(),
-            label: d.label.clone(),
-            path: d.path.clone(),
-            free_bytes: free_space_or_warn(&d.path),
+        .map(|d| {
+            let reachable = d.path.exists() && d.path.is_dir();
+            let free_bytes = if reachable {
+                free_space_or_warn(&d.path)
+            } else {
+                None
+            };
+            let writable = free_bytes.is_some();
+            let message = if !reachable {
+                "Destination not found (drive disconnected?)".to_string()
+            } else if writable {
+                "OK".to_string()
+            } else {
+                "Destination present but free space unavailable".to_string()
+            };
+            DestinationStatus {
+                id: d.id.clone(),
+                label: d.label.clone(),
+                path: d.path.clone(),
+                reachable,
+                writable,
+                free_bytes,
+                message,
+            }
         })
         .collect();
     let free_bytes = dest_status.first().and_then(|d| d.free_bytes);
@@ -108,6 +147,7 @@ fn build_status_reply(
         last_files_backed_up: state.last_files_backed_up,
         last_error: state.last_error.clone(),
         last_dirty_count: state.last_dirty_count,
+        last_safety_warning: state.last_safety_warning.clone(),
         uptime_secs,
         version: state.version.clone(),
         free_bytes,
@@ -122,6 +162,21 @@ fn build_status_reply(
             .cloned()
             .collect(),
         safe_mode: state.safe_mode,
+        destination_paused: state.destination_paused,
+        destination_pause_reason: state.destination_pause_reason.clone(),
+        destination_unavailable_ids: state.destination_unavailable_ids.clone(),
+        destination_last_unavailable_ts: state.destination_last_unavailable_ts,
+        destination_last_recovered_ts: state.destination_last_recovered_ts,
+        replication_last_run_ts: state.replication_last_run_ts,
+        replication_last_status: state.replication_last_status.clone(),
+        replication_last_error: state.replication_last_error.clone(),
+        replication_last_bytes_copied: state.replication_last_bytes_copied,
+        replication_last_blobs_copied: state.replication_last_blobs_copied,
+        replication_last_manifests_copied: state.replication_last_manifests_copied,
+        replication_last_manifests_deleted: state.replication_last_manifests_deleted,
+        replication_last_pairs_ok: state.replication_last_pairs_ok,
+        replication_last_pairs_failed: state.replication_last_pairs_failed,
+        replication_last_targets_failed: state.replication_last_targets_failed.clone(),
         destinations: dest_status,
     }
 }
@@ -302,6 +357,26 @@ pub async fn spawn_server(
                                 }
                             }
                         }
+                        Request::ClearSafetyWarning => {
+                            {
+                                let mut st = state.lock().await;
+                                st.last_safety_warning = None;
+                            }
+                            match timeout(ipc_timeout, write_ack_reply(&mut stream, true)).await {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write error: {e:?}"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write timeout after {:?}",
+                                        ipc_timeout
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -371,6 +446,26 @@ pub async fn spawn_server(
                             {
                                 let mut st = state.lock().await;
                                 st.safe_mode = enabled;
+                            }
+                            match timeout(ipc_timeout, write_ack_reply(&mut server, true)).await {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write error: {e:?}"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::error!(
+                                        "daemon::runtime::ipc spawn_server write timeout after {:?}",
+                                        ipc_timeout
+                                    );
+                                }
+                            }
+                        }
+                        Request::ClearSafetyWarning => {
+                            {
+                                let mut st = state.lock().await;
+                                st.last_safety_warning = None;
                             }
                             match timeout(ipc_timeout, write_ack_reply(&mut server, true)).await {
                                 Ok(Ok(_)) => {}

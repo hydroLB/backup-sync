@@ -25,12 +25,15 @@ pub fn default_config() -> Result<Config> {
         planning: PlanningTuning::default(),
         runtime: RuntimeTuning::default(),
         safe_mode: false,
+        encryption: model::EncryptionConfig::default(),
+        compression: model::CompressionConfig::default(),
         watched: vec![],
         destinations: vec![crate::config::model::Destination {
             id: model::default_destination_id(),
             path: backup_root,
             label: Some("Primary".into()),
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     })
 }

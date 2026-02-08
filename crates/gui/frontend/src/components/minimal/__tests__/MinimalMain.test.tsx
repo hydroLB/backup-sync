@@ -11,8 +11,43 @@ vi.mock('../../../services/config', () => ({
 
 vi.mock('../../../services/ipc', () => ({
   safeInvoke: vi.fn(),
+  tauriAvailable: () => false,
   wrapError: (context: string, error: unknown) => new Error(`${context}: ${String(error)}`),
 }));
+
+/**
+ * Summary: Build a successful hardening report payload for background checks.
+ *
+ * Inputs: None.
+ * Outputs: A `HardeningReport` compatible object for IPC mocks.
+ * Side effects: None.
+ * Error handling: None.
+ * Ties to other methods: Used by `renderMinimal` safeInvoke default implementation.
+ * Why this exists: Keep background hardening deterministic in minimal UI tests.
+ */
+function makePassingHardeningReport() {
+  return {
+    ok: true,
+    message: 'ok',
+    watched_ok: ['/tmp/project'],
+    watched_issues: [],
+    destinations: [
+      {
+        id: 'default',
+        path: '/tmp/backups',
+        ok: true,
+        free_bytes: 1024 * 1024 * 1024,
+        required_free_bytes: 1024 * 1024,
+        message: 'ok',
+      },
+    ],
+    snapshots: {
+      checked: false,
+      supported: true,
+      message: 'not checked',
+    },
+  };
+}
 
 /**
  * Purpose: Build a complete config object for minimal UI tests.
@@ -98,9 +133,20 @@ async function renderMinimal(
     const cfg = makeConfig(overrides);
     (loadConfig as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(cfg);
     (saveConfig as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (safeInvoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (command: string, payload?: { desired?: boolean }) => {
+        if (command === 'hardening_check_cmd') {
+          return makePassingHardeningReport();
+        }
+        if (command === 'toggle_safe_mode_cmd') {
+          return payload?.desired ?? false;
+        }
+        return null;
+      },
+    );
     const onEvent = vi.fn();
     render(<MinimalMain onEvent={onEvent} />);
-    await screen.findByText('Destination');
+    await screen.findByRole('heading', { name: 'Destination' });
     return { onEvent };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -109,7 +155,7 @@ async function renderMinimal(
 }
 
 /**
- * Purpose: Verify the minimal UI exposes running toggle, interval editor, and only restore action.
+ * Purpose: Verify the minimal UI exposes running toggle, automatic cadence summary, and only restore action.
  *
  * Inputs: None.
  * Outputs: Asserts presence/absence of key controls.
@@ -120,43 +166,16 @@ async function assertOnlyRestoreActionVisible(): Promise<void> {
   try {
     await renderMinimal();
     expect(screen.getByLabelText('Running')).toBeInTheDocument();
-    expect(screen.getByLabelText('Backup interval minutes')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restore version' })).toBeInTheDocument();
+    expect(screen.getByText('Automatic backups')).toBeInTheDocument();
+    expect(screen.getByText(/Every 30 min/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Backup interval minutes')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore Backup Version' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Safety checks required' })).not.toBeInTheDocument();
     expect(screen.queryByText('Actions')).not.toBeInTheDocument();
     expect(screen.queryByText('Back up now')).not.toBeInTheDocument();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[MinimalMain.test.tsx::assertOnlyRestoreActionVisible] ${reason}`);
-  }
-}
-
-/**
- * Purpose: Verify editing the interval commits a config save with derived seconds.
- *
- * Inputs: None.
- * Outputs: Asserts `saveConfig` receives updated `interval_seconds`.
- * Side effects: Fires input events and awaits async save.
- * Why: Ensure the schedule editor actually persists changes.
- */
-async function assertIntervalEditSaves(): Promise<void> {
-  try {
-    await renderMinimal();
-    const intervalInput = screen.getByLabelText('Backup interval minutes');
-    fireEvent.change(intervalInput, { target: { value: '45' } });
-    fireEvent.blur(intervalInput);
-    await waitFor(() => {
-      expect(saveConfig).toHaveBeenCalled();
-    });
-    const calls = (saveConfig as unknown as ReturnType<typeof vi.fn>).mock.calls;
-    const first = calls[0]?.[0];
-    if (!first) {
-      throw new Error('[MinimalMain.test.tsx::assertIntervalEditSaves] Missing saveConfig payload');
-    }
-    const saved = first as Config;
-    expect(saved.interval_seconds).toBe(45 * 60);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[MinimalMain.test.tsx::assertIntervalEditSaves] ${reason}`);
   }
 }
 
@@ -171,7 +190,6 @@ async function assertIntervalEditSaves(): Promise<void> {
 async function assertRunningToggleCallsIpc(): Promise<void> {
   try {
     await renderMinimal({ safe_mode: false });
-    (safeInvoke as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
     const runningToggle = screen.getByLabelText('Running');
     fireEvent.click(runningToggle);
     await waitFor(() => {
@@ -183,8 +201,57 @@ async function assertRunningToggleCallsIpc(): Promise<void> {
   }
 }
 
+/**
+ * Purpose: Verify pausing shows Saved badge confirmation.
+ *
+ * Inputs: None.
+ * Outputs: Asserts the Saved badge is visible after pausing.
+ * Side effects: Clicks running toggle and awaits UI updates.
+ * Why: Prevent regressions where pause actions do not surface a success confirmation.
+ */
+async function assertPauseShowsSavedBadge(): Promise<void> {
+  try {
+    await renderMinimal({ safe_mode: false });
+    const runningToggle = screen.getByLabelText('Running');
+    fireEvent.click(runningToggle);
+    await waitFor(() => {
+      expect(screen.getByText('Saved')).toBeInTheDocument();
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`[MinimalMain.test.tsx::assertPauseShowsSavedBadge] ${reason}`);
+  }
+}
+
+/**
+ * Purpose: Verify additional destinations are visible and removable from the minimal destination card.
+ *
+ * Inputs: None.
+ * Outputs: Asserts extra destination text and remove control are rendered.
+ * Side effects: Renders the component and queries DOM.
+ * Why: Prevent regressions where added destinations exist in config but are not shown in UI.
+ */
+async function assertAdditionalDestinationsVisible(): Promise<void> {
+  try {
+    await renderMinimal({
+      destinations: [
+        { id: 'default', path: '/tmp/backups', label: 'Primary' },
+        { id: 'dest-2', path: '/tmp/backup-2', label: 'Destination 2' },
+      ],
+    });
+    expect(screen.getByText(/Destination 2: \/tmp\/backup-2/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove destination Destination 2' }),
+    ).toBeInTheDocument();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`[MinimalMain.test.tsx::assertAdditionalDestinationsVisible] ${reason}`);
+  }
+}
+
 describe('MinimalMain', () => {
-  it('shows running toggle, interval editor, and restore button', assertOnlyRestoreActionVisible);
-  it('persists interval edits', assertIntervalEditSaves);
+  it('shows running toggle, automatic cadence, and restore button', assertOnlyRestoreActionVisible);
   it('wires running toggle to IPC', assertRunningToggleCallsIpc);
+  it('shows Saved badge when paused', assertPauseShowsSavedBadge);
+  it('shows additional destinations with remove controls', assertAdditionalDestinationsVisible);
 });

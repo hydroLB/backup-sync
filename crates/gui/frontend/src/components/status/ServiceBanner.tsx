@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../ui/Button';
 
 type Props = {
   message: string;
@@ -50,11 +51,9 @@ const ServiceBanner: React.FC<Props> = ({
     return (
       <div className={`service-banner ${reachable ? 'ok' : 'warn'}`}>
         <div>{message}</div>
-        <div className="muted">
+        <div className="muted service-meta">
           {uptimeSecs != null && uptimeSecs > 0 && (
-            <span style={{ marginRight: 8 }}>
-              Uptime: {Math.floor(uptimeSecs / SECONDS_PER_HOUR)}h
-            </span>
+            <span>Uptime: {Math.floor(uptimeSecs / SECONDS_PER_HOUR)}h</span>
           )}
           {lastIpcTs ? (
             <span>Last contact: {new Date(lastIpcTs * 1000).toLocaleTimeString()}</span>
@@ -62,9 +61,9 @@ const ServiceBanner: React.FC<Props> = ({
         </div>
         {!reachable && (
           <div className="inline-actions">
-            <button className="btn secondary" onClick={handleFix}>
+            <Button tone="secondary" onClick={handleFix}>
               Fix
-            </button>
+            </Button>
             {fixCommand && <span className="muted">Try: {fixCommand}</span>}
           </div>
         )}

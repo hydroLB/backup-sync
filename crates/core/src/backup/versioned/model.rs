@@ -13,6 +13,12 @@ pub struct VersionIndex {
     pub schema_version: u32,
     pub source_path: String,
     pub versions: Vec<VersionInfo>,
+    #[serde(default)]
+    pub safety_pinned_version_id: Option<String>,
+    #[serde(default)]
+    pub safety_pending_version_id: Option<String>,
+    #[serde(default)]
+    pub safety_pending_first_seen_unix: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

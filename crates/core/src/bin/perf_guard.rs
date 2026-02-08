@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
-use backup_core::backup::retention;
-use backup_core::fs::hashing::hash_file;
+use backup_core::backup::versioned;
+use backup_core::config::model::{Destination, WatchedKind, WatchedPath};
+use backup_core::config::registry::config_defaults;
+use backup_core::hashing::sha256_file_hex;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::{self, File};
@@ -18,8 +20,8 @@ use tempfile::TempDir;
 /// Why: Standardize how performance metrics are recorded and compared.
 #[derive(Debug, Serialize, Deserialize)]
 struct PerfMetrics {
-    hash_ms: u128,
-    retention_ms: u128,
+    sha256_ms: u128,
+    versioned_simulate_ms: u128,
 }
 
 /// Purpose: Provide the performance guard configuration.
@@ -98,27 +100,32 @@ fn create_payload(dir: &TempDir, bytes: usize) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Purpose: Create retention-style files for pruning tests.
+/// Purpose: Create a deterministic watched tree for versioned simulation tests.
 ///
-/// Inputs: `dir` as the temp directory, `count` as file count.
-/// Outputs: Vector of file paths.
-/// Ties to: Retention enforcement measurements.
-/// Side effects: Writes files to disk.
-/// Why: Model retention workloads with sortable timestamps.
-fn create_retention_files(dir: &TempDir, count: usize) -> Result<Vec<PathBuf>> {
-    let mut paths = Vec::with_capacity(count);
-    for i in 0..count {
-        let name = format!("20240101-{:06}__file.txt", i);
-        let path = dir.path().join(name);
-        File::create(&path).with_context(|| {
+/// Inputs: `dir` as the temp directory root, `files` count, and `bytes_each` size.
+/// Outputs: The watched directory path created under `dir`.
+/// Ties to: Versioned scan and hashing measurement in `measure_metrics`.
+/// Side effects: Writes a set of files to disk.
+/// Why: Keep the simulation workload stable so regressions are meaningful.
+fn create_watched_tree(dir: &TempDir, files: usize, bytes_each: usize) -> Result<PathBuf> {
+    let watched = dir.path().join("watched");
+    fs::create_dir_all(&watched).with_context(|| {
+        format!(
+            "perf_guard::create_watched_tree failed to create watched dir {:?}",
+            watched
+        )
+    })?;
+    let payload = vec![0xAB; bytes_each];
+    for i in 0..files {
+        let path = watched.join(format!("f_{i:05}.bin"));
+        fs::write(&path, &payload).with_context(|| {
             format!(
-                "perf_guard::create_retention_files failed to create file {:?}",
+                "perf_guard::create_watched_tree failed to write file {:?}",
                 path
             )
         })?;
-        paths.push(path);
     }
-    Ok(paths)
+    Ok(watched)
 }
 
 /// Purpose: Measure hashing and retention timings for the perf guard.
@@ -131,26 +138,56 @@ fn create_retention_files(dir: &TempDir, count: usize) -> Result<Vec<PathBuf>> {
 fn measure_metrics() -> Result<PerfMetrics> {
     let temp = TempDir::new().context("perf_guard::measure_metrics failed to create temp dir")?;
     let payload = create_payload(&temp, 8 * 1024 * 1024)?;
-    let hash_start = Instant::now();
+    let sha_start = Instant::now();
     for _ in 0..5 {
-        let _ = hash_file(&payload).with_context(|| {
+        let _ = sha256_file_hex(&payload).with_context(|| {
             format!(
-                "perf_guard::measure_metrics hash_file failed for {:?}",
+                "perf_guard::measure_metrics sha256_file_hex failed for {:?}",
                 payload
             )
         })?;
     }
-    let hash_ms = hash_start.elapsed().as_millis();
+    let sha256_ms = sha_start.elapsed().as_millis();
 
-    let retention_start = Instant::now();
-    let files = create_retention_files(&temp, 200)?;
-    let _ = retention::enforce(100, files)
-        .context("perf_guard::measure_metrics retention::enforce failed during retention check")?;
-    let retention_ms = retention_start.elapsed().as_millis();
+    let watched = create_watched_tree(&temp, 200, 4 * 1024)?;
+    let destination = temp.path().join("dest");
+    fs::create_dir_all(&destination).with_context(|| {
+        format!(
+            "perf_guard::measure_metrics failed to create destination dir {:?}",
+            destination
+        )
+    })?;
+    let mut cfg =
+        config_defaults().context("perf_guard::measure_metrics failed to build defaults")?;
+    cfg.backup_root = destination.clone();
+    cfg.runtime.source_snapshots_enabled = false;
+    cfg.destinations = vec![Destination {
+        id: "primary".to_string(),
+        path: destination.clone(),
+        label: Some("Primary".to_string()),
+        max_backups_per_file: None,
+        replicate_to: vec![],
+    }];
+    cfg.watched = vec![WatchedPath {
+        path: watched,
+        kind: WatchedKind::Directory,
+        enabled: true,
+        destination_id: "primary".to_string(),
+        max_backups_per_file: Some(5),
+    }];
+    versioned::run_backup_cycle(&cfg)
+        .context("perf_guard::measure_metrics failed initial versioned backup")?;
+
+    let simulate_start = Instant::now();
+    for _ in 0..3 {
+        let _ = versioned::simulate_backup_cycle_with_sample_limit(&cfg, 0)
+            .context("perf_guard::measure_metrics simulate failed")?;
+    }
+    let versioned_simulate_ms = simulate_start.elapsed().as_millis();
 
     Ok(PerfMetrics {
-        hash_ms,
-        retention_ms,
+        sha256_ms,
+        versioned_simulate_ms,
     })
 }
 
@@ -202,20 +239,21 @@ fn write_baseline(path: &PathBuf, metrics: &PerfMetrics) -> Result<()> {
 /// Side effects: None.
 /// Why: Fail fast on performance regressions.
 fn compare_metrics(baseline: &PerfMetrics, current: &PerfMetrics, max_ratio: f64) -> Result<()> {
-    let hash_ratio = current.hash_ms as f64 / baseline.hash_ms as f64;
-    let retention_ratio = current.retention_ms as f64 / baseline.retention_ms as f64;
+    let sha_ratio = current.sha256_ms as f64 / baseline.sha256_ms as f64;
+    let simulate_ratio =
+        current.versioned_simulate_ms as f64 / baseline.versioned_simulate_ms as f64;
 
-    if hash_ratio > max_ratio {
+    if sha_ratio > max_ratio {
         anyhow::bail!(
-            "perf_guard::compare_metrics hash regression {:.2}x > {:.2}x",
-            hash_ratio,
+            "perf_guard::compare_metrics sha256 regression {:.2}x > {:.2}x",
+            sha_ratio,
             max_ratio
         );
     }
-    if retention_ratio > max_ratio {
+    if simulate_ratio > max_ratio {
         anyhow::bail!(
-            "perf_guard::compare_metrics retention regression {:.2}x > {:.2}x",
-            retention_ratio,
+            "perf_guard::compare_metrics versioned_simulate regression {:.2}x > {:.2}x",
+            simulate_ratio,
             max_ratio
         );
     }
@@ -243,8 +281,8 @@ fn main() -> Result<()> {
     compare_metrics(&baseline, &metrics, config.max_ratio)?;
 
     println!(
-        "perf_guard ok: hash {} ms, retention {} ms",
-        metrics.hash_ms, metrics.retention_ms
+        "perf_guard ok: sha256 {} ms, versioned_simulate {} ms",
+        metrics.sha256_ms, metrics.versioned_simulate_ms
     );
     Ok(())
 }

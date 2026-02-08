@@ -35,14 +35,41 @@ struct Args {
 enum Command {
     Status,
     Doctor,
+    /// Purpose: Generate a new at-rest encryption key file for blob encryption.
+    ///
+    /// Inputs: Optional output path and an overwrite flag.
+    /// Outputs: Writes a key file and prints its key_id and config guidance.
+    /// Ties to: `[encryption]` config block used by the versioned blob store.
+    /// Side effects: Writes a key file to disk.
+    /// Why: encrypted backups are only recoverable with the same key; generation should be explicit.
+    Keygen {
+        /// Purpose: Override the key file output path.
+        ///
+        /// Inputs: CLI flag value.
+        /// Outputs: Uses the provided path instead of the platform default.
+        /// Ties to: `commands::key::keygen` key path selection.
+        /// Side effects: None.
+        /// Why: allow custom storage locations for key material.
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Purpose: Allow overwriting an existing key file.
+        ///
+        /// Inputs: CLI flag value.
+        /// Outputs: Enables overwrite behavior.
+        /// Ties to: `commands::key::keygen` force handling.
+        /// Side effects: Can overwrite an existing key file.
+        /// Why: support intentional key rotation or recovery from partial key files.
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
     RunOnce {
         /// Purpose: Build a plan without copying files.
         ///
         /// Inputs: CLI flag value.
-        /// Outputs: Enables dry run behavior for the run-once command.
-        /// Ties to: `commands::run::run_once` dry run handling.
+        /// Outputs: Enables simulation mode for the run-once command.
+        /// Ties to: `commands::run::run_once` simulation handling.
         /// Side effects: None.
-        /// Why: allow safe previews before executing backups.
+        /// Why: allow safe previews before executing versioned backups.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
@@ -139,6 +166,9 @@ async fn run() -> Result<()> {
     match args.cmd {
         Command::Status => commands::status().context("cli::run status command failed")?,
         Command::Doctor => commands::doctor().context("cli::run doctor command failed")?,
+        Command::Keygen { path, force } => {
+            commands::keygen(path, force).context("cli::run keygen command failed")?
+        }
         Command::RunOnce { dry_run } => commands::run::run_once(dry_run)
             .await
             .context("cli::run run-once command failed")?,

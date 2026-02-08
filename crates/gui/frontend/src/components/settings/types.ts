@@ -11,6 +11,7 @@ export type Destination = {
   label?: string | null;
   path: string;
   max_backups_per_file?: number | null;
+  replicate_to?: string[];
 };
 
 export type HashingTuning = {
@@ -50,6 +51,9 @@ export type RuntimeTuning = {
   tray_tooltip_refresh_seconds: number;
   log_tail_lines: number;
   simulation_sample_limit: number;
+  replication_enabled?: boolean;
+  replication_mirror_manifests?: boolean;
+  replication_max_manifest_deletes_per_cycle?: number;
 };
 
 export type Config = {

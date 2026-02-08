@@ -1,12 +1,14 @@
 use super::model::{Manifest, ManifestEntryKind, VersionInfo};
-use super::store::{blob_path, blobs_root, sha256_hex, sources_root, store_root};
+use super::store::{blob_path, blobs_root, sources_root, store_root};
 use crate::config::model::{Config, Destination, WatchedKind};
+use crate::encryption::blobs::BlobCodec;
+use crate::hashing;
 use anyhow::{Context, Result};
 use filetime::{set_file_mtime, FileTime};
 use fs2::free_space;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +30,30 @@ pub struct RestoreResult {
     pub files_written: usize,
     pub files_removed: usize,
     pub dirs_created: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct VersionFileInfo {
+    pub rel_path: String,
+    pub len: u64,
+    pub mtime_unix: i64,
+    pub mtime_nanos: u32,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListVersionFilesResult {
+    pub total_files: usize,
+    pub files: Vec<VersionFileInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RestoreFilesRequest {
+    pub source_path: PathBuf,
+    pub version_id: String,
+    pub rel_paths: Vec<String>,
+    pub mode: RestoreMode,
+    pub target_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +86,7 @@ pub fn list_versions(cfg: &Config) -> Result<Vec<(PathBuf, Vec<VersionInfo>)>> {
                 )
             })?;
         let store_root = store_root(&dest.path);
-        let source_id = sha256_hex(watched.path.to_string_lossy().as_bytes());
+        let source_id = hashing::sha256_hex(watched.path.to_string_lossy().as_bytes());
         let index_path = sources_root(&store_root)
             .join(&source_id)
             .join("index.json");
@@ -122,7 +148,7 @@ fn load_manifest_for_request(cfg: &Config, req: &RestoreRequest) -> Result<(Mani
         })?;
 
     let store_root = store_root(&dest.path);
-    let source_id = sha256_hex(req.source_path.to_string_lossy().as_bytes());
+    let source_id = hashing::sha256_hex(req.source_path.to_string_lossy().as_bytes());
     let manifests_root = sources_root(&store_root).join(&source_id).join("manifests");
     let manifest_path = manifests_root.join(format!("{}.json", req.version_id));
     let raw = fs::read_to_string(&manifest_path).with_context(|| {
@@ -249,6 +275,8 @@ fn build_restore_tree(
     stage_root: &Path,
     manifest: &Manifest,
     planned_files: &[PlannedFile],
+    blob_codec: &BlobCodec,
+    blob_timeout_seconds: u64,
 ) -> Result<RestoreResult> {
     let mut result = RestoreResult::default();
     fs::create_dir_all(stage_root).with_context(|| {
@@ -284,7 +312,7 @@ fn build_restore_tree(
                 )
             })?;
         }
-        write_file_atomic_from_blob(&pf.blob_path, &out_path)?;
+        write_file_atomic_from_blob(&pf.blob_path, &out_path, blob_codec, blob_timeout_seconds)?;
         restore_mtime(&out_path, pf.mtime_unix, pf.mtime_nanos)?;
         result.files_written += 1;
     }
@@ -398,6 +426,187 @@ fn restore_token() -> String {
     )
 }
 
+pub fn list_version_files(
+    cfg: &Config,
+    source_path: &Path,
+    version_id: &str,
+    query: Option<&str>,
+    limit: usize,
+) -> Result<ListVersionFilesResult> {
+    /*
+     * Summary: List file entries for a specific version with optional substring filtering.
+     *
+     * Inputs: Config, watched directory path, version id, optional query substring, and a result limit.
+     * Outputs: A `ListVersionFilesResult` with total file count and up to `limit` matches.
+     * Side effects: Reads the manifest JSON from the destination store.
+     * Error handling: Returns contextual errors for missing config mappings and manifest parse failures.
+     * Ties to other methods: Used by GUI file-level restore UX to browse and search version contents.
+     * Why this exists: Restoring individual files requires discoverability of paths inside manifests.
+     */
+    let req = RestoreRequest {
+        source_path: source_path.to_path_buf(),
+        version_id: version_id.to_string(),
+        mode: RestoreMode::InPlace,
+        target_dir: None,
+    };
+    let (manifest, _store_root) = load_manifest_for_request(cfg, &req)?;
+
+    let norm_query = query
+        .map(|q| q.trim())
+        .filter(|q| !q.is_empty())
+        .map(|q| q.to_ascii_lowercase());
+
+    let mut total_files: usize = 0;
+    let mut files: Vec<VersionFileInfo> = Vec::new();
+    let cap = limit.max(1);
+
+    for entry in manifest.entries.values() {
+        if entry.kind != ManifestEntryKind::File {
+            continue;
+        }
+        let Some(sha256) = entry.sha256.as_deref() else {
+            continue;
+        };
+        total_files = total_files.saturating_add(1);
+        if let Some(q) = norm_query.as_deref() {
+            if !entry.rel_path.to_ascii_lowercase().contains(q) {
+                continue;
+            }
+        }
+        if files.len() >= cap {
+            continue;
+        }
+        files.push(VersionFileInfo {
+            rel_path: entry.rel_path.clone(),
+            len: entry.len,
+            mtime_unix: entry.mtime_unix,
+            mtime_nanos: entry.mtime_nanos,
+            sha256: sha256.to_string(),
+        });
+    }
+
+    Ok(ListVersionFilesResult { total_files, files })
+}
+
+pub fn restore_files(cfg: &Config, req: &RestoreFilesRequest) -> Result<RestoreResult> {
+    /*
+     * Summary: Restore a specific set of files from a version without swapping whole directory trees.
+     *
+     * Inputs: Config plus a request containing watched folder, version id, file rel paths, and mode.
+     * Outputs: A `RestoreResult` with counts for files written and directories created.
+     * Side effects: Creates directories and writes files atomically from blobs.
+     * Error handling: Fails before any writes if any requested file is missing or blobs are absent.
+     * Ties to other methods: Uses manifest load, per-file preflight, `write_file_atomic_from_blob`, and mtime restore.
+     * Why this exists: File-level restore is a common UX need without the risk of full in-place swaps.
+     */
+    if req.rel_paths.is_empty() {
+        anyhow::bail!("versioned::restore_files requires at least one rel_path");
+    }
+
+    let manifest_req = RestoreRequest {
+        source_path: req.source_path.clone(),
+        version_id: req.version_id.clone(),
+        mode: RestoreMode::InPlace,
+        target_dir: None,
+    };
+    let (manifest, store_root) = load_manifest_for_request(cfg, &manifest_req)?;
+    let blobs_root = blobs_root(&store_root);
+
+    let restore_root = match req.mode {
+        RestoreMode::InPlace => req.source_path.clone(),
+        RestoreMode::ToDirectory => req
+            .target_dir
+            .clone()
+            .context("versioned::restore_files missing target_dir for ToDirectory")?,
+    };
+    if restore_root.exists() && !restore_root.is_dir() {
+        anyhow::bail!(
+            "versioned::restore_files restore_root exists and is not a directory: {:?}",
+            restore_root
+        );
+    }
+    fs::create_dir_all(&restore_root).with_context(|| {
+        format!(
+            "versioned::restore_files failed to create restore root {:?}",
+            restore_root
+        )
+    })?;
+
+    let mut missing: Vec<String> = Vec::new();
+    let mut planned: Vec<PlannedFile> = Vec::new();
+    let mut total_bytes: u64 = 0;
+
+    for rel_path in req.rel_paths.iter() {
+        let entry = match manifest.entries.get(rel_path) {
+            None => {
+                missing.push(format!("{rel_path}: not present in manifest"));
+                continue;
+            }
+            Some(e) => e,
+        };
+        if entry.kind != ManifestEntryKind::File {
+            missing.push(format!("{rel_path}: not a file entry"));
+            continue;
+        }
+        let hash = match entry.sha256.as_deref() {
+            None => {
+                missing.push(format!("{rel_path}: missing sha256 in manifest"));
+                continue;
+            }
+            Some(h) => h,
+        };
+        let blob = blob_path(&blobs_root, hash);
+        if !blob.exists() {
+            missing.push(format!("{rel_path}: missing blob {hash}"));
+            continue;
+        }
+        total_bytes = total_bytes.saturating_add(entry.len);
+        planned.push(PlannedFile {
+            rel_path: rel_path.clone(),
+            blob_path: blob,
+            mtime_unix: entry.mtime_unix,
+            mtime_nanos: entry.mtime_nanos,
+        });
+    }
+
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "versioned::restore_files cannot restore due to missing content:\n{}",
+            missing.join("\n")
+        );
+    }
+    ensure_restore_free_space(cfg, &restore_root, total_bytes)?;
+
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::restore_files failed to initialize blob codec")?;
+
+    let mut result = RestoreResult::default();
+    for pf in planned.iter() {
+        let out_path = restore_root.join(&pf.rel_path);
+        if let Some(parent) = out_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "versioned::restore_files failed to create parent dir {:?}",
+                        parent
+                    )
+                })?;
+                result.dirs_created += 1;
+            }
+        }
+        write_file_atomic_from_blob(
+            &pf.blob_path,
+            &out_path,
+            &blob_codec,
+            cfg.hashing.timeout_seconds,
+        )?;
+        restore_mtime(&out_path, pf.mtime_unix, pf.mtime_nanos)?;
+        result.files_written += 1;
+    }
+
+    Ok(result)
+}
+
 pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResult> {
     /*
      * Summary: Restore a watched directory to a specific version with preflight + transactional swap.
@@ -441,6 +650,9 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
 
     let (planned_files, _bytes) = preflight_restore(cfg, &manifest, &blobs_root, parent)?;
 
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::restore_version failed to initialize blob codec")?;
+
     let token = restore_token();
     let stage_root = parent.join(format!(".backup_sync_restore_stage_{token}"));
 
@@ -458,7 +670,13 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
         0
     };
 
-    let mut result = match build_restore_tree(&stage_root, &manifest, &planned_files) {
+    let mut result = match build_restore_tree(
+        &stage_root,
+        &manifest,
+        &planned_files,
+        &blob_codec,
+        cfg.hashing.timeout_seconds,
+    ) {
         Ok(r) => r,
         Err(e) => {
             let _ = fs::remove_dir_all(&stage_root);
@@ -487,7 +705,12 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
     Ok(result)
 }
 
-fn write_file_atomic_from_blob(blob_path: &Path, out_path: &Path) -> Result<()> {
+fn write_file_atomic_from_blob(
+    blob_path: &Path,
+    out_path: &Path,
+    blob_codec: &BlobCodec,
+    blob_timeout_seconds: u64,
+) -> Result<()> {
     let parent = out_path
         .parent()
         .context("versioned::write_file_atomic_from_blob missing parent")?;
@@ -498,33 +721,17 @@ fn write_file_atomic_from_blob(blob_path: &Path, out_path: &Path) -> Result<()> 
         )
     })?;
 
-    let mut blob = fs::File::open(blob_path).with_context(|| {
-        format!(
-            "versioned::write_file_atomic_from_blob failed to open blob {:?}",
-            blob_path
-        )
-    })?;
-
     let mut temp = tempfile::NamedTempFile::new_in(parent)
         .context("versioned::write_file_atomic_from_blob failed to create temp file")?;
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = blob.read(&mut buf).with_context(|| {
+
+    blob_codec
+        .copy_blob_plaintext_to_writer(blob_path, temp.as_file_mut(), blob_timeout_seconds)
+        .with_context(|| {
             format!(
-                "versioned::write_file_atomic_from_blob failed reading blob {:?}",
+                "versioned::write_file_atomic_from_blob failed decoding blob {:?}",
                 blob_path
             )
         })?;
-        if n == 0 {
-            break;
-        }
-        temp.write_all(&buf[..n]).with_context(|| {
-            format!(
-                "versioned::write_file_atomic_from_blob failed writing temp file for {:?}",
-                out_path
-            )
-        })?;
-    }
     temp.flush().ok();
 
     let _ = fs::remove_file(out_path);

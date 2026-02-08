@@ -10,7 +10,10 @@ import { tauriAvailable } from '../../../services/ipc';
  * Side effects: Invokes IPC-backed file pickers and emits popup messages.
  * Why: Centralize picker behavior and IPC checks.
  */
-export function usePickers(popup: (msg: string) => void) {
+export function usePickers(
+  popup: (msg: string) => void,
+  opts?: { onPickerBusyChange?: (busy: boolean) => void },
+) {
   /**
    * Purpose: Pick a backup destination directory and return its path.
    *
@@ -27,6 +30,7 @@ export function usePickers(popup: (msg: string) => void) {
         popup('Picker unavailable (IPC). Launch the app build to choose destination.');
         return null;
       }
+      opts?.onPickerBusyChange?.(true);
       const selection = await openDialog({
         directory: true,
         multiple: false,
@@ -40,6 +44,8 @@ export function usePickers(popup: (msg: string) => void) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[usePickers::pickDestinationPath] Picker failed: ${reason}`);
       return null;
+    } finally {
+      opts?.onPickerBusyChange?.(false);
     }
   };
 
@@ -62,6 +68,7 @@ export function usePickers(popup: (msg: string) => void) {
         popup('Picker unavailable (IPC). Launch the app build to select paths.');
         return;
       }
+      opts?.onPickerBusyChange?.(true);
       const selection = await openDialog({
         directory: kind === 'Directory',
         multiple: false,
@@ -70,12 +77,12 @@ export function usePickers(popup: (msg: string) => void) {
       if (typeof selection === 'string') {
         addWatched(selection, kind, destId);
         popup(`Added ${selection}`);
-      } else {
-        popup('No selection made or picker was closed.');
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       popup(`[usePickers::pickPathForDest] Picker failed: ${reason}`);
+    } finally {
+      opts?.onPickerBusyChange?.(false);
     }
   };
 
@@ -92,7 +99,6 @@ export function usePickers(popup: (msg: string) => void) {
     try {
       const selection = await pickDestinationPath();
       if (!selection) {
-        popup('No destination selected or picker was closed.');
         return;
       }
       onChosen(selection);

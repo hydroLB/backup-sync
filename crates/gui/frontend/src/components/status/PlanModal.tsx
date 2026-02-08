@@ -1,4 +1,6 @@
 import React from 'react';
+import { Button } from '../ui/Button';
+import { ModalShell } from '../ui/ModalShell';
 
 type Props = {
   message: string | null;
@@ -38,22 +40,23 @@ const PlanModal: React.FC<Props> = ({ message, onClose }) => {
       return null;
     }
     return (
-      <div className="modal">
-        <div className="modal__content">
-          <h4>Too many files to back up</h4>
-          <p className="muted">{message}</p>
-          <ul className="muted">
-            <li>Add ignores: node_modules, build, target, *.log, Cache</li>
-            <li>Limit watched folders to what you need</li>
-            <li>Run &quot;Simulate backup&quot; to see the scope before retrying</li>
-          </ul>
-          <div className="inline-actions">
-            <button className="btn" onClick={handleClose}>
-              Got it
-            </button>
-          </div>
-        </div>
-      </div>
+      <ModalShell
+        open={!!message}
+        title="Too many files to back up"
+        onClose={handleClose}
+        description={message}
+        footer={
+          <Button onClick={handleClose} autoFocus>
+            Got it
+          </Button>
+        }
+      >
+        <ul className="muted">
+          <li>Add ignores: node_modules, build, target, *.log, Cache</li>
+          <li>Limit watched folders to what you need</li>
+          <li>Run &quot;Simulate backup&quot; to see the scope before retrying</li>
+        </ul>
+      </ModalShell>
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

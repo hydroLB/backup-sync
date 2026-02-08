@@ -2,7 +2,7 @@ import { IpcError, tauriAvailable, wrapError } from './ipc';
 
 type DialogModule = typeof import('@tauri-apps/api/dialog');
 type OpenOptions = import('@tauri-apps/api/dialog').OpenDialogOptions;
-type OpenResult = import('@tauri-apps/api/dialog').OpenDialogReturn;
+type OpenResult = Awaited<ReturnType<DialogModule['open']>>;
 
 let dialogModulePromise: Promise<DialogModule> | null = null;
 
@@ -41,7 +41,10 @@ export async function loadDialogModule(): Promise<DialogModule> {
 export async function openDialog(options: OpenOptions): Promise<OpenResult> {
   try {
     if (!tauriAvailable()) {
-      throw new IpcError('Picker unavailable (IPC). Launch the desktop app build.', 'TAURI_UNAVAILABLE');
+      throw new IpcError(
+        'Picker unavailable (IPC). Launch the desktop app build.',
+        'TAURI_UNAVAILABLE',
+      );
     }
     const mod = await loadDialogModule();
     return await mod.open(options);
@@ -68,4 +71,3 @@ export async function prewarmDialog(): Promise<void> {
     // best-effort prewarm
   }
 }
-

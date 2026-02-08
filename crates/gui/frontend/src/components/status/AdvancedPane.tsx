@@ -35,20 +35,18 @@ const AdvancedPane: React.FC<Props> = ({ status, logTail }) => {
     }
     return (
       <div className="advanced-pane">
-        <div className="section-title" style={{ marginBottom: 6 }}>
-          <h4 style={{ margin: 0 }}>Advanced</h4>
+        <div className="section-title advanced-head">
+          <h4 className="heading-compact">Advanced</h4>
           <span className="pill">Debug</span>
         </div>
-        <div className="muted" style={{ marginBottom: 6 }}>
+        <div className="muted advanced-note">
           IPC healthy. Free: {formatBytes(status.free_bytes)} • Last run:{' '}
           {formatDateTime(status.last_run_ts)}
         </div>
         <pre className="advanced-pane__code">{json}</pre>
         {logTail && (
           <>
-            <div className="muted" style={{ marginTop: 8, marginBottom: 4 }}>
-              Log tail (latest entries)
-            </div>
+            <div className="muted advanced-log-label">Log tail (latest entries)</div>
             <pre className="advanced-pane__code">{logTail}</pre>
           </>
         )}

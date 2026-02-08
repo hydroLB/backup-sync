@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../ui/Button';
 
 type Props = {
   freeBytes: number | null;
@@ -45,13 +46,13 @@ const LowSpaceGuard: React.FC<Props> = ({
       return null;
     }
     return (
-      <div className="pill" style={{ borderColor: '#ff7b7b', color: '#ffb0b0', marginTop: 6 }}>
+      <div className="pill pill-danger mt-2">
         <span title="Free-space guard will pause backups until space recovers.">
           Low disk space at backup destination
         </span>
-        <button className="btn secondary" style={{ marginLeft: 8 }} onClick={handleToggle}>
+        <Button tone="secondary" size="sm" onClick={handleToggle}>
           {resumeOnSpace ? 'Pause until fixed' : 'Resume when ok'}
-        </button>
+        </Button>
       </div>
     );
   } catch (error) {

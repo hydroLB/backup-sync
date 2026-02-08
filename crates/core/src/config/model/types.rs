@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::tuning::{ExecutionTuning, HashingTuning, PlanningTuning, RuntimeTuning};
+use super::{CompressionConfig, EncryptionConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WatchedKind {
@@ -16,6 +17,8 @@ pub struct Destination {
     pub label: Option<String>,
     #[serde(default)]
     pub max_backups_per_file: Option<usize>,
+    #[serde(default)]
+    pub replicate_to: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +57,10 @@ pub struct Config {
     pub runtime: RuntimeTuning,
     #[serde(default)]
     pub safe_mode: bool,
+    #[serde(default)]
+    pub encryption: EncryptionConfig,
+    #[serde(default)]
+    pub compression: CompressionConfig,
     pub watched: Vec<WatchedPath>,
     #[serde(default)]
     pub destinations: Vec<Destination>,

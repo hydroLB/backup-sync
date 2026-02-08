@@ -192,7 +192,7 @@ const WatchList: React.FC<Props> = ({
                       Exclude something inside this{' '}
                       {w.kind === 'Directory' ? 'folder' : 'file parent'}:
                     </div>
-                    <div className="inline-actions" style={{ marginTop: 6 }}>
+                    <div className="inline-actions mt-2">
                       <input
                         type="text"
                         placeholder="e.g. *.log or Cache"
@@ -208,7 +208,7 @@ const WatchList: React.FC<Props> = ({
                         Add exclusion
                       </button>
                     </div>
-                    <div className="inline-actions" style={{ marginTop: 4 }}>
+                    <div className="inline-actions mt-1">
                       {quickPatterns(w.path.toString()).map((p) => {
                         let label = 'Ignore pattern';
                         if (p.includes('node_modules')) label = 'Ignore node_modules';
@@ -230,7 +230,7 @@ const WatchList: React.FC<Props> = ({
                       })}
                     </div>
                     {existingForPath.length > 0 && (
-                      <div className="muted" style={{ marginTop: 4 }}>
+                      <div className="muted mt-1">
                         Existing excludes: {existingForPath.join(', ')}
                       </div>
                     )}

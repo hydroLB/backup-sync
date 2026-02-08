@@ -4,7 +4,7 @@ use fs2::free_space;
 use serde::Serialize;
 use std::fs;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 /// Purpose: Access check payload for watched paths and destination.
 ///
 /// Inputs: derived from filesystem probes.

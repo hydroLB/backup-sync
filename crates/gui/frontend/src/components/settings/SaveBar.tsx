@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../ui/Button';
 
 type Props = {
   disabled?: boolean;
@@ -19,9 +20,9 @@ const SaveBar: React.FC<Props> = ({ disabled, status, onSave }) => {
   try {
     return (
       <div className="sticky-actions">
-        <button className="btn" onClick={onSave} disabled={disabled}>
+        <Button onClick={onSave} disabled={disabled}>
           Save settings
-        </button>
+        </Button>
         <span className="muted">{status}</span>
       </div>
     );

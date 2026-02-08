@@ -1,10 +1,12 @@
 import React from 'react';
 import { UI_TUNING } from '../../config/uiTuning';
+import { InlineAlert } from '../ui/InlineAlert';
+import { Button } from '../ui/Button';
 
 type Props = {
   error: string | null;
-  onInstallService?: () => void;
-  onExportLogs?: () => void;
+  onInstallService?: () => Promise<void> | void;
+  onExportLogs?: () => Promise<void> | void;
   message?: string;
 };
 
@@ -20,6 +22,9 @@ const DEFAULT_OFFLINE_MESSAGE = UI_TUNING.offlineNoticeMessage;
  * Why: Provides clear recovery actions when the daemon is offline.
  */
 const OfflineNotice: React.FC<Props> = ({ error, onInstallService, onExportLogs, message }) => {
+  const [installing, setInstalling] = React.useState(false);
+  const [exporting, setExporting] = React.useState(false);
+
   /**
    * Purpose: Safely invoke the install service action.
    *
@@ -29,12 +34,16 @@ const OfflineNotice: React.FC<Props> = ({ error, onInstallService, onExportLogs,
    * Side effects: Invokes the provided install callback.
    * Why: Provides error context for recovery actions.
    */
-  const handleInstall = () => {
+  const handleInstall = async () => {
     try {
-      onInstallService?.();
+      if (!onInstallService) return;
+      setInstalling(true);
+      await onInstallService();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`[OfflineNotice.handleInstall] Failed to trigger install action: ${reason}`);
+    } finally {
+      setInstalling(false);
     }
   };
 
@@ -47,12 +56,16 @@ const OfflineNotice: React.FC<Props> = ({ error, onInstallService, onExportLogs,
    * Side effects: Invokes the provided export callback.
    * Why: Provides error context for recovery actions.
    */
-  const handleExportLogs = () => {
+  const handleExportLogs = async () => {
     try {
-      onExportLogs?.();
+      if (!onExportLogs) return;
+      setExporting(true);
+      await onExportLogs();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`[OfflineNotice.handleExportLogs] Failed to trigger log export: ${reason}`);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -64,19 +77,28 @@ const OfflineNotice: React.FC<Props> = ({ error, onInstallService, onExportLogs,
           <span className="pill">Not connected</span>
         </div>
         <p className="muted">{message || DEFAULT_OFFLINE_MESSAGE}</p>
-        <div className="inline-actions" style={{ marginTop: 8 }}>
+        <div className="inline-actions mt-2">
           {onInstallService && (
-            <button className="btn" onClick={handleInstall}>
+            <Button
+              onClick={() => void handleInstall()}
+              loading={installing}
+              loadingLabel="Starting..."
+            >
               Start on login
-            </button>
+            </Button>
           )}
           {onExportLogs && (
-            <button className="btn secondary" onClick={handleExportLogs}>
+            <Button
+              tone="secondary"
+              onClick={() => void handleExportLogs()}
+              loading={exporting}
+              loadingLabel="Exporting..."
+            >
               Export logs
-            </button>
+            </Button>
           )}
         </div>
-        {error && <div style={{ color: '#ff7b7b', marginTop: 8 }}>Error: {error}</div>}
+        {error && <InlineAlert kind="error">Error: {error}</InlineAlert>}
       </div>
     );
   } catch (error) {
