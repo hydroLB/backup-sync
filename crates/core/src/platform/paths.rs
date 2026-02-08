@@ -57,3 +57,18 @@ pub fn log_file_path() -> Result<PathBuf> {
     p.push("backup_sync/logs/daemon.log");
     Ok(p)
 }
+
+/// Purpose: Builds the default encryption key file path for at-rest blob encryption.
+///
+/// Inputs: none.
+/// Outputs: the filesystem path to the encryption key file.
+/// Ties to: encryption config defaults and keyfile loading.
+/// Side effects: Reads OS configuration directories.
+/// Why: keep key material out of the destination store so backups remain recoverable only with the user key.
+pub fn encryption_key_file_path() -> Result<PathBuf> {
+    let mut p = config_dir().ok_or_else(|| {
+        anyhow::anyhow!("platform::paths::encryption_key_file_path no config dir")
+    })?;
+    p.push("backup_sync/key_v1.bin");
+    Ok(p)
+}

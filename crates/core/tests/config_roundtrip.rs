@@ -29,6 +29,8 @@ fn config_roundtrip() {
         execution: ExecutionTuning::default(),
         planning: PlanningTuning::default(),
         runtime: backup_core::config::model::RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched: vec![],
         destinations: vec![backup_core::config::model::Destination {
@@ -36,6 +38,7 @@ fn config_roundtrip() {
             path: dir.path().join("b"),
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     };
     let raw =

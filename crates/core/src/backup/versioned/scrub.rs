@@ -1,13 +1,12 @@
 use super::model::{Manifest, ManifestEntryKind, VersionIndex};
 use super::store::{blob_path, blobs_root, sources_root, store_root};
 use crate::config::model::{Config, Destination, HashingTuning};
+use crate::encryption::blobs::BlobCodec;
+use crate::hashing;
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrubMode {
@@ -40,6 +39,8 @@ pub fn scrub_versioned_store(
     sample_versions_per_source: usize,
     seed: u64,
 ) -> Result<ScrubResult> {
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::scrub_versioned_store failed to initialize blob codec")?;
     let destinations_by_id: HashMap<&str, &Destination> = cfg
         .destinations
         .iter()
@@ -61,7 +62,7 @@ pub fn scrub_versioned_store(
                 )
             })?;
         let store = store_root(&dest.path);
-        let src_id = super::store::sha256_hex(watched.path.to_string_lossy().as_bytes());
+        let src_id = hashing::sha256_hex(watched.path.to_string_lossy().as_bytes());
         let source_root = sources_root(&store).join(&src_id);
         let index_path = source_root.join("index.json");
         if !index_path.exists() {
@@ -141,7 +142,7 @@ pub fn scrub_versioned_store(
             }
             if mode == ScrubMode::Full || selected_set.contains(h.as_str()) {
                 blobs_hashed += 1;
-                let computed = sha256_file(&blob, hashing.timeout_seconds)?;
+                let computed = blob_codec.sha256_plaintext_blob(&blob, hashing.timeout_seconds)?;
                 if computed != *h {
                     hash_mismatches += 1;
                 }
@@ -187,27 +188,4 @@ fn select_hashes_for_mode(
     Ok(out)
 }
 
-fn sha256_file(path: &Path, timeout_seconds: u64) -> Result<String> {
-    let start = Instant::now();
-    let mut file =
-        fs::File::open(path).with_context(|| format!("versioned::scrub sha256 open {:?}", path))?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
-            anyhow::bail!(
-                "versioned::scrub sha256 timed out after {}s hashing {:?}",
-                timeout_seconds,
-                path
-            );
-        }
-        let n = file
-            .read(&mut buf)
-            .with_context(|| format!("versioned::scrub sha256 read {:?}", path))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(super::store::sha256_hex(&hasher.finalize()))
-}
+// Plainfile hashing is handled by `BlobCodec`, which also supports decoding compressed and or encrypted blobs.

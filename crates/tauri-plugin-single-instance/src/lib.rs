@@ -1,8 +1,11 @@
 use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
+use tauri::Manager;
 
-struct SingleInstanceGuard(std::fs::File);
+struct SingleInstanceGuard {
+    _file: std::fs::File,
+}
 
 /// Purpose: Initializes a best-effort single-instance guard for Tauri applications.
 ///
@@ -42,10 +45,10 @@ where
                     .ok()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                on_second_instance(&app.app_handle(), argv, cwd);
+                on_second_instance(app, argv, cwd);
                 std::process::exit(0);
             }
-            app.manage(SingleInstanceGuard(file));
+            app.manage(SingleInstanceGuard { _file: file });
             Ok(())
         })
         .build()
@@ -59,16 +62,10 @@ where
 /// Error handling: Falls back to the OS temp dir when app data directories are unavailable.
 /// Ties to other methods: Used by `init` during plugin setup.
 /// Why this exists: Keep locking per-app and per-user without hardcoding platform paths.
-fn lock_path(app: &tauri::App) -> Result<PathBuf, tauri::Error> {
-    let identifier = app
-        .config()
-        .tauri
-        .bundle
-        .identifier
-        .clone()
-        .unwrap_or_else(|| "backup-sync".to_string());
-
+fn lock_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, tauri::Error> {
+    let cfg = app.config();
+    let identifier = cfg.tauri.bundle.identifier.clone();
     let base =
-        tauri::api::path::app_cache_dir(app.config()).unwrap_or_else(|| std::env::temp_dir());
+        tauri::api::path::app_cache_dir(cfg.as_ref()).unwrap_or_else(|| std::env::temp_dir());
     Ok(base.join(format!("{identifier}.single_instance.lock")))
 }

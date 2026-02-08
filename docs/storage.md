@@ -45,6 +45,23 @@ Entry fields:
 - Write a blob only when it does not already exist in `blobs/sha256/...`.
 - Enforce retention per folder; when older manifests are deleted, unreferenced blobs are garbage collected.
 
+## At-rest encryption (blobs only)
+
+When `[encryption].enabled = true`, blob bytes are stored encrypted on disk while manifests remain plaintext:
+- Blob filenames still use the plaintext SHA-256 so deduplication and integrity checks remain stable.
+- Restores and scrubs decrypt blobs on read using the configured key file and key id.
+- Losing the key file makes encrypted backups unrecoverable.
+
+## At-rest compression (blobs only)
+
+When `[compression].enabled = true`, new blobs are stored in a compressed, chunked container:
+- Blob filenames still use the plaintext SHA-256 so deduplication remains stable across settings changes.
+- Scrub verification remains meaningful because it hashes the **decoded plaintext** (decrypt then decompress).
+
+Compression and encryption can be enabled independently:
+- Compression only: blobs start with the magic `BSYNCCMP`.
+- Encryption + compression: blobs start with `BSYNCENC` and use an encryption algorithm id that indicates the per-chunk compressed payload.
+
 ## Restore behavior
 
 Restore to directory:

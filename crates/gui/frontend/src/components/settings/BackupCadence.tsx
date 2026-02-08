@@ -1,33 +1,25 @@
 import React from 'react';
 
 type Props = {
-  interval_seconds: number;
   max_backups_per_file: number;
   onChange: (data: Partial<{ interval_seconds: number; max_backups_per_file: number }>) => void;
 };
 
 /**
- * Purpose: Render cadence controls for backup interval and retention.
+ * Purpose: Render cadence controls for the fixed automatic schedule and retention.
  *
- * Inputs: Interval seconds, max backups per file, and change handler.
+ * Inputs: Max backups per file and change handler.
  * Outputs: A form section for cadence settings.
  * Ties to: Settings panel cadence section.
  * Side effects: Registers UI event handlers for cadence updates.
- * Why: Allow operators to tune backup frequency and retention defaults.
+ * Why: Keep scheduling consistent while still letting operators tune retention defaults.
  */
-const BackupCadence: React.FC<Props> = ({ interval_seconds, max_backups_per_file, onChange }) => {
+const BackupCadence: React.FC<Props> = ({ max_backups_per_file, onChange }) => {
   try {
     return (
-      <>
-        <h3>Backup cadence</h3>
-        <label>
-          Backup interval (seconds)
-          <input
-            type="number"
-            value={interval_seconds}
-            onChange={(e) => onChange({ interval_seconds: Number(e.target.value) })}
-          />
-        </label>
+        <>
+          <h3>Backup cadence</h3>
+        <div className="muted">Automatic backups run every 30 minutes.</div>
         <label>
           Max backups per file
           <input

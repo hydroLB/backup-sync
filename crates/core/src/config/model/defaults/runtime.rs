@@ -9,6 +9,17 @@ pub(crate) fn default_prune_interval_cycles() -> u64 {
     10
 }
 
+/// Purpose: Supplies the default interval (in cycles) for forcing a full scan even when watchers report no changes.
+///
+/// Inputs: none.
+/// Outputs: the number of cycles between forced full scans.
+/// Ties to: daemon cycle skipping based on watcher dirty sets.
+/// Side effects: None.
+/// Why: watchers can miss events; periodic full scans provide a safety net.
+pub(crate) fn default_force_full_scan_interval_cycles() -> u64 {
+    24
+}
+
 /// Purpose: Supplies the default interval for verification cycles.
 ///
 /// Inputs: none.
@@ -128,4 +139,48 @@ pub(crate) fn default_source_snapshots_enabled() -> bool {
 /// Why: keep OS-level snapshot operations bounded so backup cycles cannot hang indefinitely.
 pub(crate) fn default_source_snapshot_timeout_seconds() -> u64 {
     20
+}
+
+/// Purpose: Supplies the default enablement flag for destination replication.
+///
+/// Inputs: none.
+/// Outputs: true by default.
+/// Ties to: versioned store replication for multi-destination and 3-2-1 workflows.
+/// Side effects: None.
+/// Why: replication is opt-in per destination via `replicate_to`, but can be disabled globally for safety.
+pub(crate) fn default_replication_enabled() -> bool {
+    true
+}
+
+/// Purpose: Supplies the default mirror behavior for replication manifest pruning.
+///
+/// Inputs: none.
+/// Outputs: true by default.
+/// Ties to: replication behavior when primary retention prunes old versions.
+/// Side effects: None.
+/// Why: replicas should usually reflect the same visible version set as the primary store.
+pub(crate) fn default_replication_mirror_manifests() -> bool {
+    true
+}
+
+/// Purpose: Supplies the default safety cap for manifest deletions per replication cycle.
+///
+/// Inputs: none.
+/// Outputs: maximum number of manifest files to delete from a replica per cycle.
+/// Ties to: replication mirror deletion safety.
+/// Side effects: None.
+/// Why: prevent accidental large deletions when destination mappings are misconfigured.
+pub(crate) fn default_replication_max_manifest_deletes_per_cycle() -> usize {
+    500
+}
+
+/// Purpose: Supplies the default "large deletion" threshold for pinning an extra version.
+///
+/// Inputs: none.
+/// Outputs: A ratio in `[0.0, 1.0]` representing the minimum shrink to trigger pinning.
+/// Ties to: versioned store pruning behavior.
+/// Side effects: None.
+/// Why: Keep a safety baseline when a watched path suddenly shrinks dramatically.
+pub(crate) fn default_large_deletion_keep_extra_threshold_ratio() -> f64 {
+    0.5
 }

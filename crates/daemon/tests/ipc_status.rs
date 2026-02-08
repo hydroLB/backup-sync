@@ -26,6 +26,7 @@ async fn unix_ipc_status_round_trip() {
         label: None,
         path: backup_root.clone(),
         max_backups_per_file: None,
+        replicate_to: vec![],
     }];
     let handle = match ipc::spawn_server(
         shared.clone(),

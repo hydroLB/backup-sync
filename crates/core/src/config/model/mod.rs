@@ -1,8 +1,12 @@
+pub mod compression;
 pub mod defaults;
+pub mod encryption;
 pub mod tuning;
 
 mod types;
 
+pub use compression::CompressionConfig;
+pub use encryption::EncryptionConfig;
 pub use tuning::{ExecutionTuning, HashingTuning, PlanningTuning, RuntimeTuning};
 pub use types::{Config, Destination, WatchedKind, WatchedPath};
 

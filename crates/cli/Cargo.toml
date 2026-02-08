@@ -13,3 +13,4 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 dirs = "5"
 fs2 = "0.4"
+chrono = { version = "0.4", features = ["serde"] }

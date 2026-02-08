@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Destination, WatchedPath } from '../types';
 import DestMenu from './DestMenu';
 import DestItems from './DestItems';
+import { Button } from '../../ui/Button';
 
 type Props = {
   dest: Destination;
@@ -98,7 +99,12 @@ const DestCard: React.FC<Props> = ({
             <div className="muted dest-path">{dest.path}</div>
           </div>
           <div className="dest-actions">
-            <button className="icon-btn" onClick={() => setMenuOpen(!menuOpen)}>
+            <button
+              className="icon-btn"
+              type="button"
+              aria-label={menuOpen ? 'Close destination menu' : 'Open destination menu'}
+              onClick={() => setMenuOpen(!menuOpen)}
+            >
               ⋮
             </button>
           </div>
@@ -109,18 +115,15 @@ const DestCard: React.FC<Props> = ({
             onChange={(v) => onSetRetention(dest.id, v)}
           />
         )}
-        <div className="dest-drop">
-          <div>Drag files/folders here</div>
-          <div className="inline-actions" style={{ marginTop: 6 }}>
-            <button className="btn secondary" onClick={() => onPickPath(dest.id, 'Directory')}>
-              Add folder
-            </button>
-            <button className="btn secondary" onClick={() => onPickPath(dest.id, 'File')}>
-              Add file
-            </button>
+          <div className="dest-drop">
+            <div>Drag files/folders here</div>
+            <div className="inline-actions mt-2">
+            <Button tone="secondary" size="sm" onClick={() => onPickPath(dest.id, 'Directory')}>
+              Add path…
+            </Button>
+            </div>
+            {status && <div className="muted small">{status}</div>}
           </div>
-          {status && <div className="muted small">{status}</div>}
-        </div>
         <DestItems items={items} onToggleEnabled={onToggleEnabled} onRemove={onRemove} />
       </div>
     );

@@ -28,16 +28,7 @@ const OnboardingSummary: React.FC<Props> = ({
   try {
     const freeLabel = freeBytes == null ? 'Checking free space…' : formatBytes(freeBytes);
     return (
-      <div
-        className="muted"
-        style={{
-          marginTop: 6,
-          border: '1px solid var(--border)',
-          borderRadius: 10,
-          padding: 10,
-          background: 'rgba(255,255,255,0.04)',
-        }}
-      >
+      <div className="muted summary-card">
         <div>
           Watched:{' '}
           {watchedCount > 0
@@ -48,7 +39,7 @@ const OnboardingSummary: React.FC<Props> = ({
         <div>Free space: {freeLabel}</div>
         <div>Safe mode: {safeMode ? 'On (scan/verify only)' : 'Off (normal backups)'}</div>
         {onSimulate && (
-          <button className="btn secondary" style={{ marginTop: 8 }} onClick={onSimulate}>
+          <button className="btn secondary mt-2" onClick={onSimulate}>
             Simulate backup
           </button>
         )}

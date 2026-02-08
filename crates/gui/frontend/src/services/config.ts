@@ -2,6 +2,8 @@ import { correlationId } from './correlation';
 import { Config } from '../components/settings/types';
 import { safeInvoke, wrapError } from './ipc';
 
+const FIXED_AUTOMATIC_INTERVAL_SECONDS = 30 * 60;
+
 /**
  * Purpose: Load the current configuration from the backend.
  *
@@ -30,7 +32,10 @@ export async function loadConfig(): Promise<Config> {
  */
 export async function saveConfig(cfg: Config): Promise<void> {
   try {
-    return await safeInvoke('save_config_cmd', { cfg, correlationId: correlationId('save') });
+    return await safeInvoke('save_config_cmd', {
+      cfg: { ...cfg, interval_seconds: FIXED_AUTOMATIC_INTERVAL_SECONDS },
+      correlationId: correlationId('save'),
+    });
   } catch (error) {
     throw wrapError('[saveConfig] Failed to save configuration', error);
   }

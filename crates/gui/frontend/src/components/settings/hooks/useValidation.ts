@@ -55,7 +55,6 @@ export function useValidation() {
         if (conflict && conflict.path !== w.path)
           return 'A parent/child path is already protected. Remove duplicates.';
       }
-      if (next.interval_seconds < 5) return 'Backup interval must be at least 5 seconds.';
       if (next.max_backups_per_file < 1) return 'Max backups per file must be at least 1.';
       if (next.max_parallel_copies < 1) return 'Max parallel copies must be at least 1.';
       if (ignores.length > 200) return 'Too many ignore patterns; trim to 200 or fewer.';

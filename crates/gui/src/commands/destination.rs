@@ -2,7 +2,7 @@
 use crate::commands::error::ErrorEnvelope;
 use fs2::free_space;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Serialize)]
 /// Purpose: Result payload describing destination validation status.
@@ -16,6 +16,44 @@ pub struct DestinationCheck {
     pub writable: bool,
     pub free_bytes: Option<u64>,
     pub message: String,
+}
+
+#[cfg(target_os = "macos")]
+/// Summary: Detect whether a destination is inside a missing `/Volumes/<name>` mount root on macOS.
+///
+/// Inputs: `path` destination path to validate.
+/// Outputs: Missing mount-root path when the volume root is not present, otherwise `None`.
+/// Side effects: None.
+/// Error handling: Returns `None` when the destination is not under `/Volumes` or path parsing fails.
+/// Ties to other methods: Used by `check_destination_cmd` before attempting auto-create behavior.
+/// Why this exists: Prevent auto-creating fake mount folders when an external drive is disconnected.
+fn missing_macos_mount_root(path: &Path) -> Option<PathBuf> {
+    let volumes_root = Path::new("/Volumes");
+    let relative = path.strip_prefix(volumes_root).ok()?;
+    let mut components = relative.components();
+    let volume_name = match components.next()? {
+        Component::Normal(name) => name,
+        _ => return None,
+    };
+    let mount_root = volumes_root.join(volume_name);
+    if mount_root.exists() {
+        None
+    } else {
+        Some(mount_root)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+/// Summary: Non-macOS shim for mount-root detection.
+///
+/// Inputs: Ignored destination path.
+/// Outputs: Always `None`.
+/// Side effects: None.
+/// Error handling: None.
+/// Ties to other methods: Keeps `check_destination_cmd` platform-agnostic.
+/// Why this exists: The `/Volumes` mount guard only applies to macOS.
+fn missing_macos_mount_root(_path: &Path) -> Option<PathBuf> {
+    None
 }
 
 #[tauri::command]
@@ -50,11 +88,27 @@ pub fn check_destination_cmd(path: String) -> Result<DestinationCheck, ErrorEnve
         });
     }
     if !p.exists() {
-        return Ok(DestinationCheck {
-            writable: false,
-            free_bytes: None,
-            message: "Destination folder does not exist. Create it first, then select it.".into(),
-        });
+        if let Some(missing_mount_root) = missing_macos_mount_root(&p) {
+            return Ok(DestinationCheck {
+                writable: false,
+                free_bytes: None,
+                message: format!(
+                    "Destination drive is not mounted at {}. Reconnect it and try again.",
+                    missing_mount_root.display()
+                ),
+            });
+        }
+
+        if let Err(error) = std::fs::create_dir_all(&p) {
+            return Ok(DestinationCheck {
+                writable: false,
+                free_bytes: None,
+                message: format!(
+                    "Could not create destination folder automatically: {}",
+                    error
+                ),
+            });
+        }
     }
     if !p.is_dir() {
         return Ok(DestinationCheck {
@@ -74,5 +128,57 @@ pub fn check_destination_cmd(path: String) -> Result<DestinationCheck, ErrorEnve
             free_bytes: None,
             message: format!("Cannot read free space: {}", e),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_destination_cmd;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Summary: Generate a unique temporary path for test filesystem operations.
+    ///
+    /// Inputs: `label` path segment for test readability.
+    /// Outputs: Unique path under the process temp directory.
+    /// Side effects: None.
+    /// Error handling: Falls back to timestamp `0` when system clock is before epoch.
+    /// Ties to other methods: Used by destination command tests.
+    /// Why this exists: Keep tests deterministic without adding external dependencies.
+    fn unique_temp_path(label: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("backup-sync-gui-{label}-{timestamp}"))
+    }
+
+    #[test]
+    fn creates_missing_destination_folder_automatically() {
+        let destination = unique_temp_path("destination-create")
+            .join("missing")
+            .join("nested");
+        if destination.exists() {
+            let _ = std::fs::remove_dir_all(&destination);
+        }
+
+        let result =
+            check_destination_cmd(destination.display().to_string()).expect("check should succeed");
+        assert!(
+            result.writable,
+            "expected writable result, got: {}",
+            result.message
+        );
+        assert!(
+            destination.is_dir(),
+            "destination directory should be created"
+        );
+
+        let cleanup_root = destination
+            .ancestors()
+            .nth(2)
+            .map(PathBuf::from)
+            .unwrap_or(destination);
+        let _ = std::fs::remove_dir_all(cleanup_root);
     }
 }

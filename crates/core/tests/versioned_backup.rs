@@ -36,6 +36,8 @@ fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
         execution: ExecutionTuning::default(),
         planning: PlanningTuning::default(),
         runtime: RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched: vec![WatchedPath {
             path: source.to_path_buf(),
@@ -49,6 +51,7 @@ fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
             path: dest.to_path_buf(),
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     }
 }
@@ -136,6 +139,129 @@ fn versioned_enforces_retention_limit() {
         .expect("versioned_backup::versioned_enforces_retention_limit cycle 3 failed");
 
     assert_eq!(versions_for(&cfg, &source).len(), 2);
+}
+
+#[test]
+fn large_deletion_pins_extra_version_beyond_retention() {
+    let tmp = tempdir().expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to create temp",
+    );
+    let source = tmp.path().join("source");
+    let dest = tmp.path().join("dest");
+    fs::create_dir_all(&source).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to create source dir",
+    );
+    fs::create_dir_all(&dest).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to create dest",
+    );
+
+    for i in 0..4 {
+        fs::write(source.join(format!("file-{i}.txt")), "data").expect(
+            "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to write seed file",
+        );
+    }
+
+    let cfg = build_cfg(&source, &dest, 1);
+    let cycle1 = run_backup_cycle(&cfg).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention cycle 1 failed",
+    );
+    assert_eq!(
+        cycle1.versions_created, 1,
+        "expected an initial version to be created"
+    );
+    let baseline_version_id = versions_for(&cfg, &source)
+        .first()
+        .cloned()
+        .expect("versioned_backup::large_deletion_pins_extra_version_beyond_retention missing baseline id");
+
+    for i in 0..3 {
+        fs::remove_file(source.join(format!("file-{i}.txt"))).expect(
+            "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to delete file",
+        );
+    }
+
+    let cycle2 = run_backup_cycle(&cfg).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention cycle 2 failed",
+    );
+    assert_eq!(
+        cycle2.versions_created, 1,
+        "expected a new version after deletions"
+    );
+    assert!(
+        !cycle2.safety_warnings.is_empty(),
+        "expected a safety warning on large deletion"
+    );
+    assert!(
+        cycle2.safety_warnings[0].message.contains("75%"),
+        "expected a ~75% shrink warning, got: {}",
+        cycle2.safety_warnings[0].message
+    );
+
+    // Keep versions=1 would normally retain only one manifest, but the pinned baseline should
+    // remain as an extra safety version.
+    let source_id = sha256_hex(source.to_string_lossy().as_bytes());
+    let index_path = dest
+        .join(".backup_sync")
+        .join("v1")
+        .join("sources")
+        .join(source_id)
+        .join("index.json");
+    let raw = fs::read_to_string(&index_path).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to read index.json",
+    );
+    let index: backup_core::backup::versioned::VersionIndex = serde_json::from_str(&raw).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to parse index.json",
+    );
+    assert_eq!(
+        index.safety_pending_version_id.as_deref(),
+        Some(baseline_version_id.as_str()),
+        "expected baseline version to be kept pending"
+    );
+    assert_eq!(
+        index.safety_pinned_version_id.as_deref(),
+        None,
+        "expected pending to be promoted only after a second clean scan"
+    );
+    assert_eq!(
+        versions_for(&cfg, &source).len(),
+        2,
+        "expected keep(1)+pinned(1) versions"
+    );
+
+    // A second clean scan with no further changes should promote the pending baseline to a pin.
+    let cycle3 = run_backup_cycle(&cfg).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention cycle 3 failed",
+    );
+    assert_eq!(
+        cycle3.versions_created, 0,
+        "expected no new version when no changes occurred"
+    );
+    assert!(
+        cycle3.safety_warnings.is_empty(),
+        "expected no additional safety warning on promotion"
+    );
+
+    let raw = fs::read_to_string(&index_path).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to read index.json after promotion",
+    );
+    let index: backup_core::backup::versioned::VersionIndex = serde_json::from_str(&raw).expect(
+        "versioned_backup::large_deletion_pins_extra_version_beyond_retention failed to parse index.json after promotion",
+    );
+    assert_eq!(
+        index.safety_pending_version_id.as_deref(),
+        None,
+        "expected pending baseline to be cleared after promotion"
+    );
+    assert_eq!(
+        index.safety_pinned_version_id.as_deref(),
+        Some(baseline_version_id.as_str()),
+        "expected baseline version to be pinned after a second clean scan"
+    );
+    assert_eq!(
+        versions_for(&cfg, &source).len(),
+        2,
+        "expected keep(1)+pinned(1) versions after promotion"
+    );
 }
 
 #[test]

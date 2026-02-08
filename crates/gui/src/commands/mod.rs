@@ -4,6 +4,7 @@ pub mod config;
 pub mod correlation;
 pub mod destination;
 pub mod error;
+pub mod hardening;
 pub mod logs;
 pub mod service;
 pub mod status;

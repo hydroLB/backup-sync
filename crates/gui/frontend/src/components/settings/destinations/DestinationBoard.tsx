@@ -1,6 +1,8 @@
 import React from 'react';
 import { Destination, WatchedPath } from '../types';
 import DestCard from './DestCard';
+import { Button } from '../../ui/Button';
+import { StateBlock } from '../../ui/StateBlock';
 
 type Props = {
   destinations: Destination[];
@@ -39,28 +41,41 @@ const DestinationBoard: React.FC<Props> = ({
       <div className="destination-board">
         <div className="board-header">
           <h3>Backup locations</h3>
-          <button className="btn secondary" onClick={onAddDestination}>
+          <Button tone="secondary" onClick={onAddDestination}>
             Add destination
-          </button>
+          </Button>
         </div>
-        <div className="dest-grid">
-          {destinations.map((d) => {
-            const items = watched.filter((w) => (w.destination_id || 'default') === d.id);
-            return (
-              <DestCard
-                key={d.id}
-                dest={d}
-                items={items}
-                onAddPath={onAddPath}
-                onPickPath={onPickPath}
-                onToggleEnabled={onToggleEnabled}
-                onRemove={onRemove}
-                onSetRetention={onSetDestRetention}
-                onSetLabel={onSetDestLabel}
-              />
-            );
-          })}
-        </div>
+        {destinations.length === 0 ? (
+          <StateBlock
+            tone="empty"
+            title="No destinations configured"
+            message="Add a backup location to continue setup."
+            action={
+              <Button tone="secondary" size="sm" onClick={onAddDestination}>
+                Add destination
+              </Button>
+            }
+          />
+        ) : (
+          <div className="dest-grid">
+            {destinations.map((d) => {
+              const items = watched.filter((w) => (w.destination_id || 'default') === d.id);
+              return (
+                <DestCard
+                  key={d.id}
+                  dest={d}
+                  items={items}
+                  onAddPath={onAddPath}
+                  onPickPath={onPickPath}
+                  onToggleEnabled={onToggleEnabled}
+                  onRemove={onRemove}
+                  onSetRetention={onSetDestRetention}
+                  onSetLabel={onSetDestLabel}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   } catch (error) {

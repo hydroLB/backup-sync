@@ -1,5 +1,7 @@
 import React from 'react';
 import { WatchedPath } from '../types';
+import { Button } from '../../ui/Button';
+import { StateBlock } from '../../ui/StateBlock';
 
 type Props = {
   items: WatchedPath[];
@@ -18,7 +20,15 @@ type Props = {
  */
 const DestItems: React.FC<Props> = ({ items, onToggleEnabled, onRemove }) => {
   try {
-    if (!items.length) return <div className="muted">Nothing protected yet.</div>;
+    if (!items.length) {
+      return (
+        <StateBlock
+          tone="empty"
+          title="Nothing protected yet"
+          message="Add a file or folder to this destination."
+        />
+      );
+    }
     return (
       <div className="dest-items">
         {items.map((w) => (
@@ -28,12 +38,12 @@ const DestItems: React.FC<Props> = ({ items, onToggleEnabled, onRemove }) => {
               <div className="muted small">{w.path}</div>
             </div>
             <div className="inline-actions">
-              <button className="btn secondary" onClick={() => onToggleEnabled(w.path)}>
+              <Button tone="secondary" size="sm" onClick={() => onToggleEnabled(w.path)}>
                 {w.enabled ? 'Pause' : 'Enable'}
-              </button>
-              <button className="btn secondary" onClick={() => onRemove(w.path)}>
+              </Button>
+              <Button tone="secondary" size="sm" onClick={() => onRemove(w.path)}>
                 Remove
-              </button>
+              </Button>
             </div>
           </div>
         ))}

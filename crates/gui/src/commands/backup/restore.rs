@@ -1,7 +1,8 @@
 use crate::commands::correlation;
 use crate::commands::error::ErrorEnvelope;
 use backup_core::backup::versioned::restore::{
-    list_versions, restore_version, RestoreMode, RestoreRequest,
+    list_version_files, list_versions, restore_files, restore_version, ListVersionFilesResult,
+    RestoreFilesRequest, RestoreMode, RestoreRequest, VersionFileInfo,
 };
 use backup_core::{load_config, validate};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,40 @@ pub struct RestoreResultDto {
     pub files_written: usize,
     pub files_removed: usize,
     pub dirs_created: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VersionFileInfoDto {
+    pub rel_path: String,
+    pub len: u64,
+    pub mtime_unix: i64,
+    pub mtime_nanos: u32,
+    pub sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListVersionFilesResultDto {
+    pub total_files: usize,
+    pub files: Vec<VersionFileInfoDto>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListVersionFilesArgs {
+    pub source_path: String,
+    pub version_id: String,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RestoreFilesArgs {
+    pub source_path: String,
+    pub version_id: String,
+    pub rel_paths: Vec<String>,
+    pub mode: RestoreModeDto,
+    pub target_dir: Option<String>,
 }
 
 #[tauri::command]
@@ -87,6 +122,71 @@ pub async fn list_versions_cmd(
 }
 
 #[tauri::command]
+pub async fn list_version_files_cmd(
+    args: ListVersionFilesArgs,
+    correlation_id: Option<String>,
+) -> Result<ListVersionFilesResultDto, ErrorEnvelope> {
+    let cid = correlation::cid("restore_files_list", correlation_id);
+    let cfg = load_config().map_err(|e| {
+        ErrorEnvelope::new(
+            "CONFIG_LOAD",
+            format!(
+                "[cid={}] list_version_files_cmd failed to load config: {}",
+                cid, e
+            ),
+        )
+    })?;
+    validate(&cfg).map_err(|e| {
+        ErrorEnvelope::new(
+            "CONFIG_INVALID",
+            format!(
+                "[cid={}] list_version_files_cmd config validation failed: {}",
+                cid, e
+            ),
+        )
+    })?;
+
+    let limit = args.limit.unwrap_or(200);
+    let ListVersionFilesResult { total_files, files } = list_version_files(
+        &cfg,
+        PathBuf::from(args.source_path).as_path(),
+        args.version_id.as_str(),
+        args.query.as_deref(),
+        limit,
+    )
+    .map_err(|e| {
+        ErrorEnvelope::new(
+            "LIST_FILES_FAILED",
+            format!("[cid={}] list_version_files_cmd failed: {}", cid, e),
+        )
+    })?;
+
+    Ok(ListVersionFilesResultDto {
+        total_files,
+        files: files
+            .into_iter()
+            .map(
+                |VersionFileInfo {
+                     rel_path,
+                     len,
+                     mtime_unix,
+                     mtime_nanos,
+                     sha256,
+                 }| {
+                    VersionFileInfoDto {
+                        rel_path,
+                        len,
+                        mtime_unix,
+                        mtime_nanos,
+                        sha256,
+                    }
+                },
+            )
+            .collect(),
+    })
+}
+
+#[tauri::command]
 pub async fn restore_version_cmd(
     args: RestoreArgs,
     correlation_id: Option<String>,
@@ -125,6 +225,56 @@ pub async fn restore_version_cmd(
         ErrorEnvelope::new(
             "RESTORE_FAILED",
             format!("[cid={}] restore_version_cmd failed: {}", cid, e),
+        )
+    })?;
+    Ok(RestoreResultDto {
+        files_written: result.files_written,
+        files_removed: result.files_removed,
+        dirs_created: result.dirs_created,
+    })
+}
+
+#[tauri::command]
+pub async fn restore_files_cmd(
+    args: RestoreFilesArgs,
+    correlation_id: Option<String>,
+) -> Result<RestoreResultDto, ErrorEnvelope> {
+    let cid = correlation::cid("restore_files", correlation_id);
+    let cfg = load_config().map_err(|e| {
+        ErrorEnvelope::new(
+            "CONFIG_LOAD",
+            format!(
+                "[cid={}] restore_files_cmd failed to load config: {}",
+                cid, e
+            ),
+        )
+    })?;
+    validate(&cfg).map_err(|e| {
+        ErrorEnvelope::new(
+            "CONFIG_INVALID",
+            format!(
+                "[cid={}] restore_files_cmd config validation failed: {}",
+                cid, e
+            ),
+        )
+    })?;
+
+    let mode = match args.mode {
+        RestoreModeDto::InPlace => RestoreMode::InPlace,
+        RestoreModeDto::ToDirectory => RestoreMode::ToDirectory,
+    };
+    let req = RestoreFilesRequest {
+        source_path: PathBuf::from(args.source_path),
+        version_id: args.version_id,
+        rel_paths: args.rel_paths,
+        mode,
+        target_dir: args.target_dir.map(PathBuf::from),
+    };
+
+    let result = restore_files(&cfg, &req).map_err(|e| {
+        ErrorEnvelope::new(
+            "RESTORE_FILES_FAILED",
+            format!("[cid={}] restore_files_cmd failed: {}", cid, e),
         )
     })?;
     Ok(RestoreResultDto {

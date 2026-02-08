@@ -1,7 +1,8 @@
 import { prewarmDialog } from './dialog';
 import { loadTauriInvoke, tauriAvailable } from './ipc';
 
-let prewarmed = false;
+type PrewarmState = 'idle' | 'in_progress' | 'done';
+let prewarmState: PrewarmState = 'idle';
 
 /**
  * Purpose: Prewarm native Tauri modules used by common UI interactions.
@@ -15,12 +16,14 @@ let prewarmed = false;
  */
 export async function prewarmNativeApis(): Promise<void> {
   try {
-    if (prewarmed) return;
-    prewarmed = true;
+    if (prewarmState !== 'idle') return;
+    // Do not permanently "burn" prewarming if the IPC bridge is not
+    // available yet. Tauri can attach __TAURI_IPC__ slightly after first paint.
     if (!tauriAvailable()) return;
+    prewarmState = 'in_progress';
     await Promise.all([loadTauriInvoke(), prewarmDialog()]);
+    prewarmState = 'done';
   } catch {
-    // best-effort prewarm
+    prewarmState = 'idle';
   }
 }
-

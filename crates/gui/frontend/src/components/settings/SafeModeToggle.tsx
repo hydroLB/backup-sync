@@ -17,7 +17,7 @@ type Props = {
 const SafeModeToggle: React.FC<Props> = ({ value, onChange }) => {
   try {
     return (
-      <label style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <label className="label-row">
         <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
         <span title="Backups won't write; only scan and verify. Good for debugging.">
           Safe mode (scan/verify only; no writes)

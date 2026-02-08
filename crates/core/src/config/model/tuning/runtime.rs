@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct RuntimeTuning {
     #[serde(default = "crate::config::model::defaults::default_prune_interval_cycles")]
     pub prune_interval_cycles: u64,
+    #[serde(default = "crate::config::model::defaults::default_force_full_scan_interval_cycles")]
+    pub force_full_scan_interval_cycles: u64,
     #[serde(default = "crate::config::model::defaults::default_verify_interval_seconds")]
     pub verify_interval_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_scrub_full_interval_seconds")]
@@ -32,6 +34,18 @@ pub struct RuntimeTuning {
     pub log_tail_lines: usize,
     #[serde(default = "crate::config::model::defaults::default_simulation_sample_limit")]
     pub simulation_sample_limit: usize,
+    #[serde(default = "crate::config::model::defaults::default_replication_enabled")]
+    pub replication_enabled: bool,
+    #[serde(default = "crate::config::model::defaults::default_replication_mirror_manifests")]
+    pub replication_mirror_manifests: bool,
+    #[serde(
+        default = "crate::config::model::defaults::default_replication_max_manifest_deletes_per_cycle"
+    )]
+    pub replication_max_manifest_deletes_per_cycle: usize,
+    #[serde(
+        default = "crate::config::model::defaults::default_large_deletion_keep_extra_threshold_ratio"
+    )]
+    pub large_deletion_keep_extra_threshold_ratio: f64,
     #[serde(default)]
     pub gui_start_hidden: bool,
 }
@@ -47,6 +61,8 @@ impl Default for RuntimeTuning {
     fn default() -> Self {
         Self {
             prune_interval_cycles: crate::config::model::defaults::default_prune_interval_cycles(),
+            force_full_scan_interval_cycles:
+                crate::config::model::defaults::default_force_full_scan_interval_cycles(),
             verify_interval_seconds:
                 crate::config::model::defaults::default_verify_interval_seconds(),
             scrub_full_interval_seconds:
@@ -72,6 +88,13 @@ impl Default for RuntimeTuning {
             log_tail_lines: crate::config::model::defaults::default_log_tail_lines(),
             simulation_sample_limit:
                 crate::config::model::defaults::default_simulation_sample_limit(),
+            replication_enabled: crate::config::model::defaults::default_replication_enabled(),
+            replication_mirror_manifests:
+                crate::config::model::defaults::default_replication_mirror_manifests(),
+            replication_max_manifest_deletes_per_cycle:
+                crate::config::model::defaults::default_replication_max_manifest_deletes_per_cycle(),
+            large_deletion_keep_extra_threshold_ratio:
+                crate::config::model::defaults::default_large_deletion_keep_extra_threshold_ratio(),
             gui_start_hidden: false,
         }
     }

@@ -5,6 +5,7 @@ import { formatBytes } from '../utils/format';
 import { ActionLogEntry } from './status/ActionLogFlyout';
 import { SimulationResult } from '../services/types';
 import { UI_TUNING } from '../config/uiTuning';
+import { Button } from './ui/Button';
 
 type Props = { onEvent?: (msg: string, kind?: ActionLogEntry['kind']) => void; safeMode?: boolean };
 type PlanError = { message?: string; code?: string };
@@ -135,27 +136,35 @@ export const RunNow: React.FC<Props> = ({ onEvent, safeMode }) => {
           <h3>Manual run</h3>
           <span className="pill">Instant</span>
         </div>
-        <p className="muted" style={{ marginTop: 0 }}>
+        <p className="muted mt-0">
           Trigger a backup cycle right now without waiting for the scheduler.
         </p>
         <div className="inline-actions">
-          <button className="btn" onClick={handleRun} disabled={loading || safeMode}>
+          <Button
+            onClick={handleRun}
+            disabled={safeMode}
+            loading={loading}
+            loadingLabel="Running..."
+          >
             {safeMode ? 'Safe mode enabled' : loading ? 'Running...' : 'Run backup now'}
-          </button>
-          <button className="btn secondary" onClick={handleSimulate} disabled={simulating}>
-            {simulating ? 'Simulating...' : 'Simulate backup'}
-          </button>
+          </Button>
+          <Button
+            tone="secondary"
+            onClick={handleSimulate}
+            loading={simulating}
+            loadingLabel="Simulating..."
+          >
+            Simulate backup
+          </Button>
           {message && <span className="muted">{message}</span>}
         </div>
         {log && (
           <pre
+            className="log-preview"
             style={{
               maxHeight: logPreviewMaxHeightPx,
-              overflow: 'auto',
-              background: 'rgba(255,255,255,0.05)',
               padding: logPreviewPaddingPx,
               borderRadius: logPreviewRadiusPx,
-              border: '1px solid var(--border)',
             }}
           >
             {log}

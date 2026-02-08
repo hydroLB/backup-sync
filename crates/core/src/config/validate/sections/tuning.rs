@@ -260,6 +260,19 @@ fn validate_runtime_limits(cfg: &Config, limits: &ValidationLimits, label: &str)
             limits.max_prune_interval_cycles
         );
     }
+
+    ensure_nonzero_u64(
+        label,
+        "runtime.force_full_scan_interval_cycles",
+        cfg.runtime.force_full_scan_interval_cycles,
+    )?;
+    if cfg.runtime.force_full_scan_interval_cycles > limits.max_force_full_scan_interval_cycles {
+        bail!(
+            "{label} runtime.force_full_scan_interval_cycles too large (>{})",
+            limits.max_force_full_scan_interval_cycles
+        );
+    }
+
     if cfg.runtime.verify_interval_seconds < limits.min_verify_interval_seconds {
         bail!(
             "{label} runtime.verify_interval_seconds must be >= {}",
@@ -404,6 +417,22 @@ fn validate_runtime_limits(cfg: &Config, limits: &ValidationLimits, label: &str)
         bail!(
             "{label} runtime.simulation_sample_limit too large (>{})",
             limits.max_simulation_sample_limit
+        );
+    }
+
+    if cfg.runtime.replication_max_manifest_deletes_per_cycle
+        > limits.max_replication_max_manifest_deletes_per_cycle
+    {
+        bail!(
+            "{label} runtime.replication_max_manifest_deletes_per_cycle too large (>{})",
+            limits.max_replication_max_manifest_deletes_per_cycle
+        );
+    }
+
+    let threshold = cfg.runtime.large_deletion_keep_extra_threshold_ratio;
+    if !threshold.is_finite() || threshold < 0.0 || threshold > 1.0 {
+        bail!(
+            "{label} runtime.large_deletion_keep_extra_threshold_ratio must be within [0.0, 1.0]"
         );
     }
     Ok(())

@@ -1,6 +1,7 @@
 import React from 'react';
 import { UI_TUNING } from '../../config/uiTuning';
 import { formatDateTime } from '../../utils/format';
+import { Button } from '../ui/Button';
 
 type Props = {
   last_verify_ts: number | null;
@@ -61,9 +62,14 @@ const VerifyBlock: React.FC<Props> = ({
           <div>{last_verify_issues ?? 0}</div>
         </div>
         <div>
-          <button className="btn" disabled={verifying} onClick={handleVerify}>
-            {verifying ? 'Verifying...' : 'Verify backups'}
-          </button>
+          <Button
+            onClick={handleVerify}
+            disabled={verifying}
+            loading={verifying}
+            loadingLabel="Verifying..."
+          >
+            Verify backups
+          </Button>
           <div className="muted">{verifyMsg}</div>
         </div>
       </div>

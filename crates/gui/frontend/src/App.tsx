@@ -7,10 +7,6 @@ import { UI_TUNING } from './config/uiTuning';
 import { MinimalMain } from './components/minimal/MinimalMain';
 import { prewarmNativeApis } from './services/nativePrewarm';
 
-type IdleCallbackHandle = number;
-type IdleCallbackFn = (deadline: unknown) => void;
-type IdleCallbackOptions = { timeout?: number };
-
 /**
  * Purpose: Render the top-level application shell and coordinate shared UI state.
  *
@@ -32,25 +28,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const timeouts: Array<ReturnType<typeof setTimeout>> = [];
     const run = () => {
-      void prewarmNativeApis();
+      // Tauri can attach the IPC bridge shortly after first paint. Prewarm with a
+      // short, bounded retry schedule so the first picker click is fast.
+      const retryDelaysMs = [0, 150, 350, 700, 1200, 2000, 3200];
+      for (const delayMs of retryDelaysMs) {
+        timeouts.push(
+          setTimeout(() => {
+            void prewarmNativeApis();
+          }, delayMs),
+        );
+      }
     };
-    const w = window as unknown as {
-      requestIdleCallback?: (cb: IdleCallbackFn, opts?: IdleCallbackOptions) => IdleCallbackHandle;
-      cancelIdleCallback?: (id: IdleCallbackHandle) => void;
+    // `requestIdleCallback` can be deferred long enough that users click before
+    // it fires. Schedule prewarm retries immediately, and let the prewarm
+    // function no-op until IPC is ready.
+    const id = setTimeout(run, 0);
+    return () => {
+      clearTimeout(id);
+      for (const t of timeouts) clearTimeout(t);
     };
-    if (typeof window !== 'undefined' && typeof w.requestIdleCallback === 'function') {
-      const id = w.requestIdleCallback(run, { timeout: 2000 });
-      return () => {
-        try {
-          w.cancelIdleCallback?.(id);
-        } catch {
-          // ignore
-        }
-      };
-    }
-    const id = setTimeout(run, 50);
-    return () => clearTimeout(id);
   }, []);
   /**
    * Purpose: Append a new action entry to the in-memory activity feed.
@@ -85,11 +83,11 @@ export default function App() {
             <ActionLogFlyout items={actionLog} />
           </div>
           <div className="grid">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="panel-column">
               <StatusCard onEvent={recordAction} onSafeMode={setSafeMode} />
               <RunNow onEvent={recordAction} safeMode={safeMode} />
             </div>
-            <div style={{ alignSelf: 'start' }}>
+            <div>
               <SettingsPanel />
             </div>
           </div>

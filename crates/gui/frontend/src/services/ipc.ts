@@ -182,6 +182,29 @@ export async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>)
   return await withTimeout(invoke<T>(cmd, args), timeoutMs, `IPC ${cmd}`);
 }
 
+/**
+ * Purpose: Invoke a Tauri command with a per-call timeout override.
+ *
+ * Inputs: `cmd` command name, `args` optional argument map, and `timeoutMs` override.
+ * Outputs: A typed response from the backend IPC layer.
+ * Side effects: Invokes IPC calls and loads the Tauri API module.
+ * Error handling: Throws an `IpcError` on timeout or IPC failure, preserving backend codes when possible.
+ * Ties to other methods: Used by long-running health checks like hardening probes.
+ * Why this exists: Some checks can legitimately take longer than the global IPC timeout without hanging the UI.
+ */
+export async function safeInvokeWithTimeout<T>(
+  cmd: string,
+  args: Record<string, unknown> | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  if (!hasTauri()) {
+    throw new IpcError('Tauri IPC unavailable; run the desktop app build', 'TAURI_UNAVAILABLE');
+  }
+  const { invoke } = await loadTauriInvoke();
+  const effectiveTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : UI_TUNING.system.ipcTimeoutMs;
+  return await withTimeout(invoke<T>(cmd, args), effectiveTimeout, `IPC ${cmd}`);
+}
+
 type TauriModule = typeof import('@tauri-apps/api/tauri');
 let tauriModulePromise: Promise<TauriModule> | null = null;
 

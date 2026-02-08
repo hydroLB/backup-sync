@@ -15,6 +15,7 @@ pub fn normalize_loaded_config(mut cfg: Config) -> Config {
             path: cfg.backup_root.clone(),
             label: Some("Primary".to_string()),
             max_backups_per_file: None,
+            replicate_to: vec![],
         }];
     }
 

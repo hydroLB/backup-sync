@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-engine")]
+
 use backup_core::{
     backup::{execution::BackupExecutor, planning},
     config::model::{
@@ -31,6 +33,8 @@ fn config_with_dest(dest: PathBuf, watched: PathBuf) -> Config {
         execution: ExecutionTuning::default(),
         planning: PlanningTuning::default(),
         runtime: backup_core::config::model::RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched: vec![WatchedPath {
             path: watched,
@@ -44,6 +48,7 @@ fn config_with_dest(dest: PathBuf, watched: PathBuf) -> Config {
             path: dest,
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     }
 }
@@ -105,6 +110,8 @@ fn min_free_space_stops_run() {
         execution: ExecutionTuning::default(),
         planning: PlanningTuning::default(),
         runtime: backup_core::config::model::RuntimeTuning::default(),
+        encryption: backup_core::config::model::EncryptionConfig::default(),
+        compression: backup_core::config::model::CompressionConfig::default(),
         safe_mode: false,
         watched: vec![WatchedPath {
             path: watched.clone(),
@@ -118,6 +125,7 @@ fn min_free_space_stops_run() {
             path: dest.clone(),
             label: None,
             max_backups_per_file: None,
+            replicate_to: vec![],
         }],
     };
     let (mut state, _) = StateStore::load_or_default(dir.path().join("state.json"))

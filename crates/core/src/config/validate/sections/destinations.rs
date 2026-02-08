@@ -3,6 +3,7 @@ use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use tracing::warn;
 
 #[derive(Debug)]
 pub(crate) struct DestinationIndex<'a> {
@@ -43,6 +44,7 @@ pub(crate) fn validate_and_index<'cfg>(
         validate_one_destination(cfg, d, label, &mut ids)?;
         by_id.insert(d.id.as_str(), d.path.as_path());
     }
+    validate_replication_targets(cfg, label, &by_id)?;
     Ok(DestinationIndex { by_id })
 }
 
@@ -76,10 +78,9 @@ fn validate_one_destination(
     }
     if let Some(parent) = d.path.parent() {
         if !parent.exists() {
-            bail!(
-                "{label} destination {} parent does not exist: {:?}",
-                d.id,
-                parent
+            warn!(
+                "{label} destination {} parent does not exist yet (drive disconnected?): {:?}",
+                d.id, parent
             );
         }
     } else {
@@ -95,13 +96,58 @@ fn validate_one_destination(
             d.path
         );
     }
-    if let Err(e) = fs::create_dir_all(&d.path) {
-        bail!(
-            "{label} destination {} is not writable or creatable at {:?}: {}",
-            d.id,
-            d.path,
-            e
+    if d.path.exists() {
+        if let Err(e) = fs::create_dir_all(&d.path) {
+            bail!(
+                "{label} destination {} is not writable or creatable at {:?}: {}",
+                d.id,
+                d.path,
+                e
+            );
+        }
+    } else {
+        warn!(
+            "{label} destination {} path does not exist yet (drive disconnected?): {:?}",
+            d.id, d.path
         );
+    }
+    Ok(())
+}
+
+/// Purpose: Validate destination replication topology (replicate_to ids).
+///
+/// Inputs: loaded config, label prefix, and a destination id index.
+/// Outputs: `Ok(())` when all replicate_to references are valid.
+/// Ties to: versioned store replication and 3-2-1 workflows.
+/// Side effects: None.
+/// Why: replication references must be validated early to avoid silent no-op replication.
+fn validate_replication_targets(
+    cfg: &Config,
+    label: &str,
+    by_id: &HashMap<&str, &Path>,
+) -> Result<()> {
+    for d in &cfg.destinations {
+        for target in d.replicate_to.iter() {
+            if target.trim().is_empty() {
+                bail!(
+                    "{label} destination {} replicate_to cannot contain empty ids",
+                    d.id
+                );
+            }
+            if target == &d.id {
+                bail!(
+                    "{label} destination {} replicate_to cannot include itself",
+                    d.id
+                );
+            }
+            if !by_id.contains_key(target.as_str()) {
+                bail!(
+                    "{label} destination {} replicate_to references unknown destination id {}",
+                    d.id,
+                    target
+                );
+            }
+        }
     }
     Ok(())
 }

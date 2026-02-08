@@ -36,3 +36,36 @@ pub(crate) fn default_ignore_patterns() -> Vec<String> {
         "**/~$*".into(),
     ]
 }
+
+/// Purpose: Supplies the default chunk size (in bytes) for encrypted blob streaming.
+///
+/// Inputs: none.
+/// Outputs: the blob encryption chunk size in bytes.
+/// Ties to: encrypted blob encoding and decoding.
+/// Side effects: None.
+/// Why: keep encryption bounded in memory while remaining efficient on typical storage.
+pub(crate) fn default_blob_encryption_chunk_bytes() -> usize {
+    64 * 1024
+}
+
+/// Purpose: Supplies the default chunk size (in bytes) for compressed blob streaming.
+///
+/// Inputs: none.
+/// Outputs: the blob compression chunk size in bytes.
+/// Ties to: compressed blob encoding and decoding.
+/// Side effects: None.
+/// Why: keep compression bounded in memory while remaining efficient on typical storage.
+pub(crate) fn default_blob_compression_chunk_bytes() -> usize {
+    64 * 1024
+}
+
+/// Purpose: Supplies the default Zstd compression level for blob writes.
+///
+/// Inputs: none.
+/// Outputs: the zstd compression level as an integer.
+/// Ties to: compressed blob encoding.
+/// Side effects: None.
+/// Why: provide a balanced default that trades CPU for better space savings.
+pub(crate) fn default_blob_compression_zstd_level() -> i32 {
+    3
+}

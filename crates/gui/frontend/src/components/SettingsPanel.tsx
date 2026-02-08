@@ -18,8 +18,10 @@ import { useOnboardingState } from './settings/useOnboarding';
 import { useWatchActions } from './settings/useWatchActions';
 import { tauriAvailable } from '../services/ipc';
 import { UI_TUNING } from '../config/uiTuning';
-import { AccessProbe, SimulationResult } from '../services/types';
+import { AccessProbe, HardeningReport, SimulationResult } from '../services/types';
 import { openDialog } from '../services/dialog';
+import { hardeningFingerprint, isHardeningSatisfied, writeHardeningDone } from '../utils/hardening';
+import { Button } from './ui/Button';
 
 /**
  * Purpose: Render the settings panel and onboarding flows.
@@ -33,7 +35,7 @@ import { openDialog } from '../services/dialog';
 export const SettingsPanel: React.FC = () => {
   const defaultCfg: Config = {
     backup_root: '',
-    interval_seconds: 60,
+    interval_seconds: 30 * 60,
     max_backups_per_file: 3,
     skip_hidden: true,
     ignore_patterns: [],
@@ -253,8 +255,6 @@ export const SettingsPanel: React.FC = () => {
       if (typeof selection === 'string') {
         addWatched(selection, kind, destId);
         setStatus(`Added ${selection}`);
-      } else {
-        popup('No selection made or picker was closed.');
       }
     } catch (e) {
       popup(`[SettingsPanel::pickPath] Path picker failed: ${e}`);
@@ -331,8 +331,6 @@ export const SettingsPanel: React.FC = () => {
       if (typeof selection === 'string') {
         addWatched(selection, kind, destId);
         setStatus(`Added ${selection}`);
-      } else {
-        popup('No selection made or picker was closed.');
       }
     } catch (e) {
       popup(`[SettingsPanel::addPathToDestination] Path picker failed: ${e}`);
@@ -434,7 +432,40 @@ export const SettingsPanel: React.FC = () => {
     }
   };
 
-  const canFinishOnboarding = cfg.watched.length > 0 && !!destStatus?.writable;
+  const [hardeningBusy, setHardeningBusy] = useState<boolean>(false);
+  const [hardeningReport, setHardeningReport] = useState<HardeningReport | null>(null);
+  const hardeningSatisfied = isHardeningSatisfied(cfg);
+  const canFinishOnboarding =
+    cfg.watched.length > 0 && !!destStatus?.writable && hardeningSatisfied;
+
+  /**
+   * Purpose: Run first-run hardening checks and persist completion when successful.
+   *
+   * Inputs: Whether to also probe OS snapshot support.
+   * Outputs: Updates local hardening state and persistence markers.
+   * Ties to: Onboarding finish gating in the background step.
+   * Side effects: Invokes IPC hardening checks and writes to localStorage on success.
+   * Why: Background scheduling should only be enabled after prerequisites are validated.
+   */
+  const runHardening = async (checkSnapshots: boolean) => {
+    try {
+      setHardeningBusy(true);
+      const { hardeningCheck } = await import('../services/system');
+      const res = await hardeningCheck({ check_snapshots: checkSnapshots });
+      setHardeningReport(res);
+      if (res.ok) {
+        writeHardeningDone(hardeningFingerprint(cfg));
+        setStatus('Safety checks passed.');
+      } else {
+        setStatus(`Safety checks failed: ${res.message}`);
+      }
+    } catch (e) {
+      const msg = `[SettingsPanel::runHardening] Hardening checks failed: ${String(e)}`;
+      setStatus(msg);
+    } finally {
+      setHardeningBusy(false);
+    }
+  };
 
   /**
    * Purpose: Persist resume on space preference to storage.
@@ -534,6 +565,9 @@ export const SettingsPanel: React.FC = () => {
           hasWatched={cfg.watched.length > 0}
           destStatus={destStatus}
           canFinish={canFinishOnboarding}
+          hardeningSatisfied={hardeningSatisfied}
+          hardeningBusy={hardeningBusy}
+          hardeningReport={hardeningReport}
           retention={cfg.max_backups_per_file}
           watchedPaths={(cfg.watched || []).map((w) => w.path)}
           summary={`Watched: ${cfg.watched.length}, Destination: ${destStatus?.message ?? 'Not set'}`}
@@ -545,9 +579,9 @@ export const SettingsPanel: React.FC = () => {
           safeMode={cfg.safe_mode}
           statusMessage={validation ?? status}
           startOnLoginMsg={startOnLoginMsg}
+          onRunHardening={runHardening}
           onChangeRetention={(v) => setCfg({ ...cfg, max_backups_per_file: v })}
           onAddFolder={() => pickPath('Directory')}
-          onAddFile={() => pickPath('File')}
           onQuickAddDesktop={() => quickAdd(() => specialDir('desktop'), 'Desktop')}
           onQuickAddDocuments={() => quickAdd(() => specialDir('documents'), 'Documents')}
           onQuickAddDownloads={() => quickAdd(() => specialDir('downloads'), 'Downloads')}
@@ -595,7 +629,6 @@ export const SettingsPanel: React.FC = () => {
 
           <div className="divider" />
           <BackupCadence
-            interval_seconds={cfg.interval_seconds}
             max_backups_per_file={cfg.max_backups_per_file}
             onChange={(data) => setCfg({ ...cfg, ...data })}
           />
@@ -638,18 +671,14 @@ export const SettingsPanel: React.FC = () => {
             </button>
             <span className="muted">{validation ?? status}</span>
           </div>
-          <div className="muted" style={{ marginTop: 4 }}>
+          <div className="muted mt-1">
             {validation ? `Why can't I save? ${validation}` : 'All required fields look good.'}
           </div>
-          {simulateMsg && (
-            <div className="muted" style={{ marginTop: 4 }}>
-              {simulateMsg}
-            </div>
-          )}
-          <div className="inline-actions" style={{ marginTop: 6 }}>
-            <button className="btn secondary" onClick={exportDoctor}>
+          {simulateMsg && <div className="muted mt-1">{simulateMsg}</div>}
+          <div className="inline-actions mt-2">
+            <Button tone="secondary" onClick={exportDoctor}>
               Run doctor (export)
-            </button>
+            </Button>
             <span className="muted">{doctorMsg}</span>
           </div>
           <SaveBar

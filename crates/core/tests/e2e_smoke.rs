@@ -1,82 +1,85 @@
-use backup_core::{
-    backup::{execution::BackupExecutor, planning},
-    config::model::{
-        Config, ExecutionTuning, HashingTuning, PlanningTuning, RuntimeTuning, WatchedKind,
-        WatchedPath,
-    },
-    fs::scanning::collect_targets,
-    state::store::StateStore,
-    verify_backups,
+use anyhow::{Context, Result};
+use backup_core::backup::versioned::restore::{
+    list_versions, restore_version, RestoreMode, RestoreRequest,
 };
+use backup_core::{
+    backup::versioned,
+    config::{
+        model::{Destination, WatchedKind, WatchedPath},
+        registry::config_defaults,
+    },
+    validate,
+};
+use std::fs;
 use tempfile::tempdir;
 
 #[test]
-/// Purpose: Runs a full scan, plan, execute, and verify cycle as a smoke test.
+/// Purpose: Runs a versioned backup + restore cycle as an end-to-end smoke test.
 ///
-/// Inputs: a temporary watched directory and destination.
-/// Outputs: a successful backup and verification result.
-/// Ties to: the end to end workflow for backups.
-/// Side effects: None.
-/// Why: ensure the primary workflow stays healthy across refactors.
-fn e2e_smoke_backup_cycle() {
-    let dir = tempdir().expect("e2e_smoke::e2e_smoke_backup_cycle failed to create temp dir");
+/// Inputs: A temporary watched directory and destination store.
+/// Outputs: A successful backup, listed version, and a restore that matches original contents.
+/// Ties to: The primary versioned engine workflow used by the daemon, CLI, and GUI.
+/// Side effects: Creates temp directories and writes a small test file.
+/// Why: Ensure the production engine stays healthy across refactors.
+fn e2e_smoke_versioned_backup_and_restore() -> Result<()> {
+    let dir = tempdir().context("e2e_smoke::versioned failed to create temp root")?;
     let watched_dir = dir.path().join("watched");
-    let backup_root = dir.path().join("backups");
-    std::fs::create_dir_all(&watched_dir)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to create watched dir");
-    std::fs::create_dir_all(&backup_root)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to create backup root");
+    let destination = dir.path().join("dest");
+    fs::create_dir_all(&watched_dir).context("e2e_smoke::versioned failed to create watched")?;
+    fs::create_dir_all(&destination).context("e2e_smoke::versioned failed to create dest")?;
     let file_path = watched_dir.join("note.txt");
-    std::fs::write(&file_path, "hello world")
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to write watched file");
+    fs::write(&file_path, "hello world\n").context("e2e_smoke::versioned write watched file")?;
 
-    let cfg = Config {
-        backup_root: backup_root.clone(),
-        interval_seconds: 60,
-        max_backups_per_file: 3,
-        skip_hidden: true,
-        ignore_patterns: vec![],
-        max_parallel_copies: 1,
-        max_bytes_per_second: None,
-        min_free_space_bytes: None,
-        hashing: HashingTuning::default(),
-        execution: ExecutionTuning::default(),
-        planning: PlanningTuning::default(),
-        runtime: RuntimeTuning::default(),
-        safe_mode: false,
-        watched: vec![WatchedPath {
-            path: watched_dir,
-            kind: WatchedKind::Directory,
-            enabled: true,
-            destination_id: "default".into(),
-            max_backups_per_file: None,
-        }],
-        destinations: vec![backup_core::config::model::Destination {
-            id: "default".into(),
-            path: backup_root,
-            label: None,
-            max_backups_per_file: None,
-        }],
-    };
+    let mut cfg = config_defaults().context("e2e_smoke::versioned defaults")?;
+    cfg.backup_root = destination.clone();
+    cfg.runtime.source_snapshots_enabled = false;
+    cfg.destinations = vec![Destination {
+        id: "primary".into(),
+        path: destination.clone(),
+        label: Some("Primary".into()),
+        max_backups_per_file: None,
+        replicate_to: vec![],
+    }];
+    cfg.watched = vec![WatchedPath {
+        path: watched_dir.clone(),
+        kind: WatchedKind::Directory,
+        enabled: true,
+        destination_id: "primary".into(),
+        max_backups_per_file: Some(5),
+    }];
+    validate(&cfg).context("e2e_smoke::versioned config validation")?;
 
-    let state_path = dir.path().join("state.json");
-    let (mut state, store) = StateStore::load_or_default(state_path)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to load state");
-    let targets =
-        collect_targets(&cfg).expect("e2e_smoke::e2e_smoke_backup_cycle failed to collect targets");
-    let plan = planning::plan(targets, &mut state, &cfg.planning, &cfg.hashing)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to build plan");
-    assert_eq!(plan.len(), 1, "expected one planned item");
-    let exec = BackupExecutor::from_config(&cfg);
-    let res = exec
-        .execute(&plan, &mut state)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to execute plan");
-    assert_eq!(res.backed_up, 1);
-    store
-        .persist(&state)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to persist state");
-    let (ok, bad) = verify_backups(&mut state, &cfg.hashing)
-        .expect("e2e_smoke::e2e_smoke_backup_cycle failed to verify backups");
-    assert!(ok >= 1);
-    assert_eq!(bad, 0);
+    let result = versioned::run_backup_cycle(&cfg).context("e2e_smoke::versioned run backup")?;
+    assert_eq!(result.versions_created, 1, "expected one version created");
+
+    let versions = list_versions(&cfg).context("e2e_smoke::versioned list versions")?;
+    let (source_path, infos) = versions
+        .into_iter()
+        .find(|(p, _)| p == &watched_dir)
+        .context("e2e_smoke::versioned missing watched folder in list_versions")?;
+    let latest = infos
+        .last()
+        .context("e2e_smoke::versioned expected at least one version")?;
+
+    let restore_dir = dir.path().join("restore_out");
+    let restore_res = restore_version(
+        &cfg,
+        &RestoreRequest {
+            source_path,
+            version_id: latest.id.clone(),
+            mode: RestoreMode::ToDirectory,
+            target_dir: Some(restore_dir.clone()),
+        },
+    )
+    .context("e2e_smoke::versioned restore_version")?;
+    assert!(
+        restore_res.files_written >= 1,
+        "expected at least one restored file"
+    );
+
+    let restored = restore_dir.join("note.txt");
+    let body = fs::read_to_string(&restored)
+        .with_context(|| format!("e2e_smoke::versioned read restored file {:?}", restored))?;
+    assert_eq!(body, "hello world\n");
+    Ok(())
 }

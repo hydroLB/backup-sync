@@ -22,13 +22,13 @@ const FreeSpaceGuard: React.FC<Props> = ({ minFree, resumeOnSpace, onToggleResum
     if (!minFree || minFree <= 0) return null;
     return (
       <>
-        <div className="muted" style={{ marginTop: 4 }}>
+        <div className="muted mt-1">
           Free-space guard is active.{' '}
           {resumeOnSpace
             ? 'Will resume when space recovers above the threshold.'
             : 'You can pause until space recovers.'}
         </div>
-        <label style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <label className="label-row">
           <input
             type="checkbox"
             checked={resumeOnSpace}
@@ -38,7 +38,7 @@ const FreeSpaceGuard: React.FC<Props> = ({ minFree, resumeOnSpace, onToggleResum
             Resume automatically when free space is above the minimum
           </span>
         </label>
-        <div className="muted" style={{ marginTop: 2 }}>
+        <div className="muted mt-1">
           Threshold: {formatBytes(minFree)} ({minFree} bytes)
         </div>
         {message && <div className="muted">{message}</div>}

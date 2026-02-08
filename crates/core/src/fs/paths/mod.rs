@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 /// Why: avoid long or unsafe path segments when building backup directories.
 pub fn hash_path(path: &Path) -> String {
     let norm = path.to_string_lossy();
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(norm.as_bytes());
-    hasher.finalize().to_hex().to_string()
+    crate::hashing::sha256_hex(norm.as_bytes())
 }
 
 /// Purpose: Joins a root path with a child path without normalization.

@@ -64,7 +64,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::commands::backup::run::run_now_cmd,
             crate::commands::backup::run::run_simulate_cmd,
             crate::commands::backup::restore::list_versions_cmd,
+            crate::commands::backup::restore::list_version_files_cmd,
             crate::commands::backup::restore::restore_version_cmd,
+            crate::commands::backup::restore::restore_files_cmd,
             crate::commands::backup::verify::verify_cmd,
             crate::commands::logs::log_tail_cmd,
             crate::commands::service::install_service_cmd,
@@ -77,7 +79,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::commands::access::test_access_cmd,
             crate::commands::support::diagnostics::doctor_report_cmd,
             crate::commands::support::diagnostics::export_diagnostic_bundle_cmd,
-            crate::commands::config::toggle_safe_mode_cmd
+            crate::commands::config::toggle_safe_mode_cmd,
+            crate::commands::hardening::hardening_check_cmd,
+            crate::commands::backup::safety::remove_kept_extra_version_cmd
         ])
         .run(tauri::generate_context!())?;
     Ok(())

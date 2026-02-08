@@ -3,14 +3,16 @@ use super::model::{
     VersionInfo,
 };
 use crate::config::model::{Config, Destination, WatchedKind, WatchedPath};
+use crate::encryption::blobs::BlobCodec;
 use crate::fs::snapshots::prepare_source_view;
+use crate::hashing;
 use crate::logging::redact_path;
+use crate::state::models::SafetyWarning;
 use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -20,12 +22,19 @@ pub struct FolderDescriptor {
     pub keep_versions: usize,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct ManifestSize {
+    file_count: u64,
+    file_bytes: u64,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct FolderBackupResult {
     pub changed: bool,
     pub version_id: Option<String>,
     pub blobs_written: usize,
     pub bytes_written: u64,
+    pub safety_warning: Option<SafetyWarning>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -34,6 +43,22 @@ pub struct BackupCycleResult {
     pub versions_created: usize,
     pub blobs_written: usize,
     pub bytes_written: u64,
+    pub safety_warnings: Vec<SafetyWarning>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SimulationSummary {
+    pub watched: usize,
+    pub versions_would_create: usize,
+    pub adds: usize,
+    pub modifies: usize,
+    pub deletes: usize,
+    pub items: usize,
+    pub blobs_to_write: usize,
+    pub bytes_to_write: u64,
+    pub sample: Vec<String>,
+    pub read_failures: usize,
+    pub snapshot_errors: usize,
 }
 
 pub(crate) const STORE_DIR: &str = ".backup_sync";
@@ -176,6 +201,9 @@ pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
         .map(|d| (d.id.as_str(), d))
         .collect();
 
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::run_backup_cycle failed to initialize blob codec")?;
+
     let mut cycle = BackupCycleResult::default();
     for watched in cfg.watched.iter().filter(|w| w.enabled) {
         let dest = destinations_by_id
@@ -196,10 +224,13 @@ pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
             destination_root: dest.path.clone(),
             keep_versions,
         };
-        let result = backup_one_folder(cfg, watched, &descriptor)?;
+        let result = backup_one_folder(cfg, watched, &descriptor, &blob_codec)?;
         cycle.folders_scanned += 1;
         if result.changed {
             cycle.versions_created += 1;
+        }
+        if let Some(w) = result.safety_warning {
+            cycle.safety_warnings.push(w);
         }
         cycle.blobs_written += result.blobs_written;
         cycle.bytes_written += result.bytes_written;
@@ -207,10 +238,356 @@ pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
     Ok(cycle)
 }
 
+/**
+ * Summary: Removes a kept safety version (pending or pinned baseline) for a watched source.
+ *
+ * Inputs: Destination root containing the versioned store and the watched source path.
+ * Outputs: `Ok(Some(version_id))` when a kept version was removed, `Ok(None)` when none existed.
+ * Side effects: Updates `index.json`, deletes the pinned manifest file, and runs blob GC.
+ * Error handling: Returns contextual errors for index IO/serialization and manifest deletion failures.
+ * Ties to other methods: Clears pins set by `maybe_pin_large_deletion_baseline` and relies on `gc_unreferenced_blobs`.
+ * Why this exists: Let users explicitly drop the extra baseline when a shrink was expected.
+ */
+pub fn remove_kept_safety_version(
+    destination_root: &Path,
+    source_path: &Path,
+) -> Result<Option<String>> {
+    let store_root = store_root(destination_root);
+    let blobs_root = blobs_root(&store_root);
+
+    let source_id = hashing::sha256_hex(source_path.to_string_lossy().as_bytes());
+    let source_root = sources_root(&store_root).join(&source_id);
+    let manifests_root = source_root.join("manifests");
+
+    let mut index = load_index(&source_root, source_path)?;
+    let kept = match index
+        .safety_pinned_version_id
+        .clone()
+        .or(index.safety_pending_version_id.clone())
+    {
+        None => return Ok(None),
+        Some(v) => v,
+    };
+
+    let was_listed = index.versions.iter().any(|v| v.id == kept);
+    if !was_listed {
+        index.safety_pinned_version_id = None;
+        index.safety_pending_version_id = None;
+        index.safety_pending_first_seen_unix = None;
+        write_index(&source_root, &index, destination_root)?;
+        return Ok(None);
+    }
+
+    index.versions.retain(|v| v.id != kept);
+    index.safety_pinned_version_id = None;
+    index.safety_pending_version_id = None;
+    index.safety_pending_first_seen_unix = None;
+    write_index(&source_root, &index, destination_root)?;
+
+    let manifest_path = manifests_root.join(format!("{kept}.json"));
+    fs::remove_file(&manifest_path).with_context(|| {
+        format!(
+            "versioned::remove_kept_safety_version failed to delete manifest {:?}",
+            manifest_path
+        )
+    })?;
+    let _ = sync_dir(&manifests_root);
+    gc_unreferenced_blobs(&store_root, &blobs_root)?;
+
+    Ok(Some(kept))
+}
+
+/**
+ * Summary: Compute a stable "size" summary for a manifest for safety comparisons.
+ *
+ * Inputs: A manifest representing a watched file or directory state.
+ * Outputs: `ManifestSize` containing file count and total file bytes.
+ * Side effects: None.
+ * Error handling: None.
+ * Ties to other methods: Used by `maybe_pin_large_deletion_baseline` to detect large shrink events.
+ * Why this exists: Provide a deterministic, cheap metric to detect suspicious mass deletions.
+ */
+fn manifest_size(manifest: &Manifest) -> ManifestSize {
+    let mut out = ManifestSize::default();
+    for e in manifest.entries.values() {
+        if e.kind != ManifestEntryKind::File {
+            continue;
+        }
+        out.file_count = out.file_count.saturating_add(1);
+        out.file_bytes = out.file_bytes.saturating_add(e.len);
+    }
+    out
+}
+
+/**
+ * Summary: Compute the maximum shrink ratio between two manifest sizes.
+ *
+ * Inputs: previous and next manifest size summaries.
+ * Outputs: Optional shrink ratio in `[0.0, 1.0]` when a baseline is available.
+ * Side effects: None.
+ * Error handling: None.
+ * Ties to other methods: Used by `maybe_pin_large_deletion_baseline`.
+ * Why this exists: Detect suspicious deletions using both byte and file-count heuristics.
+ */
+fn shrink_ratio(prev: ManifestSize, next: ManifestSize) -> Option<f64> {
+    let bytes_ratio = if prev.file_bytes > 0 && next.file_bytes <= prev.file_bytes {
+        (prev.file_bytes - next.file_bytes) as f64 / prev.file_bytes as f64
+    } else {
+        0.0
+    };
+    let count_ratio = if prev.file_count > 0 && next.file_count <= prev.file_count {
+        (prev.file_count - next.file_count) as f64 / prev.file_count as f64
+    } else {
+        0.0
+    };
+    if prev.file_bytes == 0 && prev.file_count == 0 {
+        None
+    } else {
+        Some(bytes_ratio.max(count_ratio).clamp(0.0, 1.0))
+    }
+}
+
+/**
+ * Summary: Pin a pre-change version when a watched path shrinks dramatically.
+ *
+ * Inputs: Config, watched path, previous manifest, next manifest, and a mutable version index.
+ * Outputs: A `SafetyWarning` when pinning occurred; otherwise `None`.
+ * Side effects: Mutates the index to set `safety_pinned_version_id` for retention.
+ * Error handling: Best-effort, returns `None` when required metadata is unavailable.
+ * Ties to other methods: Called by `backup_one_folder` before pruning, and persisted via `write_index`.
+ * Why this exists: Prevent silent "bad runs" from pruning the last known-good full version.
+ */
+fn maybe_pin_large_deletion_baseline(
+    cfg: &Config,
+    watched: &WatchedPath,
+    prev: &Manifest,
+    next: &Manifest,
+    index: &mut VersionIndex,
+    manifests_root: &Path,
+    had_read_failures: bool,
+) -> (Option<SafetyWarning>, bool) {
+    let threshold = cfg.runtime.large_deletion_keep_extra_threshold_ratio;
+    if had_read_failures {
+        return (None, false);
+    }
+    if !(threshold > 0.0) {
+        return (None, false);
+    }
+
+    let mut index_changed = false;
+
+    if let Some(pinned) = index.safety_pinned_version_id.as_deref() {
+        let still_present = index.versions.iter().any(|v| v.id == pinned);
+        if !still_present {
+            index.safety_pinned_version_id = None;
+            index_changed = true;
+        }
+    }
+    if let Some(pending) = index.safety_pending_version_id.as_deref() {
+        let still_present = index.versions.iter().any(|v| v.id == pending);
+        if !still_present {
+            index.safety_pending_version_id = None;
+            index.safety_pending_first_seen_unix = None;
+            index_changed = true;
+        }
+    }
+
+    if index.safety_pinned_version_id.is_some() {
+        return (None, index_changed);
+    }
+
+    let baseline_manifest = if let Some(pending_id) = index.safety_pending_version_id.as_deref() {
+        let path = manifests_root.join(format!("{pending_id}.json"));
+        match fs::read_to_string(&path) {
+            Ok(raw) => match serde_json::from_str::<Manifest>(&raw) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    tracing::warn!(
+                        watched_path = %redact_path(&watched.path),
+                        error = %e,
+                        "versioned safety baseline pending manifest parse failed; clearing pending"
+                    );
+                    index.safety_pending_version_id = None;
+                    index.safety_pending_first_seen_unix = None;
+                    index_changed = true;
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    watched_path = %redact_path(&watched.path),
+                    error = %e,
+                    "versioned safety baseline pending manifest read failed; clearing pending"
+                );
+                index.safety_pending_version_id = None;
+                index.safety_pending_first_seen_unix = None;
+                index_changed = true;
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let prev_size = manifest_size(baseline_manifest.as_ref().unwrap_or(prev));
+    let next_size = manifest_size(next);
+    let Some(ratio) = shrink_ratio(prev_size, next_size) else {
+        return (None, index_changed);
+    };
+    if ratio < threshold {
+        if index.safety_pending_version_id.is_some() {
+            index.safety_pending_version_id = None;
+            index.safety_pending_first_seen_unix = None;
+            index_changed = true;
+        }
+        return (None, index_changed);
+    }
+
+    if let Some(pending_id) = index.safety_pending_version_id.clone() {
+        // Second consecutive clean scan with the shrink still present: promote to a permanent pin.
+        index.safety_pinned_version_id = Some(pending_id);
+        index.safety_pending_version_id = None;
+        index.safety_pending_first_seen_unix = None;
+        index_changed = true;
+        return (None, index_changed);
+    }
+
+    let baseline_id = index
+        .versions
+        .iter()
+        .max_by(|a, b| {
+            a.created_at_unix
+                .cmp(&b.created_at_unix)
+                .then_with(|| a.id.cmp(&b.id))
+        })
+        .map(|v| v.id.clone());
+    let Some(baseline_id) = baseline_id else {
+        return (None, index_changed);
+    };
+
+    // First detection: keep the baseline immediately (pending) so pruning cannot delete it.
+    index.safety_pending_version_id = Some(baseline_id.clone());
+    index.safety_pending_first_seen_unix = Some(chrono::Utc::now().timestamp());
+    index_changed = true;
+
+    let pct = (ratio * 100.0).round().clamp(0.0, 100.0) as u32;
+    (
+        Some(SafetyWarning {
+            ts: chrono::Utc::now().timestamp(),
+            message: format!(
+                "Protected path is ~{pct}% smaller than before. Extra version kept while we confirm. If this was expected, remove it."
+            ),
+            watched_path: Some(watched.path.to_string_lossy().into_owned()),
+            kept_version_id: Some(baseline_id),
+        }),
+        index_changed,
+    )
+}
+
+/// Summary: Simulate a versioned backup cycle without writing to the destination store.
+///
+/// Inputs: a validated config with watched paths and destinations.
+/// Outputs: a `SimulationSummary` describing what would change and what would be written.
+/// Side effects: Reads filesystem metadata and file contents for hashing; reads existing store manifests/blobs.
+/// Error handling: Returns contextual errors for invalid config references, scan/hashing failures, and store reads.
+/// Ties to other methods: Mirrors the scan and equivalence logic used by `run_backup_cycle` and `backup_one_folder`.
+/// Why this exists: Provide a safe preview of changes and expected IO before running a real backup.
+pub fn simulate_backup_cycle(cfg: &Config) -> Result<SimulationSummary> {
+    let sample_limit = cfg.runtime.simulation_sample_limit;
+    simulate_backup_cycle_with_sample_limit(cfg, sample_limit)
+}
+
+/// Summary: Simulate a versioned backup cycle with an explicit sample limit override.
+///
+/// Inputs: config and a maximum number of sample paths to return.
+/// Outputs: a `SimulationSummary` describing planned changes.
+/// Side effects: Same as `simulate_backup_cycle`.
+/// Error handling: Same as `simulate_backup_cycle`.
+/// Ties to other methods: Used by tests and callers that need a smaller sample cap.
+/// Why this exists: Allow deterministic and bounded simulation output.
+pub fn simulate_backup_cycle_with_sample_limit(
+    cfg: &Config,
+    sample_limit: usize,
+) -> Result<SimulationSummary> {
+    let destinations_by_id: HashMap<&str, &Destination> = cfg
+        .destinations
+        .iter()
+        .map(|d| (d.id.as_str(), d))
+        .collect();
+
+    let retry_delays = cfg.execution.retry_delays();
+    let mut summary = SimulationSummary::default();
+    let mut remaining_sample = sample_limit;
+
+    for watched in cfg.watched.iter().filter(|w| w.enabled) {
+        let dest = destinations_by_id
+            .get(watched.destination_id.as_str())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "versioned::simulate_backup_cycle missing destination id {} for watched path {}",
+                    watched.destination_id,
+                    redact_path(&watched.path)
+                )
+            })?;
+
+        let store_root = store_root(&dest.path);
+        let blobs_root = blobs_root(&store_root);
+        let source_id = hashing::sha256_hex(watched.path.to_string_lossy().as_bytes());
+        let source_root = sources_root(&store_root).join(&source_id);
+        let manifests_root = source_root.join("manifests");
+        let index = load_index(&source_root, &watched.path)?;
+        let prev = latest_manifest(&manifests_root, &index)?;
+
+        let source_view = prepare_source_view(
+            &watched.path,
+            cfg.runtime.source_snapshots_enabled,
+            cfg.runtime.source_snapshot_timeout_seconds,
+        )?;
+        let snapshot_error = source_view.snapshot_error().map(|s| s.to_string());
+
+        let mut next = scan_snapshot(cfg, watched, source_view.scan_path(), &prev, &retry_delays)?;
+        next.source_snapshot = source_view.snapshot().cloned();
+        next.source_snapshot_error = snapshot_error.clone();
+
+        summary.watched += 1;
+        summary.read_failures += next.read_failures.len();
+        if snapshot_error.is_some() {
+            summary.snapshot_errors += 1;
+        }
+
+        let would_create_version = match prev.as_ref() {
+            None => true,
+            Some(prev_manifest) => !manifests_equivalent(prev_manifest, &next),
+        };
+        if would_create_version {
+            summary.versions_would_create += 1;
+        }
+
+        let (adds, modifies, deletes, blobs_to_write, bytes_to_write, sample_used) =
+            diff_for_simulation(watched, prev.as_ref(), &next, &blobs_root, remaining_sample);
+
+        summary.adds += adds;
+        summary.modifies += modifies;
+        summary.deletes += deletes;
+        summary.items += adds + modifies + deletes;
+        summary.blobs_to_write += blobs_to_write;
+        summary.bytes_to_write += bytes_to_write;
+
+        if remaining_sample > 0 && !sample_used.is_empty() {
+            let to_take = remaining_sample.min(sample_used.len());
+            summary.sample.extend(sample_used.into_iter().take(to_take));
+            remaining_sample = remaining_sample.saturating_sub(to_take);
+        }
+    }
+
+    Ok(summary)
+}
+
 fn backup_one_folder(
     cfg: &Config,
     watched: &WatchedPath,
     desc: &FolderDescriptor,
+    blob_codec: &BlobCodec,
 ) -> Result<FolderBackupResult> {
     let retry_delays = cfg.execution.retry_delays();
     let store_root = store_root(&desc.destination_root);
@@ -222,7 +599,7 @@ fn backup_one_folder(
         )
     })?;
 
-    let source_id = sha256_hex(desc.source_path.to_string_lossy().as_bytes());
+    let source_id = hashing::sha256_hex(desc.source_path.to_string_lossy().as_bytes());
     let source_root = sources_root(&store_root).join(&source_id);
     let manifests_root = source_root.join("manifests");
     create_dir_all_durable(&manifests_root, &desc.destination_root).with_context(|| {
@@ -239,6 +616,7 @@ fn backup_one_folder(
         cfg.runtime.source_snapshots_enabled,
         cfg.runtime.source_snapshot_timeout_seconds,
     )?;
+    let snapshot_error = source_view.snapshot_error().map(|s| s.to_string());
     if let Some(err) = source_view.snapshot_error() {
         tracing::warn!(
             source_path = %redact_path(&watched.path),
@@ -248,16 +626,35 @@ fn backup_one_folder(
     }
     let mut snapshot = scan_snapshot(cfg, watched, source_view.scan_path(), &prev, &retry_delays)?;
     snapshot.source_snapshot = source_view.snapshot().cloned();
-    snapshot.source_snapshot_error = source_view.snapshot_error().map(|s| s.to_string());
+    snapshot.source_snapshot_error = snapshot_error.clone();
+    // Snapshot availability is best-effort and does not imply the scan is incomplete.
+    // Only gate pruning/safety on real read failures (missing hashes, IO failures).
     let mut had_read_failures = !snapshot.read_failures.is_empty();
     let changed = match &prev {
         None => true,
         Some(prev_manifest) => !manifests_equivalent(prev_manifest, &snapshot),
     };
     if !changed {
+        let mut safety_warning: Option<SafetyWarning> = None;
+        if let Some(prev_manifest) = prev.as_ref() {
+            let (warn, index_changed) = maybe_pin_large_deletion_baseline(
+                cfg,
+                watched,
+                prev_manifest,
+                &snapshot,
+                &mut index,
+                &manifests_root,
+                had_read_failures,
+            );
+            safety_warning = warn;
+            if index_changed {
+                write_index(&source_root, &index, &desc.destination_root)?;
+            }
+        }
         write_scan_report(&source_root, &snapshot, None, &desc.destination_root)?;
         return Ok(FolderBackupResult {
             changed: false,
+            safety_warning,
             ..Default::default()
         });
     }
@@ -313,6 +710,7 @@ fn backup_one_folder(
             &blob_path,
             cfg.hashing.timeout_seconds,
             &retry_delays,
+            blob_codec,
             &desc.destination_root,
         ) {
             Ok((count, bytes)) => {
@@ -347,13 +745,43 @@ fn backup_one_folder(
         Some(prev_manifest) => !manifests_equivalent(prev_manifest, &snapshot),
     };
     if !changed_after_failures {
+        let mut safety_warning: Option<SafetyWarning> = None;
+        if let Some(prev_manifest) = prev.as_ref() {
+            let (warn, index_changed) = maybe_pin_large_deletion_baseline(
+                cfg,
+                watched,
+                prev_manifest,
+                &snapshot,
+                &mut index,
+                &manifests_root,
+                had_read_failures,
+            );
+            safety_warning = warn;
+            if index_changed {
+                write_index(&source_root, &index, &desc.destination_root)?;
+            }
+        }
         write_scan_report(&source_root, &snapshot, None, &desc.destination_root)?;
         return Ok(FolderBackupResult {
             changed: false,
             blobs_written: written.blobs_written,
             bytes_written: written.bytes_written,
+            safety_warning,
             ..Default::default()
         });
+    }
+
+    if let Some(prev_manifest) = prev.as_ref() {
+        let (warn, _index_changed) = maybe_pin_large_deletion_baseline(
+            cfg,
+            watched,
+            prev_manifest,
+            &snapshot,
+            &mut index,
+            &manifests_root,
+            had_read_failures,
+        );
+        written.safety_warning = warn;
     }
 
     write_json_atomic_durable(&manifest_path, &snapshot, &desc.destination_root).with_context(
@@ -377,17 +805,25 @@ fn backup_one_folder(
             .then_with(|| a.id.cmp(&b.id))
     });
 
-    let mut deleted_any = false;
+    let mut pruned: Vec<VersionInfo> = Vec::new();
     if !had_read_failures {
-        while index.versions.len() > desc.keep_versions {
-            if let Some(oldest) = index.versions.first().cloned() {
-                let path = manifests_root.join(format!("{}.json", oldest.id));
-                let _ = fs::remove_file(&path);
-                index.versions.remove(0);
-                deleted_any = true;
-            } else {
-                break;
+        let mut protected: Vec<&str> = Vec::new();
+        if let Some(pinned) = index.safety_pinned_version_id.as_deref() {
+            protected.push(pinned);
+        }
+        if let Some(pending) = index.safety_pending_version_id.as_deref() {
+            if !protected.iter().any(|p| *p == pending) {
+                protected.push(pending);
             }
+        }
+        let allowed = desc.keep_versions + protected.len();
+        while index.versions.len() > allowed {
+            let remove_pos = index
+                .versions
+                .iter()
+                .position(|v| !protected.iter().any(|p| *p == v.id.as_str()));
+            let Some(pos) = remove_pos else { break };
+            pruned.push(index.versions.remove(pos));
         }
     }
 
@@ -399,11 +835,218 @@ fn backup_one_folder(
         &desc.destination_root,
     )?;
 
-    if deleted_any {
+    if !pruned.is_empty() {
+        for v in pruned.iter() {
+            let path = manifests_root.join(format!("{}.json", v.id));
+            let _ = fs::remove_file(&path);
+        }
+        let _ = sync_dir(&manifests_root);
         gc_unreferenced_blobs(&store_root, &blobs_root)?;
     }
 
     Ok(written)
+}
+
+fn diff_for_simulation(
+    watched: &WatchedPath,
+    prev: Option<&Manifest>,
+    next: &Manifest,
+    blobs_root: &Path,
+    sample_limit: usize,
+) -> (usize, usize, usize, usize, u64, Vec<String>) {
+    let mut adds = 0usize;
+    let mut modifies = 0usize;
+    let mut deletes = 0usize;
+    let mut blobs_to_write = 0usize;
+    let mut bytes_to_write = 0u64;
+    let mut sample: Vec<String> = Vec::new();
+
+    for (k, entry) in next.entries.iter() {
+        let change = match prev.and_then(|p| p.entries.get(k)) {
+            None => Some('+'),
+            Some(prev_e) => {
+                if prev_e.kind != entry.kind {
+                    Some('~')
+                } else if entry.kind == ManifestEntryKind::File && prev_e.sha256 != entry.sha256 {
+                    Some('~')
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(prefix) = change {
+            if prefix == '+' {
+                adds += 1;
+            } else {
+                modifies += 1;
+            }
+            if entry.kind == ManifestEntryKind::File {
+                if let Some(hash) = entry.sha256.as_deref() {
+                    let blob = blob_path(blobs_root, hash);
+                    if !blob.exists() {
+                        blobs_to_write += 1;
+                        bytes_to_write = bytes_to_write.saturating_add(entry.len);
+                    }
+                }
+            }
+            if sample.len() < sample_limit {
+                sample.push(format_change_sample(
+                    prefix,
+                    watched,
+                    entry.rel_path.as_str(),
+                ));
+            }
+        }
+    }
+
+    if let Some(prev_manifest) = prev {
+        for (k, prev_entry) in prev_manifest.entries.iter() {
+            if next.entries.contains_key(k) {
+                continue;
+            }
+            deletes += 1;
+            if sample.len() < sample_limit {
+                sample.push(format_change_sample(
+                    '-',
+                    watched,
+                    prev_entry.rel_path.as_str(),
+                ));
+            }
+        }
+    }
+
+    (
+        adds,
+        modifies,
+        deletes,
+        blobs_to_write,
+        bytes_to_write,
+        sample,
+    )
+}
+
+fn format_change_sample(prefix: char, watched: &WatchedPath, rel_path: &str) -> String {
+    let full = match watched.kind {
+        WatchedKind::File => watched.path.clone(),
+        WatchedKind::Directory => watched.path.join(Path::new(rel_path)),
+    };
+    format!("{prefix} {}", redact_path(&full))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::model::{WatchedKind, WatchedPath};
+    use crate::config::registry::config_defaults;
+    use std::io::Write;
+
+    /**
+     * Summary: Build a minimal config for versioned backup tests.
+     *
+     * Inputs: Source and destination paths and keep versions count.
+     * Outputs: A config suitable for calling `run_backup_cycle`.
+     * Side effects: None.
+     * Error handling: Propagates default config creation failures.
+     * Ties to other methods: Used by durability and pruning tests in this module.
+     * Why this exists: Avoid duplicating verbose config initialization in each test.
+     */
+    fn test_config(source: &Path, destination: &Path, keep_versions: usize) -> Result<Config> {
+        let mut cfg = config_defaults()?;
+        cfg.backup_root = destination.to_path_buf();
+        cfg.destinations = vec![Destination {
+            id: "default".to_string(),
+            path: destination.to_path_buf(),
+            label: Some("Primary".to_string()),
+            max_backups_per_file: None,
+            replicate_to: vec![],
+        }];
+        cfg.watched = vec![WatchedPath {
+            path: source.to_path_buf(),
+            kind: WatchedKind::Directory,
+            enabled: true,
+            destination_id: "default".to_string(),
+            max_backups_per_file: Some(keep_versions),
+        }];
+        Ok(cfg)
+    }
+
+    /**
+     * Summary: Ensure pruning does not delete manifests unless the index commit succeeds.
+     *
+     * Inputs: None.
+     * Outputs: None.
+     * Side effects: Creates temp directories, writes files, runs backups, and toggles permissions.
+     * Error handling: Fails the test with actionable context on unexpected backup behavior.
+     * Ties to other methods: Exercises `backup_one_folder` prune pipeline and `write_index` durability.
+     * Why this exists: A crash or write failure during `index.json` update must not strand an index that
+     * points at a deleted manifest.
+     */
+    #[test]
+    #[cfg(target_family = "unix")]
+    fn pruning_is_deferred_until_index_commit() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let src_dir = tempfile::tempdir().context("test temp src")?;
+        let dst_dir = tempfile::tempdir().context("test temp dst")?;
+
+        let file_path = src_dir.path().join("a.txt");
+        fs::write(&file_path, "one\n").context("write initial source")?;
+
+        let cfg = test_config(src_dir.path(), dst_dir.path(), 1)?;
+        run_backup_cycle(&cfg).context("first backup cycle")?;
+
+        let source_id =
+            crate::hashing::sha256_hex(cfg.watched[0].path.to_string_lossy().as_bytes());
+        let store = store_root(dst_dir.path());
+        let source_root = sources_root(&store).join(&source_id);
+        let manifests_root = source_root.join("manifests");
+
+        let index_path = source_root.join("index.json");
+        let raw = fs::read_to_string(&index_path).context("read index after first run")?;
+        let index: VersionIndex =
+            serde_json::from_str(&raw).context("parse index after first run")?;
+        let first_version = index
+            .versions
+            .last()
+            .context("expected at least one version")?
+            .id
+            .clone();
+        let first_manifest = manifests_root.join(format!("{}.json", first_version));
+        assert!(
+            first_manifest.exists(),
+            "expected first manifest to exist at {:?}",
+            first_manifest
+        );
+
+        // Block index updates without blocking manifest writes by removing write permission on
+        // `source_root` while leaving `manifests_root` writable.
+        fs::set_permissions(&source_root, fs::Permissions::from_mode(0o555))
+            .context("chmod source_root read-only")?;
+
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&file_path)
+            .context("open source for modification")?;
+        writeln!(f, "two").context("mutate source content")?;
+        f.flush().context("flush mutated source content")?;
+
+        let err = run_backup_cycle(&cfg).expect_err("second backup should fail due to index write");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("write_json_atomic_durable") || msg.contains("write_index"),
+            "expected write_index failure, got: {msg}"
+        );
+
+        // The pre-existing committed version must remain restorable via its manifest.
+        assert!(
+            first_manifest.exists(),
+            "expected committed manifest to remain when index commit fails: {:?}",
+            first_manifest
+        );
+
+        Ok(())
+    }
 }
 
 pub(crate) fn store_root(destination_root: &Path) -> PathBuf {
@@ -440,6 +1083,7 @@ fn write_blob(
     blob_path: &Path,
     timeout_seconds: u64,
     retry_delays: &[Duration],
+    blob_codec: &BlobCodec,
     durability_root: &Path,
 ) -> Result<(usize, u64)> {
     let parent = blob_path
@@ -454,7 +1098,7 @@ fn write_blob(
 
     let label = format!("versioned::write_blob {:?} -> {:?}", src_path, blob_path);
     let (written, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
-        write_blob_once(src_path, blob_path, timeout_seconds)
+        write_blob_once(src_path, blob_path, timeout_seconds, blob_codec)
     })?;
     Ok((1, written))
 }
@@ -469,43 +1113,35 @@ fn write_blob(
  * Ties to other methods: Called by `write_blob` via `retry_with_backoff`.
  * Why this exists: Allow clean retry semantics without partial blob files surviving failed attempts.
  */
-fn write_blob_once(src_path: &Path, blob_path: &Path, timeout_seconds: u64) -> Result<u64> {
+fn write_blob_once(
+    src_path: &Path,
+    blob_path: &Path,
+    timeout_seconds: u64,
+    blob_codec: &BlobCodec,
+) -> Result<u64> {
     let start = Instant::now();
-    let mut file = fs::File::open(src_path).with_context(|| {
-        format!(
-            "versioned::write_blob_once failed to open source file {:?}",
-            src_path
-        )
-    })?;
     let parent = blob_path
         .parent()
         .context("versioned::write_blob_once missing blob parent")?;
     let mut temp = tempfile::NamedTempFile::new_in(parent)
         .context("versioned::write_blob_once temp create")?;
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut written: u64 = 0;
-    loop {
-        if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
-            anyhow::bail!(
-                "versioned::write_blob_once timed out after {}s writing {:?}",
-                timeout_seconds,
-                src_path
-            );
-        }
-        let n = file
-            .read(&mut buf)
-            .with_context(|| format!("versioned::write_blob_once failed reading {:?}", src_path))?;
-        if n == 0 {
-            break;
-        }
-        temp.write_all(&buf[..n]).with_context(|| {
+
+    if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
+        anyhow::bail!(
+            "versioned::write_blob_once timed out after {}s writing {:?}",
+            timeout_seconds,
+            src_path
+        );
+    }
+    blob_codec
+        .write_blob_from_file_to_writer(src_path, temp.as_file_mut(), timeout_seconds)
+        .with_context(|| {
             format!(
-                "versioned::write_blob_once failed writing temp for {:?}",
+                "versioned::write_blob_once failed encoding blob from {:?}",
                 src_path
             )
         })?;
-        written += n as u64;
-    }
+    let written = temp.as_file().metadata().map(|m| m.len()).unwrap_or(0);
     temp.flush().with_context(|| {
         format!(
             "versioned::write_blob_once failed to flush temp for {:?}",
@@ -560,13 +1196,7 @@ fn scan_snapshot(
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "file".to_string());
-            match scan_one_file(
-                scan_path,
-                &name,
-                cfg.hashing.timeout_seconds,
-                retry_delays,
-                &prev_entries,
-            ) {
+            match scan_one_file(scan_path, &name, &cfg.hashing, retry_delays, &prev_entries) {
                 Ok(e) => {
                     entries.insert(name.clone(), e);
                 }
@@ -637,13 +1267,7 @@ fn scan_snapshot(
                 }
                 if item.file_type().is_file() {
                     let rel_str = normalize_rel(rel);
-                    match scan_one_file(
-                        path,
-                        &rel_str,
-                        cfg.hashing.timeout_seconds,
-                        retry_delays,
-                        &prev_entries,
-                    ) {
+                    match scan_one_file(path, &rel_str, &cfg.hashing, retry_delays, &prev_entries) {
                         Ok(entry) => {
                             entries.insert(rel_str.clone(), entry);
                         }
@@ -733,10 +1357,11 @@ fn classify_scan_failure(error: &anyhow::Error) -> ReadFailurePhase {
 fn scan_one_file(
     abs_path: &Path,
     rel_path: &str,
-    timeout_seconds: u64,
+    tuning: &crate::config::model::HashingTuning,
     retry_delays: &[Duration],
     prev: &HashMap<&str, &ManifestEntry>,
 ) -> Result<ManifestEntry> {
+    let timeout_seconds = tuning.timeout_seconds;
     let label = format!("versioned::scan_one_file metadata {:?}", abs_path);
     let (meta, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
         fs::metadata(abs_path).with_context(|| {
@@ -770,7 +1395,7 @@ fn scan_one_file(
             });
         }
     }
-    let hash = sha256_file(abs_path, timeout_seconds, retry_delays)?;
+    let hash = sha256_file(abs_path, tuning, retry_delays)?;
     Ok(ManifestEntry {
         kind: ManifestEntryKind::File,
         rel_path: rel_path.to_string(),
@@ -807,6 +1432,9 @@ fn load_index(source_root: &Path, source_path: &Path) -> Result<VersionIndex> {
             schema_version: STORE_SCHEMA_VERSION,
             source_path: source_path.to_string_lossy().into_owned(),
             versions: Vec::new(),
+            safety_pinned_version_id: None,
+            safety_pending_version_id: None,
+            safety_pending_first_seen_unix: None,
         });
     }
     let raw = fs::read_to_string(&path)
@@ -947,56 +1575,16 @@ fn write_json_atomic_durable<T: serde::Serialize>(
     Ok(())
 }
 
-fn sha256_file(path: &Path, timeout_seconds: u64, retry_delays: &[Duration]) -> Result<String> {
+fn sha256_file(
+    path: &Path,
+    tuning: &crate::config::model::HashingTuning,
+    retry_delays: &[Duration],
+) -> Result<String> {
     let label = format!("versioned::sha256_file {:?}", path);
-    let (hash, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
-        sha256_file_once(path, timeout_seconds)
+    let (hash, _) = retry_with_backoff(&label, tuning.timeout_seconds, retry_delays, || {
+        hashing::sha256_file_hex_with_tuning(path, tuning)
     })?;
     Ok(hash)
-}
-
-/**
- * Summary: Compute a SHA-256 hash for a file in a single attempt.
- *
- * Inputs: File path and timeout in seconds.
- * Outputs: Hex-encoded SHA-256 hash string.
- * Side effects: Reads file contents from disk.
- * Error handling: Returns contextual errors on open/read failures and a timeout error when exceeded.
- * Ties to other methods: Used by `sha256_file` which applies retry/backoff around this function.
- * Why this exists: Allow retry to restart hashing cleanly after transient read errors.
- */
-fn sha256_file_once(path: &Path, timeout_seconds: u64) -> Result<String> {
-    let start = Instant::now();
-    let mut file = fs::File::open(path)
-        .with_context(|| format!("versioned::sha256_file_once failed to open {:?}", path))?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        if timeout_seconds > 0 && start.elapsed().as_secs() > timeout_seconds {
-            anyhow::bail!(
-                "versioned::sha256_file_once timed out after {}s hashing {:?}",
-                timeout_seconds,
-                path
-            );
-        }
-        let n = file
-            .read(&mut buf)
-            .with_context(|| format!("versioned::sha256_file_once failed reading {:?}", path))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(sha256_hex(&hasher.finalize()))
-}
-
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(out, "{:02x}", b);
-    }
-    out
 }
 
 pub(crate) fn normalize_rel(path: &Path) -> String {

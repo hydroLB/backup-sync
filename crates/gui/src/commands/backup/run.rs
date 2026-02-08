@@ -69,7 +69,7 @@ fn load_state_store(
 #[tauri::command]
 /// Purpose: Runs a backup immediately from the GUI.
 ///
-/// Inputs: an optional correlation id and session auth state.
+/// Inputs: an optional correlation id.
 /// Outputs: `Ok(())` when the backup completes or an error envelope.
 /// Ties to: GUI run now actions and state persistence.
 /// Side effects: Reads config/state, performs backup IO, and writes state updates.
@@ -114,6 +114,40 @@ pub async fn run_now_cmd(correlation_id: Option<String>) -> Result<(), ErrorEnve
             format!("[cid={}] run_now_cmd versioned backup failed: {}", cid, e),
         )
     })?;
+
+    let has_replication_pairs = cfg.destinations.iter().any(|d| !d.replicate_to.is_empty());
+    if has_replication_pairs && cfg.runtime.replication_enabled {
+        match versioned::replicate_configured_stores(&cfg) {
+            Ok(rep) => {
+                state.replication_last_run_ts = Some(chrono::Utc::now().timestamp());
+                state.replication_last_bytes_copied = rep.bytes_copied;
+                state.replication_last_blobs_copied = rep.blobs_copied;
+                state.replication_last_manifests_copied = rep.manifests_copied;
+                state.replication_last_manifests_deleted = rep.manifests_deleted;
+                state.replication_last_pairs_ok = rep.pairs_ok;
+                state.replication_last_pairs_failed = rep.pairs_failed;
+                state.replication_last_targets_failed = rep.targets_failed;
+                state.replication_last_status = Some(if rep.pairs_failed == 0 {
+                    "ok".to_string()
+                } else {
+                    "degraded".to_string()
+                });
+                state.replication_last_error = if rep.pairs_failed == 0 {
+                    None
+                } else {
+                    Some(rep.message.clone())
+                };
+                eprintln!("[cid={}] replication {}", cid, rep.message);
+            }
+            Err(e) => {
+                state.replication_last_run_ts = Some(chrono::Utc::now().timestamp());
+                state.replication_last_status = Some("failed".to_string());
+                state.replication_last_error = Some(format!("{e:#}"));
+                eprintln!("[cid={}] replication failed: {e:#}", cid);
+            }
+        }
+    }
+
     state.last_run_ts = Some(chrono::Utc::now().timestamp());
     state.last_files_backed_up = result.versions_created;
     state.last_error = None;
@@ -151,10 +185,34 @@ pub async fn run_simulate_cmd(
 ) -> Result<SimulationResult, ErrorEnvelope> {
     let cid = correlation::cid("sim", correlation_id);
     eprintln!("[cid={}] simulate start", cid);
+    let cfg = load_and_validate_config(&cid)?;
+    let sim = versioned::simulate_backup_cycle(&cfg).map_err(|e| {
+        ErrorEnvelope::new(
+            "SIMULATE_FAILED",
+            format!("[cid={}] run_simulate_cmd failed: {}", cid, e),
+        )
+    })?;
+    let mut message = format!(
+        "would_create_versions={}/{} changes=+{} ~{} -{} blobs_to_write={} bytes_to_write={}",
+        sim.versions_would_create,
+        sim.watched,
+        sim.adds,
+        sim.modifies,
+        sim.deletes,
+        sim.blobs_to_write,
+        sim.bytes_to_write
+    );
+    if sim.read_failures > 0 || sim.snapshot_errors > 0 {
+        message.push_str(&format!(
+            " read_failures={} snapshot_errors={}",
+            sim.read_failures, sim.snapshot_errors
+        ));
+    }
+    eprintln!("[cid={}] simulate complete {}", cid, message);
     Ok(SimulationResult {
-        items: 0,
-        bytes: 0,
-        sample: vec![],
-        message: "Simulation is not available in the simplified versioned-backup engine.".into(),
+        items: sim.items,
+        bytes: sim.bytes_to_write,
+        sample: sim.sample,
+        message,
     })
 }

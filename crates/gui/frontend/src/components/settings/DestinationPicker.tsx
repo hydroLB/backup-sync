@@ -30,12 +30,12 @@ const DestinationPicker: React.FC<Props> = ({
     return (
       <label>
         Backup destination
-        <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+        <div className="inline-actions inline-actions-wrap">
           <input
             type="text"
             value={backup_root}
             onChange={(e) => onChange(e.target.value)}
-            style={{ flex: 1, minWidth: 220 }}
+            className="input-grow"
           />
           <button className="btn secondary" onClick={onBrowse}>
             Browse…
