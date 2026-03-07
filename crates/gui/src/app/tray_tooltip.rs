@@ -1,7 +1,6 @@
 use crate::commands::destination;
 use crate::commands::status::get_status;
 use crate::commands::{access, hardening};
-use crate::tray;
 use chrono::Utc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -422,31 +421,30 @@ pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
                 ));
             }
             let label = format!("Backup Sync • {}", parts.join(" • "));
-            if let Err(error) = handle.tray_handle().set_tooltip(&label) {
-                warn!(
-                    error = %error,
-                    "app::tray_tooltip::update_tray_tooltip failed setting tray tooltip"
-                );
+            if let Some(tray) = handle.tray_by_id("main") {
+                if let Err(error) = tray.set_tooltip(Some(&label)) {
+                    warn!(
+                        error = %error,
+                        "app::tray_tooltip::update_tray_tooltip failed setting tray tooltip"
+                    );
+                }
             }
-            if let Err(error) = handle
-                .tray_handle()
-                .get_item(tray::STATUS_LINE)
-                .set_title(format!("Status: {}", severity.label()))
-            {
-                warn!(
-                    error = %error,
-                    "app::tray_tooltip::update_tray_tooltip failed setting status tray item"
-                );
+            if let Some(status_line) = super::tray_menu::status_line_handle() {
+                if let Err(error) = status_line.set_text(format!("Status: {}", severity.label())) {
+                    warn!(
+                        error = %error,
+                        "app::tray_tooltip::update_tray_tooltip failed setting status tray item"
+                    );
+                }
             }
-            if let Err(error) = handle
-                .tray_handle()
-                .get_item(tray::LAST_SYNC_LINE)
-                .set_title(format_last_sync_label(status.last_run_ts))
-            {
-                warn!(
-                    error = %error,
-                    "app::tray_tooltip::update_tray_tooltip failed setting last-sync tray item"
-                );
+            if let Some(last_sync_line) = super::tray_menu::last_sync_line_handle() {
+                if let Err(error) = last_sync_line.set_text(format_last_sync_label(status.last_run_ts))
+                {
+                    warn!(
+                        error = %error,
+                        "app::tray_tooltip::update_tray_tooltip failed setting last-sync tray item"
+                    );
+                }
             }
         }
         Err(error) => {
@@ -454,31 +452,29 @@ pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
                 error = %error.message,
                 "app::tray_tooltip::update_tray_tooltip failed getting daemon status"
             );
-            if let Err(set_error) = handle.tray_handle().set_tooltip("Backup Sync • Offline") {
-                warn!(
-                    error = %set_error,
-                    "app::tray_tooltip::update_tray_tooltip failed setting offline tray tooltip"
-                );
+            if let Some(tray) = handle.tray_by_id("main") {
+                if let Err(set_error) = tray.set_tooltip(Some("Backup Sync • Offline")) {
+                    warn!(
+                        error = %set_error,
+                        "app::tray_tooltip::update_tray_tooltip failed setting offline tray tooltip"
+                    );
+                }
             }
-            if let Err(set_error) = handle
-                .tray_handle()
-                .get_item(tray::STATUS_LINE)
-                .set_title("Status: Error (Offline)")
-            {
-                warn!(
-                    error = %set_error,
-                    "app::tray_tooltip::update_tray_tooltip failed setting offline status tray item"
-                );
+            if let Some(status_line) = super::tray_menu::status_line_handle() {
+                if let Err(set_error) = status_line.set_text("Status: Error (Offline)") {
+                    warn!(
+                        error = %set_error,
+                        "app::tray_tooltip::update_tray_tooltip failed setting offline status tray item"
+                    );
+                }
             }
-            if let Err(set_error) = handle
-                .tray_handle()
-                .get_item(tray::LAST_SYNC_LINE)
-                .set_title("Last sync: —")
-            {
-                warn!(
-                    error = %set_error,
-                    "app::tray_tooltip::update_tray_tooltip failed setting offline last-sync tray item"
-                );
+            if let Some(last_sync_line) = super::tray_menu::last_sync_line_handle() {
+                if let Err(set_error) = last_sync_line.set_text("Last sync: -") {
+                    warn!(
+                        error = %set_error,
+                        "app::tray_tooltip::update_tray_tooltip failed setting offline last-sync tray item"
+                    );
+                }
             }
         }
     }

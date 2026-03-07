@@ -1,7 +1,7 @@
 import { wrapError } from './ipc';
 
-type DialogModule = typeof import('@tauri-apps/api/dialog');
-type OpenOptions = import('@tauri-apps/api/dialog').OpenDialogOptions;
+type DialogModule = typeof import('@tauri-apps/plugin-dialog');
+type OpenOptions = import('@tauri-apps/plugin-dialog').OpenDialogOptions;
 type OpenResult = Awaited<ReturnType<DialogModule['open']>>;
 
 let dialogModulePromise: Promise<DialogModule> | null = null;
@@ -24,7 +24,7 @@ let dialogModulePromise: Promise<DialogModule> | null = null;
 export async function loadDialogModule(): Promise<DialogModule> {
   try {
     if (!dialogModulePromise) {
-      dialogModulePromise = import('@tauri-apps/api/dialog');
+      dialogModulePromise = import('@tauri-apps/plugin-dialog');
     }
     return await dialogModulePromise;
   } catch (error) {

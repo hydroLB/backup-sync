@@ -39,7 +39,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let tray_refresh = std::time::Duration::from_secs(runtime.tray_tooltip_refresh_seconds);
     let action_state = actions::new_action_state();
 
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
 
     #[cfg(feature = "single-instance")]
     let builder = {
@@ -53,8 +53,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     builder
         .setup(move |app| {
             let setup_cid = startup_cid.clone();
+            let tray_handles = tray_menu::build_tray(app)?;
+            tray_menu::register_handles(&tray_handles);
+            if let Some(tray) = app.tray_by_id("main") {
+                if let Err(error) = tray.set_menu(Some(tray_handles.menu.clone())) {
+                    warn!(
+                        cid = %setup_cid,
+                        error = %error,
+                        "app::run failed to attach tray menu during startup"
+                    );
+                }
+            } else {
+                warn!(cid = %setup_cid, "app::run could not find configured tray icon");
+            }
             // Keep tray tooltip updated with daemon status.
-            let handle = app.app_handle();
+            let handle = app.handle().clone();
             async_runtime::spawn(async move {
                 loop {
                     tray_tooltip::update_tray_tooltip(&handle).await;
@@ -64,7 +77,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             if runtime.gui_start_hidden {
                 // Hide on launch for users that want tray-first behavior.
-                if let Some(window) = app.get_window("main") {
+                if let Some(window) = app.get_webview_window("main") {
                     if let Err(error) = window.hide() {
                         warn!(
                             cid = %setup_cid,
@@ -78,14 +91,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(())
         })
-        .system_tray(tray_menu::build_tray())
-        .on_system_tray_event({
+        .on_menu_event({
+            let action_state = action_state.clone();
+            move |app, event| actions::handle_menu_event(app, event, &action_state)
+        })
+        .on_tray_icon_event({
             let action_state = action_state.clone();
             move |app, event| actions::handle_tray_event(app, event, &action_state)
         })
         .on_window_event({
             let action_state = action_state.clone();
-            move |event| actions::handle_window_event(event, &action_state)
+            move |window, event| actions::handle_window_event(window, event, &action_state)
         })
         .invoke_handler(tauri::generate_handler![
             crate::commands::status::get_status,

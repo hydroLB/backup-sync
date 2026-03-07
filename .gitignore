@@ -107,6 +107,7 @@ projects/
 # Tauri build artifacts
 crates/gui/src-tauri/target/
 crates/gui/src-tauri/gen/
+crates/gui/gen/
 
 # Security scan outputs
 gitleaks-report*.json
