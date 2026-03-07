@@ -20,10 +20,15 @@ type Props = {
  * Summary: Render the destination selection card in minimal mode.
  *
  * Inputs: Current destination path, busy flag, and choose handler.
+ *
  * Outputs: Card React element tree.
+ *
  * Side effects: Calls `onChoose` when the user clicks the picker button.
+ *
  * Error handling: Delegated to parent via handler.
+ *
  * Ties to other methods: Used by `MinimalMain` layout for destination setup.
+ *
  * Why this exists: Keep section layout consistent and reduce inline markup in `MinimalMain`.
  */
 export function DestinationCard({
@@ -37,14 +42,23 @@ export function DestinationCard({
 }: Props) {
   const primaryDestination = destinations[0] || null;
   const additionalDestinations = destinations.slice(1);
+  const destinationCount = destinations.filter(
+    (destination) => destination.path.trim().length > 0,
+  ).length;
 
   return (
     <div className="card destination-card">
       <h2 className="section-heading">Destination</h2>
+      <p className="section-subtitle">
+        {destinationCount > 0
+          ? `${destinationCount} destination${destinationCount === 1 ? '' : 's'} ready. Additional destinations automatically mirror protected paths.`
+          : 'Pick where Backup Sync stores version history before adding protected paths.'}
+      </p>
       {primaryDestination?.path ? (
         <div className="pill pill-row destination-primary-row mt-3" title={primaryDestination.path}>
-          <span className="pill-main truncate">
-            <span className="destination-prefix">Default:</span> {primaryDestination.path}
+          <span className="pill-main destination-primary-copy">
+            <span className="destination-prefix">Primary destination</span>
+            <span className="truncate destination-primary-path">{primaryDestination.path}</span>
           </span>
           <Button
             tone="secondary"
@@ -52,6 +66,7 @@ export function DestinationCard({
             className="pill-action destination-primary-change"
             onClick={onChoose}
             disabled={busy}
+            aria-label="Change primary destination"
           >
             Change…
           </Button>
@@ -69,6 +84,7 @@ export function DestinationCard({
               className="pill-action"
               onClick={onChoose}
               disabled={busy}
+              aria-label="Choose primary destination"
             >
               Choose…
             </Button>
@@ -113,6 +129,7 @@ export function DestinationCard({
           block
           onClick={onAddDestination}
           disabled={busy}
+          aria-label="Add another destination"
         >
           Add another destination
         </Button>

@@ -1,17 +1,31 @@
-use crate::commands::{correlation, error::ErrorEnvelope};
-use backup_core::{backup::versioned, load_config, platform::paths, state::store::StateStore};
+use crate::commands::{correlation, error::ErrorEnvelope, io_policy::run_blocking_io};
+use anyhow::Context;
+use backup_core::{
+    backup::versioned,
+    load_validated_config,
+    logging::{redact_path, redact_text},
+    platform::paths,
+    state::store::StateStore,
+};
 use chrono::Utc;
 use dirs::desktop_dir;
 use serde::Serialize;
+use tracing::info;
 
 #[derive(Serialize)]
-/// Purpose: Payload describing verification results.
+/// Summary: Payload describing verification results.
 ///
 /// Inputs: derived from verify runs.
+///
 /// Outputs: a serializable summary.
-/// Ties to: GUI verification results.
+///
 /// Side effects: None.
-/// Why: show verification status in the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI verification results.
+///
+/// Why this exists: show verification status in the UI.
 pub struct VerifyResult {
     pub ok: usize,
     pub bad: usize,
@@ -21,17 +35,23 @@ pub struct VerifyResult {
 }
 
 #[tauri::command]
-/// Purpose: Runs a verification pass over recent backups.
+/// Summary: Runs a verification pass over recent backups.
 ///
 /// Inputs: an optional correlation id.
+///
 /// Outputs: a `VerifyResult` or an error envelope.
-/// Ties to: GUI verify actions.
+///
 /// Side effects: Reads config/state, hashes backup files, and writes updated state.
-/// Why: allow users to verify backup integrity on demand.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI verify actions.
+///
+/// Why this exists: allow users to verify backup integrity on demand.
 pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, ErrorEnvelope> {
     let cid = correlation::cid("verify", correlation_id);
-    eprintln!("[cid={}] verify start", cid);
-    let cfg = load_config().map_err(|e| {
+    info!(cid = %cid, action = "verify_start", "gui verify requested");
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
@@ -89,7 +109,13 @@ pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, 
             ),
         )
     })?;
-    eprintln!("[cid={}] verify complete ok={} bad={}", cid, ok, bad);
+    info!(
+        cid = %cid,
+        action = "verify_complete",
+        ok = ok,
+        bad = bad,
+        "gui verify completed"
+    );
     Ok(VerifyResult {
         ok,
         bad,
@@ -100,19 +126,29 @@ pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, 
 }
 
 #[tauri::command]
-/// Purpose: Exports a health report to the Desktop directory.
+/// Summary: Exports a health report to the Desktop directory.
 ///
 /// Inputs: an optional correlation id.
+///
 /// Outputs: the path to the report file or an error envelope.
-/// Ties to: GUI diagnostics actions.
+///
 /// Side effects: Reads config/state and writes a health report file.
-/// Why: allow users to share health summaries.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI diagnostics actions.
+///
+/// Why this exists: allow users to share health summaries.
 pub async fn export_health_report_cmd(
     correlation_id: Option<String>,
 ) -> Result<String, ErrorEnvelope> {
     let cid = correlation::cid("health", correlation_id);
-    eprintln!("[cid={}] export health start", cid);
-    let cfg = load_config().map_err(|e| {
+    info!(
+        cid = %cid,
+        action = "export_health_start",
+        "gui health report export requested"
+    );
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
@@ -150,17 +186,28 @@ pub async fn export_health_report_cmd(
             ),
         )
     })?;
-    eprintln!("[cid={}] export health complete -> {}", cid, dest.display());
+    info!(
+        cid = %cid,
+        action = "export_health_complete",
+        report_path = %redact_path(&dest),
+        "gui health report export completed"
+    );
     Ok(dest.display().to_string())
 }
 
-/// Purpose: Fetches a status snapshot string for the health report.
+/// Summary: Fetches a status snapshot string for the health report.
 ///
 /// Inputs: none.
+///
 /// Outputs: a formatted status snapshot string.
-/// Ties to: health report generation.
+///
 /// Side effects: Performs an IPC status request.
-/// Why: include current daemon status in diagnostics.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: health report generation.
+///
+/// Why this exists: include current daemon status in diagnostics.
 async fn fetch_status_snapshot() -> String {
     match super::super::status::get_status().await {
         Ok(status) => match serde_json::to_string_pretty(&status) {
@@ -177,13 +224,19 @@ async fn fetch_status_snapshot() -> String {
     }
 }
 
-/// Purpose: Builds the health report content from config, state, and status.
+/// Summary: Builds the health report content from config, state, and status.
 ///
 /// Inputs: config, state, state path, and status text.
+///
 /// Outputs: the full report string.
-/// Ties to: health report export.
+///
 /// Side effects: None.
-/// Why: keep report formatting centralized.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: health report export.
+///
+/// Why this exists: keep report formatting centralized.
 fn build_health_report(
     cfg: &backup_core::Config,
     state: &backup_core::state::StoredState,
@@ -200,29 +253,55 @@ fn build_health_report(
     let mut report = String::new();
     report.push_str("# Local Backup Manager Health Report\n");
     report.push_str(&format!("Generated: {}\n", Utc::now()));
-    report.push_str(&format!("Config path: {}\n", config_path));
-    report.push_str(&format!("State path: {:?}\n", state_path));
-    report.push_str(&format!("Backup destination: {:?}\n", cfg.backup_root));
+    report.push_str(&format!(
+        "Config path: {}\n",
+        redact_path(std::path::Path::new(&config_path))
+    ));
+    report.push_str(&format!("State path: {}\n", redact_path(state_path)));
+    report.push_str(&format!(
+        "Backup destination: {}\n",
+        redact_path(&cfg.backup_root)
+    ));
     report.push_str(&format!("Watched entries: {}\n", cfg.watched.len()));
-    report.push_str(&format!("Last error: {:?}\n", state.last_error));
+    report.push_str(&format!(
+        "Last error: {}\n",
+        redact_text(&format!("{:?}", state.last_error))
+    ));
     report.push_str("\nStatus snapshot:\n");
-    report.push_str(status);
+    report.push_str(&redact_text(status));
     report
 }
 
-/// Purpose: Writes the health report to the Desktop directory.
+/// Summary: Writes the health report to the Desktop directory.
 ///
 /// Inputs: the report content.
+///
 /// Outputs: the written file path.
-/// Ties to: health report export.
+///
 /// Side effects: Writes the report file to disk.
-/// Why: persist the report for sharing and diagnostics.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: health report export.
+///
+/// Why this exists: persist the report for sharing and diagnostics.
 fn write_health_report(report: &str) -> Result<std::path::PathBuf, ErrorEnvelope> {
     let dest_dir = desktop_dir()
         .ok_or_else(|| ErrorEnvelope::new("NO_DESKTOP", "No desktop directory available"))?;
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
     let dest = dest_dir.join(format!("BackupSync-health-{}.txt", ts));
-    std::fs::write(&dest, report).map_err(|e| {
+    run_blocking_io(
+        "gui::backup::verify::write_health_report write file",
+        || {
+            std::fs::write(&dest, report.as_bytes()).with_context(|| {
+                format!(
+                    "backup::verify::write_health_report failed writing report at {:?}",
+                    dest
+                )
+            })
+        },
+    )
+    .map_err(|e| {
         ErrorEnvelope::new(
             "HEALTH_WRITE",
             format!("backup::verify::write_health_report failed: {}", e),

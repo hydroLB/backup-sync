@@ -1,0 +1,36 @@
+name: Feature Request
+description: Propose a concrete enhancement.
+title: "[feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Describe the user or operator problem first.
+      placeholder: What is hard today and who is affected.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the desired behavior and interface.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: List alternatives and tradeoffs.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Measurable definition of done.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true

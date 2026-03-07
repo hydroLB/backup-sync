@@ -1,14 +1,21 @@
 use anyhow::{Context, Result};
+use backup_core::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Purpose: Resolves the systemd unit path for user or system scope.
+/// Summary: Resolves the systemd unit path for user or system scope.
 ///
 /// Inputs: a user scope flag.
+///
 /// Outputs: the resolved unit file path.
-/// Ties to: CLI and GUI service installation flows.
+///
 /// Side effects: Reads the user config directory when user scope is requested.
-/// Why: centralize systemd path decisions for consistent installs.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI and GUI service installation flows.
+///
+/// Why this exists: centralize systemd path decisions for consistent installs.
 pub fn default_unit_path(user: bool) -> Result<PathBuf> {
     if user {
         let mut path = dirs::config_dir().ok_or_else(|| anyhow::anyhow!("config dir not found"))?;
@@ -19,19 +26,26 @@ pub fn default_unit_path(user: bool) -> Result<PathBuf> {
     }
 }
 
-/// Purpose: Builds and optionally writes a systemd unit file.
+/// Summary: Builds and optionally writes a systemd unit file.
 ///
 /// Inputs: the destination path, executable path, user scope, and optional log path.
+///
 /// Outputs: the unit file content string.
-/// Ties to: service installation and manifest printing commands.
+///
 /// Side effects: Creates directories and writes the unit file when a destination is provided.
-/// Why: keep service unit formatting consistent across installation paths.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation and manifest printing commands.
+///
+/// Why this exists: keep service unit formatting consistent across installation paths.
 pub fn write_unit(
     destination: &Path,
     exec: &Path,
     user: bool,
     log_path: Option<&Path>,
 ) -> Result<String> {
+    let io_policy = BlockingIoPolicy::bootstrap_defaults();
     let exec_str = exec.display().to_string();
     let log_str = log_path
         .map(|p| p.display().to_string())
@@ -65,10 +79,24 @@ WantedBy=default.target
         return Ok(contents);
     }
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create systemd directory {:?}", parent))?;
+        run_with_policy(
+            "daemon::integration::systemd::write_unit create parent directory",
+            &io_policy,
+            CancellationFlag::none(),
+            || {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create systemd directory {:?}", parent))
+            },
+        )?;
     }
-    fs::write(destination, &contents)
-        .with_context(|| format!("failed to write systemd unit to {:?}", destination))?;
+    run_with_policy(
+        "daemon::integration::systemd::write_unit write unit",
+        &io_policy,
+        CancellationFlag::none(),
+        || {
+            fs::write(destination, &contents)
+                .with_context(|| format!("failed to write systemd unit to {:?}", destination))
+        },
+    )?;
     Ok(contents)
 }

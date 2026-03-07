@@ -1,13 +1,19 @@
 import { correlationId } from '../correlation';
 
 /**
- * Purpose: Validate correlation id format and uniqueness for service calls.
+ * Summary: Validate correlation id format and uniqueness for service calls.
  *
  * Inputs: None.
+ *
  * Outputs: Throws on assertion failures.
- * Ties to: `correlationId` from the services layer.
+ *
  * Side effects: None.
- * Why: Guard the correlation id format used for tracing actions.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `correlationId` from the services layer.
+ *
+ * Why this exists: Guard the correlation id format used for tracing actions.
  */
 function assertCorrelationId(): void {
   try {

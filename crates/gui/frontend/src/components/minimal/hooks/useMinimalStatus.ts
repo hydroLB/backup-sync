@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getStatus } from '../../../services/status';
-import { tauriAvailable } from '../../../services/ipc';
 import { UI_TUNING } from '../../../config/uiTuning';
 import { StatusDto } from '../../../services/types';
 
@@ -21,10 +20,15 @@ type MinimalStatusState = {
  * Summary: Poll daemon status and emit transition feedback for minimal mode.
  *
  * Inputs: Event callback for transition notifications.
+ *
  * Outputs: Latest status plus derived destination and replication warning strings.
+ *
  * Side effects: Starts/stops polling interval timers and reads daemon status via IPC.
+ *
  * Error handling: Ignores polling failures so minimal mode remains usable offline.
+ *
  * Ties to other methods: Used by `MinimalMain` to render warning banners and toasts.
+ *
  * Why this exists: Keep status polling and transition-notification logic out of screen rendering code.
  */
 export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
@@ -32,7 +36,6 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
   const prevRef = useRef<{ destinationPaused: boolean; replicationFailed: boolean } | null>(null);
 
   useEffect(() => {
-    if (!tauriAvailable()) return;
     let cancelled = false;
 
     const refresh = () => {
@@ -70,8 +73,9 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
             replicationFailed: nextReplicationFailed,
           };
         })
-        .catch(() => {
-          // Minimal mode stays usable even when daemon status is unavailable.
+        .catch((error) => {
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn(`[useMinimalStatus::refresh] Status polling failed: ${reason}`);
         });
     };
 

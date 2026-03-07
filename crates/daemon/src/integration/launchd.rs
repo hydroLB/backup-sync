@@ -1,28 +1,42 @@
 use anyhow::{Context, Result};
+use backup_core::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Purpose: Resolves the default launchd plist path.
+/// Summary: Resolves the default launchd plist path.
 ///
 /// Inputs: none.
+///
 /// Outputs: the default plist path.
-/// Ties to: service installation on macOS.
+///
 /// Side effects: Reads the user home directory.
-/// Why: keep launchd manifest placement consistent.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation on macOS.
+///
+/// Why this exists: keep launchd manifest placement consistent.
 pub fn default_plist_path() -> Result<PathBuf> {
     let mut path = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home directory not found"))?;
     path.push("Library/LaunchAgents/com.backup_sync.daemon.plist");
     Ok(path)
 }
 
-/// Purpose: Builds and optionally writes the launchd plist manifest.
+/// Summary: Builds and optionally writes the launchd plist manifest.
 ///
 /// Inputs: the destination path, daemon executable path, and optional log path.
+///
 /// Outputs: the plist content string.
-/// Ties to: macOS service installation and export flows.
+///
 /// Side effects: Creates directories and writes the plist when a destination is provided.
-/// Why: keep launchd manifests consistent across installs.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: macOS service installation and export flows.
+///
+/// Why this exists: keep launchd manifests consistent across installs.
 pub fn write_plist(destination: &Path, exec: &Path, log_path: Option<&Path>) -> Result<String> {
+    let io_policy = BlockingIoPolicy::bootstrap_defaults();
     let exec_str = exec.display().to_string();
     let log_str = log_path
         .map(|p| p.display().to_string())
@@ -52,10 +66,24 @@ pub fn write_plist(destination: &Path, exec: &Path, log_path: Option<&Path>) -> 
         return Ok(contents);
     }
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create launchd directory {:?}", parent))?;
+        run_with_policy(
+            "daemon::integration::launchd::write_plist create parent directory",
+            &io_policy,
+            CancellationFlag::none(),
+            || {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create launchd directory {:?}", parent))
+            },
+        )?;
     }
-    fs::write(destination, &contents)
-        .with_context(|| format!("failed to write launchd plist to {:?}", destination))?;
+    run_with_policy(
+        "daemon::integration::launchd::write_plist write plist",
+        &io_policy,
+        CancellationFlag::none(),
+        || {
+            fs::write(destination, &contents)
+                .with_context(|| format!("failed to write launchd plist to {:?}", destination))
+        },
+    )?;
     Ok(contents)
 }

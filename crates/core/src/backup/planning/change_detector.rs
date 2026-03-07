@@ -20,13 +20,19 @@ pub struct PlannedItem {
 
 pub type BackupPlan = Vec<PlannedItem>;
 
-/// Purpose: Builds a backup plan by comparing current filesystem metadata to stored state.
+/// Summary: Builds a backup plan by comparing current filesystem metadata to stored state.
 ///
 /// Inputs: the collected file metadata, mutable state, planning tuning, and hashing tuning.
+///
 /// Outputs: a list of planned items to back up.
-/// Ties to: `hash_file` for periodic content verification and into `StoredState` updates.
+///
 /// Side effects: Reads file contents for hashing and mutates stored state.
-/// Why: surface only changed or untracked files while limiting expensive hash checks.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `hash_file` for periodic content verification and into `StoredState` updates.
+///
+/// Why this exists: surface only changed or untracked files while limiting expensive hash checks.
 pub fn plan(
     files: Vec<FileMeta>,
     state: &mut StoredState,

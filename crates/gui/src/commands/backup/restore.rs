@@ -4,7 +4,7 @@ use backup_core::backup::versioned::restore::{
     list_version_files, list_versions, restore_files, restore_version, ListVersionFilesResult,
     RestoreFilesRequest, RestoreMode, RestoreRequest, VersionFileInfo,
 };
-use backup_core::{load_config, validate};
+use backup_core::load_validated_config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -76,25 +76,29 @@ pub struct RestoreFilesArgs {
     pub target_dir: Option<String>,
 }
 
+/// Summary: list_versions_cmd orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn list_versions_cmd(
     correlation_id: Option<String>,
 ) -> Result<Vec<FolderVersionsDto>, ErrorEnvelope> {
     let cid = correlation::cid("restore_list", correlation_id);
-    let cfg = load_config().map_err(|e| {
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
                 "[cid={}] list_versions_cmd failed to load config: {}",
-                cid, e
-            ),
-        )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_INVALID",
-            format!(
-                "[cid={}] list_versions_cmd config validation failed: {}",
                 cid, e
             ),
         )
@@ -121,26 +125,30 @@ pub async fn list_versions_cmd(
         .collect())
 }
 
+/// Summary: list_version_files_cmd orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn list_version_files_cmd(
     args: ListVersionFilesArgs,
     correlation_id: Option<String>,
 ) -> Result<ListVersionFilesResultDto, ErrorEnvelope> {
     let cid = correlation::cid("restore_files_list", correlation_id);
-    let cfg = load_config().map_err(|e| {
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
                 "[cid={}] list_version_files_cmd failed to load config: {}",
-                cid, e
-            ),
-        )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_INVALID",
-            format!(
-                "[cid={}] list_version_files_cmd config validation failed: {}",
                 cid, e
             ),
         )
@@ -186,26 +194,30 @@ pub async fn list_version_files_cmd(
     })
 }
 
+/// Summary: restore_version_cmd orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn restore_version_cmd(
     args: RestoreArgs,
     correlation_id: Option<String>,
 ) -> Result<RestoreResultDto, ErrorEnvelope> {
     let cid = correlation::cid("restore", correlation_id);
-    let cfg = load_config().map_err(|e| {
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
                 "[cid={}] restore_version_cmd failed to load config: {}",
-                cid, e
-            ),
-        )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_INVALID",
-            format!(
-                "[cid={}] restore_version_cmd config validation failed: {}",
                 cid, e
             ),
         )
@@ -234,26 +246,30 @@ pub async fn restore_version_cmd(
     })
 }
 
+/// Summary: restore_files_cmd orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn restore_files_cmd(
     args: RestoreFilesArgs,
     correlation_id: Option<String>,
 ) -> Result<RestoreResultDto, ErrorEnvelope> {
     let cid = correlation::cid("restore_files", correlation_id);
-    let cfg = load_config().map_err(|e| {
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
                 "[cid={}] restore_files_cmd failed to load config: {}",
-                cid, e
-            ),
-        )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_INVALID",
-            format!(
-                "[cid={}] restore_files_cmd config validation failed: {}",
                 cid, e
             ),
         )

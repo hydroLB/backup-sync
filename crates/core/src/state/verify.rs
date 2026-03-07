@@ -5,13 +5,19 @@ use crate::state::models::StoredState;
 use anyhow::Result;
 use chrono::Utc;
 
-/// Purpose: Re-hashes the most recent backup for each tracked file and records verification results.
+/// Summary: Re-hashes the most recent backup for each tracked file and records verification results.
 ///
 /// Inputs: mutable state and hashing tuning values.
+///
 /// Outputs: a tuple of (ok_count, issue_count).
-/// Ties to: daemon verification cycles and UI status reporting.
+///
 /// Side effects: Reads backup files, mutates stored state, and emits warnings.
-/// Why: detect corruption or drift in the most recent backups.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: daemon verification cycles and UI status reporting.
+///
+/// Why this exists: detect corruption or drift in the most recent backups.
 pub fn verify_backups(state: &mut StoredState, hashing: &HashingTuning) -> Result<(usize, usize)> {
     let mut ok = 0usize;
     let mut bad = 0usize;

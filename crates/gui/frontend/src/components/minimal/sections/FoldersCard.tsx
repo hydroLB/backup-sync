@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { WatchedPath } from '../../settings/types';
+import { WatchedPath } from '../../../domain/config';
 import { Button } from '../../ui/Button';
 import { InlineAlert } from '../../ui/InlineAlert';
 import { StateBlock } from '../../ui/StateBlock';
@@ -21,6 +20,7 @@ type Props = {
   busy: boolean;
   items: Item[];
   destinations: DestinationOption[];
+  destinationReady: boolean;
   defaultKeep: number;
   watchedWarning: string | null;
   onAddFolder: () => void;
@@ -43,16 +43,22 @@ type Props = {
  * Summary: Render the watched folders section for minimal mode.
  *
  * Inputs: Folder list, busy flag, defaults, and action handlers.
+ *
  * Outputs: Card React element tree with folder rows.
+ *
  * Side effects: Calls provided handlers for add/remove/update actions.
+ *
  * Error handling: Delegated to parent via handlers.
+ *
  * Ties to other methods: Used by `MinimalMain` watch management flow.
+ *
  * Why this exists: Encapsulate folder rendering and keep `MinimalMain` focused on orchestration.
  */
 export function FoldersCard({
   busy,
   items,
   destinations,
+  destinationReady,
   defaultKeep,
   watchedWarning,
   onAddFolder,
@@ -61,19 +67,24 @@ export function FoldersCard({
   onUpdateDestination,
 }: Props) {
   const hasItems = items.length > 0;
-  useEffect(() => {
-    // Reserve for future "Add path" UX without changing component shape.
-  }, []);
 
   return (
     <div className="card folders-card">
       <div className="section-title paths-head">
-        <h2 className="section-heading">Protected Paths</h2>
+        <div>
+          <h2 className="section-heading">Protected Paths</h2>
+          <p className="section-subtitle">
+            {destinationReady
+              ? 'Each protected path is assigned to every configured destination by default.'
+              : 'Choose a destination first so new protected paths have somewhere to write.'}
+          </p>
+        </div>
         <div className="btn-ring">
           <Button
             className="add-path-btn"
             onClick={onAddFolder}
-            disabled={busy}
+            disabled={busy || !destinationReady}
+            aria-label="Add protected path"
           >
             Add path…
           </Button>
@@ -88,9 +99,26 @@ export function FoldersCard({
       {!hasItems && (
         <StateBlock
           tone="empty"
-          title="No paths protected yet"
-          message="Use Add path to protect something and choose its destination."
-          className="mt-3"
+          title={
+            destinationReady ? 'No paths protected yet' : 'Choose a destination before adding paths'
+          }
+          message={
+            destinationReady
+              ? 'Add the first folder or file, then Backup Sync will route it to every destination.'
+              : 'The first destination defines where new protected paths will store backup history.'
+          }
+          className="mt-3 paths-empty-state"
+          action={
+            <Button
+              tone="secondary"
+              size="sm"
+              onClick={onAddFolder}
+              disabled={busy || !destinationReady}
+              aria-label="Add protected path"
+            >
+              Add path…
+            </Button>
+          }
         />
       )}
 
@@ -134,10 +162,15 @@ type RowProps = {
  * Summary: Render a single watched folder row with retention stepper.
  *
  * Inputs: Path, current keep value, busy state, and handlers.
+ *
  * Outputs: A row element suitable for the folder list.
+ *
  * Side effects: Calls the provided handlers for update/remove operations.
+ *
  * Error handling: Ignores invalid numeric input to avoid throwing during typing.
+ *
  * Ties to other methods: Used by `FoldersCard` and ultimately persisted by `MinimalMain`.
+ *
  * Why this exists: Keep folder list rendering small and reuse consistent markup.
  */
 function FolderRow({
@@ -210,7 +243,13 @@ function FolderRow({
             </button>
           </div>
         </div>
-        <Button tone="secondary" size="sm" onClick={onRemove} disabled={busy}>
+        <Button
+          tone="secondary"
+          size="sm"
+          onClick={onRemove}
+          disabled={busy}
+          aria-label={`Remove protected path ${path}`}
+        >
           Remove
         </Button>
       </div>
@@ -222,10 +261,15 @@ function FolderRow({
  * Summary: Convert a watched entry to the minimal list item shape.
  *
  * Inputs: A watched entry.
+ *
  * Outputs: Item containing the path and keep override.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by callers that want to reuse `FoldersCard` with config data.
+ *
  * Why this exists: Keep adapter logic centralized and testable.
  */
 export function watchedToItem(w: WatchedPath): Item {

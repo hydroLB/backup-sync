@@ -1,5 +1,3 @@
-#![cfg(feature = "legacy-engine")]
-
 use backup_core::{
     backup::{execution::BackupExecutor, planning},
     config::model::{
@@ -8,23 +6,29 @@ use backup_core::{
     fs::scanning::collect_targets,
     state::store::StateStore,
 };
-use std::{fs, time::Duration};
 use tempfile::tempdir;
 
+mod support;
+
 #[test]
-/// Purpose: Ensures backups occur and retention caps are enforced across multiple edits.
+/// Summary: Ensures backups occur and retention caps are enforced across multiple edits.
 ///
 /// Inputs: a file updated several times and a small retention limit.
+///
 /// Outputs: a state entry with backups not exceeding the limit.
-/// Ties to: planning, execution, and retention enforcement.
+///
 /// Side effects: None.
-/// Why: verify retention policies cap backup histories.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: planning, execution, and retention enforcement.
+///
+/// Why this exists: verify retention policies cap backup histories.
 fn backs_up_and_respects_retention() {
     let dir = tempdir()
         .expect("backup_scenarios::backs_up_and_respects_retention failed to create temp dir");
     let file = dir.path().join("a.txt");
-    fs::write(&file, "v1")
-        .expect("backup_scenarios::backs_up_and_respects_retention failed to write initial file");
+    support::write_fixture_revision(&file, 1, "v1");
 
     let cfg = Config {
         backup_root: dir.path().join("backups"),
@@ -61,9 +65,7 @@ fn backs_up_and_respects_retention() {
         .expect("backup_scenarios::backs_up_and_respects_retention failed to load state");
 
     for i in 0..3 {
-        std::thread::sleep(Duration::from_millis(5));
-        fs::write(&file, format!("v{}", i + 2))
-            .expect("backup_scenarios::backs_up_and_respects_retention failed to update file");
+        support::write_fixture_revision(&file, 2 + i as i64, &format!("v{}", i + 2));
         let targets = collect_targets(&cfg)
             .expect("backup_scenarios::backs_up_and_respects_retention failed to collect targets");
         let plan = planning::plan(targets, &mut state, &cfg.planning, &cfg.hashing)

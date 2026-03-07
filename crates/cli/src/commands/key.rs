@@ -3,13 +3,19 @@ use backup_core::encryption::keyfile;
 use backup_core::platform::paths;
 use std::path::PathBuf;
 
-/// Purpose: Create a new encryption key file for at-rest blob encryption.
+/// Summary: Create a new encryption key file for at-rest blob encryption.
 ///
 /// Inputs: Optional key path override and a force overwrite flag.
+///
 /// Outputs: `Ok(())` after writing the key file and printing recovery guidance.
-/// Ties to: encryption config (`[encryption]`) and versioned blob encryption.
+///
 /// Side effects: Writes a key file to disk with restrictive permissions where supported.
-/// Why: encrypted backups are only recoverable with the same key; key creation must be explicit and user-controlled.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: encryption config (`[encryption]`) and versioned blob encryption.
+///
+/// Why this exists: encrypted backups are only recoverable with the same key; key creation must be explicit and user-controlled.
 pub fn keygen(path: Option<PathBuf>, force: bool) -> Result<()> {
     let out_path = match path {
         Some(p) => p,

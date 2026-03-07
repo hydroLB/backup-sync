@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec make run
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+export BACKUP_SYNC_FORCE_LIVE_MODE=1
+exec "$ROOT/launch.sh"

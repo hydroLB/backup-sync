@@ -2,10 +2,10 @@
 name = "cli"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 backup_core = { path = "../core" }
-daemon = { path = "../daemon" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -14,3 +14,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 dirs = "5"
 fs2 = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+toml = "0.8"

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use backup_core::backup::versioned;
 use backup_core::config::model::{Destination, WatchedKind, WatchedPath};
 use backup_core::config::registry::config_defaults;
-use backup_core::hashing::sha256_file_hex;
+use backup_core::sha256_file_hex;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::{self, File};
@@ -11,26 +11,41 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tempfile::TempDir;
 
-/// Purpose: Capture timing metrics for a single run.
+/// Summary: Capture timing metrics for a single run.
 ///
 /// Inputs: Timing measurements for hashing and retention.
+///
 /// Outputs: A serialized JSON payload with timing metrics.
-/// Ties to: Baseline comparisons in the perf guard.
+///
 /// Side effects: None.
-/// Why: Standardize how performance metrics are recorded and compared.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Baseline comparisons in the perf guard.
+///
+/// Why this exists: Standardize how performance metrics are recorded and compared.
 #[derive(Debug, Serialize, Deserialize)]
 struct PerfMetrics {
+    sha256_small_ms: u128,
     sha256_ms: u128,
     versioned_simulate_ms: u128,
+    versioned_simulate_large_ms: u128,
+    versioned_incremental_change_ms: u128,
 }
 
-/// Purpose: Provide the performance guard configuration.
+/// Summary: Provide the performance guard configuration.
 ///
 /// Inputs: CLI args and environment.
+///
 /// Outputs: Parsed configuration with baseline path and tolerance.
-/// Ties to: CLI handling in `main`.
+///
 /// Side effects: None.
-/// Why: Keep the perf guard configuration explicit and testable.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI handling in `main`.
+///
+/// Why this exists: Keep the perf guard configuration explicit and testable.
 #[derive(Debug)]
 struct PerfConfig {
     baseline_path: PathBuf,
@@ -38,13 +53,19 @@ struct PerfConfig {
     record: bool,
 }
 
-/// Purpose: Parse CLI args into a structured config.
+/// Summary: Parse CLI args into a structured config.
 ///
 /// Inputs: CLI args from `std::env::args`.
+///
 /// Outputs: A `PerfConfig` instance.
-/// Ties to: `main` and baseline checks.
+///
 /// Side effects: Reads CLI arguments from the process environment.
-/// Why: Avoid scattered argument parsing logic.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `main` and baseline checks.
+///
+/// Why this exists: Avoid scattered argument parsing logic.
 fn parse_args() -> Result<PerfConfig> {
     let mut baseline_path = PathBuf::from("docs/perf-baseline.json");
     let mut max_ratio = 1.5f64;
@@ -79,13 +100,19 @@ fn parse_args() -> Result<PerfConfig> {
     })
 }
 
-/// Purpose: Create a deterministic file payload for hashing.
+/// Summary: Create a deterministic file payload for hashing.
 ///
 /// Inputs: `dir` as the temp directory, `bytes` as size.
+///
 /// Outputs: Path to the created file.
-/// Ties to: Hashing measurements.
+///
 /// Side effects: Writes a file to disk.
-/// Why: Keep hashing input consistent across runs.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Hashing measurements.
+///
+/// Why this exists: Keep hashing input consistent across runs.
 fn create_payload(dir: &TempDir, bytes: usize) -> Result<PathBuf> {
     let path = dir.path().join("payload.bin");
     let mut file = File::create(&path).with_context(|| {
@@ -100,13 +127,19 @@ fn create_payload(dir: &TempDir, bytes: usize) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Purpose: Create a deterministic watched tree for versioned simulation tests.
+/// Summary: Create a deterministic watched tree for versioned simulation tests.
 ///
 /// Inputs: `dir` as the temp directory root, `files` count, and `bytes_each` size.
+///
 /// Outputs: The watched directory path created under `dir`.
-/// Ties to: Versioned scan and hashing measurement in `measure_metrics`.
+///
 /// Side effects: Writes a set of files to disk.
-/// Why: Keep the simulation workload stable so regressions are meaningful.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Versioned scan and hashing measurement in `measure_metrics`.
+///
+/// Why this exists: Keep the simulation workload stable so regressions are meaningful.
 fn create_watched_tree(dir: &TempDir, files: usize, bytes_each: usize) -> Result<PathBuf> {
     let watched = dir.path().join("watched");
     fs::create_dir_all(&watched).with_context(|| {
@@ -128,19 +161,84 @@ fn create_watched_tree(dir: &TempDir, files: usize, bytes_each: usize) -> Result
     Ok(watched)
 }
 
-/// Purpose: Measure hashing and retention timings for the perf guard.
+/// Summary: Builds deterministic versioned benchmark config and destination paths.
+///
+/// Inputs: temporary directory, watched file count, and bytes per watched file.
+///
+/// Outputs: configured backup config and watched directory path.
+///
+/// Side effects: creates destination directory and writes watched fixture files.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: versioned simulation and incremental metrics in `measure_metrics`.
+///
+/// Why this exists: avoid duplicate setup logic for versioned workload measurements.
+fn build_versioned_fixture(
+    temp: &TempDir,
+    files: usize,
+    bytes_each: usize,
+) -> Result<(backup_core::Config, PathBuf)> {
+    let watched = create_watched_tree(temp, files, bytes_each)?;
+    let destination = temp.path().join("dest");
+    fs::create_dir_all(&destination).with_context(|| {
+        format!(
+            "perf_guard::build_versioned_fixture failed to create destination dir {:?}",
+            destination
+        )
+    })?;
+    let mut cfg = config_defaults()
+        .context("perf_guard::build_versioned_fixture failed to build defaults")?;
+    cfg.backup_root = destination.clone();
+    cfg.runtime.source_snapshots_enabled = false;
+    cfg.destinations = vec![Destination {
+        id: "primary".to_string(),
+        path: destination,
+        label: Some("Primary".to_string()),
+        max_backups_per_file: None,
+        replicate_to: vec![],
+    }];
+    cfg.watched = vec![WatchedPath {
+        path: watched.clone(),
+        kind: WatchedKind::Directory,
+        enabled: true,
+        destination_id: "primary".to_string(),
+        max_backups_per_file: Some(5),
+    }];
+    Ok((cfg, watched))
+}
+
+/// Summary: Measure hashing and retention timings for the perf guard.
 ///
 /// Inputs: None.
+///
 /// Outputs: A `PerfMetrics` struct with timing data.
-/// Ties to: Baseline recording and comparison.
+///
 /// Side effects: Reads and writes temporary files.
-/// Why: Track real hot paths for regression detection.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Baseline recording and comparison.
+///
+/// Why this exists: Track real hot paths for regression detection.
 fn measure_metrics() -> Result<PerfMetrics> {
     let temp = TempDir::new().context("perf_guard::measure_metrics failed to create temp dir")?;
+    let payload_small = create_payload(&temp, 1024 * 1024)?;
+    let sha_small_start = Instant::now();
+    for _ in 0..20 {
+        sha256_file_hex(&payload_small).with_context(|| {
+            format!(
+                "perf_guard::measure_metrics sha256_file_hex failed for {:?}",
+                payload_small
+            )
+        })?;
+    }
+    let sha256_small_ms = sha_small_start.elapsed().as_millis();
+
     let payload = create_payload(&temp, 8 * 1024 * 1024)?;
     let sha_start = Instant::now();
     for _ in 0..5 {
-        let _ = sha256_file_hex(&payload).with_context(|| {
+        sha256_file_hex(&payload).with_context(|| {
             format!(
                 "perf_guard::measure_metrics sha256_file_hex failed for {:?}",
                 payload
@@ -149,55 +247,61 @@ fn measure_metrics() -> Result<PerfMetrics> {
     }
     let sha256_ms = sha_start.elapsed().as_millis();
 
-    let watched = create_watched_tree(&temp, 200, 4 * 1024)?;
-    let destination = temp.path().join("dest");
-    fs::create_dir_all(&destination).with_context(|| {
-        format!(
-            "perf_guard::measure_metrics failed to create destination dir {:?}",
-            destination
-        )
-    })?;
-    let mut cfg =
-        config_defaults().context("perf_guard::measure_metrics failed to build defaults")?;
-    cfg.backup_root = destination.clone();
-    cfg.runtime.source_snapshots_enabled = false;
-    cfg.destinations = vec![Destination {
-        id: "primary".to_string(),
-        path: destination.clone(),
-        label: Some("Primary".to_string()),
-        max_backups_per_file: None,
-        replicate_to: vec![],
-    }];
-    cfg.watched = vec![WatchedPath {
-        path: watched,
-        kind: WatchedKind::Directory,
-        enabled: true,
-        destination_id: "primary".to_string(),
-        max_backups_per_file: Some(5),
-    }];
+    let (cfg, watched) = build_versioned_fixture(&temp, 200, 4 * 1024)?;
     versioned::run_backup_cycle(&cfg)
         .context("perf_guard::measure_metrics failed initial versioned backup")?;
 
     let simulate_start = Instant::now();
     for _ in 0..3 {
-        let _ = versioned::simulate_backup_cycle_with_sample_limit(&cfg, 0)
+        versioned::simulate_backup_cycle_with_sample_limit(&cfg, 0)
             .context("perf_guard::measure_metrics simulate failed")?;
     }
     let versioned_simulate_ms = simulate_start.elapsed().as_millis();
 
+    let changed_file = watched.join("f_00042.bin");
+    fs::write(&changed_file, vec![0xEF; 4 * 1024]).with_context(|| {
+        format!(
+            "perf_guard::measure_metrics failed to mutate watched file {:?}",
+            changed_file
+        )
+    })?;
+    let incremental_start = Instant::now();
+    versioned::run_backup_cycle(&cfg)
+        .context("perf_guard::measure_metrics incremental backup cycle failed")?;
+    let versioned_incremental_change_ms = incremental_start.elapsed().as_millis();
+
+    let temp_large =
+        TempDir::new().context("perf_guard::measure_metrics failed to create large temp dir")?;
+    let (cfg_large, _) = build_versioned_fixture(&temp_large, 1000, 4 * 1024)?;
+    versioned::run_backup_cycle(&cfg_large)
+        .context("perf_guard::measure_metrics failed large initial backup cycle")?;
+    let simulate_large_start = Instant::now();
+    versioned::simulate_backup_cycle_with_sample_limit(&cfg_large, 0)
+        .context("perf_guard::measure_metrics large simulate failed")?;
+    let versioned_simulate_large_ms = simulate_large_start.elapsed().as_millis();
+
     Ok(PerfMetrics {
+        sha256_small_ms,
         sha256_ms,
         versioned_simulate_ms,
+        versioned_simulate_large_ms,
+        versioned_incremental_change_ms,
     })
 }
 
-/// Purpose: Load a performance baseline from disk.
+/// Summary: Load a performance baseline from disk.
 ///
 /// Inputs: Baseline path.
+///
 /// Outputs: Parsed `PerfMetrics` data.
-/// Ties to: Baseline checks in `main`.
+///
 /// Side effects: Reads a JSON file.
-/// Why: Compare current performance to a committed baseline.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Baseline checks in `main`.
+///
+/// Why this exists: Compare current performance to a committed baseline.
 fn load_baseline(path: &PathBuf) -> Result<PerfMetrics> {
     let mut file = File::open(path)
         .with_context(|| format!("perf_guard::load_baseline failed to open {:?}", path))?;
@@ -208,13 +312,19 @@ fn load_baseline(path: &PathBuf) -> Result<PerfMetrics> {
         .with_context(|| format!("perf_guard::load_baseline failed to parse {:?}", path))
 }
 
-/// Purpose: Write a performance baseline to disk.
+/// Summary: Write a performance baseline to disk.
 ///
 /// Inputs: Baseline path and metrics to serialize.
+///
 /// Outputs: None.
-/// Ties to: `--record` flow in `main`.
+///
 /// Side effects: Writes a JSON file to disk.
-/// Why: Persist a reproducible baseline for future comparisons.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `--record` flow in `main`.
+///
+/// Why this exists: Persist a reproducible baseline for future comparisons.
 fn write_baseline(path: &PathBuf, metrics: &PerfMetrics) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -231,18 +341,48 @@ fn write_baseline(path: &PathBuf, metrics: &PerfMetrics) -> Result<()> {
     Ok(())
 }
 
-/// Purpose: Compare metrics against the baseline and enforce a slowdown ratio.
+/// Summary: Compare metrics against the baseline and enforce a slowdown ratio.
 ///
 /// Inputs: Baseline metrics, current metrics, and max ratio.
+///
 /// Outputs: `Ok(())` when within tolerance, `Err` otherwise.
-/// Ties to: CI performance gating.
+///
 /// Side effects: None.
-/// Why: Fail fast on performance regressions.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CI performance gating.
+///
+/// Why this exists: Fail fast on performance regressions.
 fn compare_metrics(baseline: &PerfMetrics, current: &PerfMetrics, max_ratio: f64) -> Result<()> {
-    let sha_ratio = current.sha256_ms as f64 / baseline.sha256_ms as f64;
-    let simulate_ratio =
-        current.versioned_simulate_ms as f64 / baseline.versioned_simulate_ms as f64;
+    let ratio = |current_ms: u128, baseline_ms: u128| -> f64 {
+        let current = current_ms.max(1) as f64;
+        let baseline = baseline_ms.max(1) as f64;
+        current / baseline
+    };
 
+    let sha_small_ratio = ratio(current.sha256_small_ms, baseline.sha256_small_ms);
+    let sha_ratio = ratio(current.sha256_ms, baseline.sha256_ms);
+    let simulate_ratio = ratio(
+        current.versioned_simulate_ms,
+        baseline.versioned_simulate_ms,
+    );
+    let simulate_large_ratio = ratio(
+        current.versioned_simulate_large_ms,
+        baseline.versioned_simulate_large_ms,
+    );
+    let incremental_ratio = ratio(
+        current.versioned_incremental_change_ms,
+        baseline.versioned_incremental_change_ms,
+    );
+
+    if sha_small_ratio > max_ratio {
+        anyhow::bail!(
+            "perf_guard::compare_metrics sha256_small regression {:.2}x > {:.2}x",
+            sha_small_ratio,
+            max_ratio
+        );
+    }
     if sha_ratio > max_ratio {
         anyhow::bail!(
             "perf_guard::compare_metrics sha256 regression {:.2}x > {:.2}x",
@@ -257,16 +397,36 @@ fn compare_metrics(baseline: &PerfMetrics, current: &PerfMetrics, max_ratio: f64
             max_ratio
         );
     }
+    if simulate_large_ratio > max_ratio {
+        anyhow::bail!(
+            "perf_guard::compare_metrics versioned_simulate_large regression {:.2}x > {:.2}x",
+            simulate_large_ratio,
+            max_ratio
+        );
+    }
+    if incremental_ratio > max_ratio {
+        anyhow::bail!(
+            "perf_guard::compare_metrics versioned_incremental_change regression {:.2}x > {:.2}x",
+            incremental_ratio,
+            max_ratio
+        );
+    }
     Ok(())
 }
 
-/// Purpose: Execute the perf guard entrypoint.
+/// Summary: Execute the perf guard entrypoint.
 ///
 /// Inputs: CLI args for baseline path, ratio, and record mode.
+///
 /// Outputs: `Ok(())` on success or a descriptive error on failure.
-/// Ties to: `scripts/perf/check_baseline.sh` and CI.
+///
 /// Side effects: Reads and writes files, runs performance measurements.
-/// Why: Provide a reproducible performance gate for hot paths.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `scripts/perf/check_baseline.sh` and CI.
+///
+/// Why this exists: Provide a reproducible performance gate for hot paths.
 fn main() -> Result<()> {
     let config = parse_args()?;
     let metrics = measure_metrics()?;
@@ -281,8 +441,12 @@ fn main() -> Result<()> {
     compare_metrics(&baseline, &metrics, config.max_ratio)?;
 
     println!(
-        "perf_guard ok: sha256 {} ms, versioned_simulate {} ms",
-        metrics.sha256_ms, metrics.versioned_simulate_ms
+        "perf_guard ok: sha256_small {} ms, sha256_large {} ms, versioned_simulate_small {} ms, versioned_simulate_large {} ms, versioned_incremental_change {} ms",
+        metrics.sha256_small_ms,
+        metrics.sha256_ms,
+        metrics.versioned_simulate_ms,
+        metrics.versioned_simulate_large_ms,
+        metrics.versioned_incremental_change_ms
     );
     Ok(())
 }

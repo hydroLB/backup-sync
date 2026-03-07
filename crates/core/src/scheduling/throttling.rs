@@ -1,13 +1,19 @@
 use anyhow::{bail, Result};
 use std::time::{Duration, Instant};
 
-/// Purpose: Throttles byte throughput to a fixed bytes per second rate.
+/// Summary: Throttles byte throughput to a fixed bytes per second rate.
 ///
 /// Inputs: the maximum bytes per second and a stream of written bytes.
+///
 /// Outputs: a sleep delay when the caller exceeds the allowance.
-/// Ties to: copy and IO heavy operations that need rate control.
+///
 /// Side effects: None.
-/// Why: prevent IO saturation while keeping throughput predictable.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: copy and IO heavy operations that need rate control.
+///
+/// Why this exists: prevent IO saturation while keeping throughput predictable.
 pub struct Throttle {
     max_bytes_per_second: u64,
     start: Instant,
@@ -15,13 +21,19 @@ pub struct Throttle {
 }
 
 impl Throttle {
-    /// Purpose: Builds a throughput throttle for a fixed bytes per second limit.
+    /// Summary: Builds a throughput throttle for a fixed bytes per second limit.
     ///
     /// Inputs: the maximum bytes per second.
+    ///
     /// Outputs: a configured `Throttle` instance.
-    /// Ties to: copy operations that need bandwidth caps.
+    ///
     /// Side effects: Reads the system clock to initialize timing.
-    /// Why: provide reusable throttling without duplicating math.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: copy operations that need bandwidth caps.
+    ///
+    /// Why this exists: provide reusable throttling without duplicating math.
     pub fn new(max_bytes_per_second: u64) -> Result<Self> {
         if max_bytes_per_second == 0 {
             bail!("scheduling::throttling::Throttle::new max_bytes_per_second must be > 0");
@@ -33,13 +45,19 @@ impl Throttle {
         })
     }
 
-    /// Purpose: Records bytes written and sleeps when the rate exceeds the limit.
+    /// Summary: Records bytes written and sleeps when the rate exceeds the limit.
     ///
     /// Inputs: the number of bytes just written.
+    ///
     /// Outputs: `()` after any required sleep.
-    /// Ties to: copy loops to enforce throughput caps.
+    ///
     /// Side effects: Sleeps to enforce throughput limits.
-    /// Why: smooth throughput without complex token buckets.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: copy loops to enforce throughput caps.
+    ///
+    /// Why this exists: smooth throughput without complex token buckets.
     pub fn record(&mut self, bytes: u64) {
         self.written = self.written.saturating_add(bytes);
         let elapsed = self.start.elapsed();

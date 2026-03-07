@@ -1,43 +1,67 @@
-/// Purpose: Supplies the default cadence for periodic hash checks on stable files.
+/// Summary: Supplies the default cadence for periodic hash checks on stable files.
 ///
 /// Inputs: none.
+///
 /// Outputs: the number of stable cycles between hash checks.
-/// Ties to: the change detector to avoid frequent rehashing.
+///
 /// Side effects: None.
-/// Why: balance integrity validation with IO cost.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: the change detector to avoid frequent rehashing.
+///
+/// Why this exists: balance integrity validation with IO cost.
 pub(crate) fn default_hash_check_interval() -> u32 {
     5
 }
 
-/// Purpose: Supplies the default maximum number of plan items per cycle.
+/// Summary: Supplies the default maximum number of plan items per cycle.
 ///
 /// Inputs: none.
+///
 /// Outputs: the maximum allowed planned items per cycle.
-/// Ties to: planning limits to prevent runaway IO.
+///
 /// Side effects: None.
-/// Why: keep backup cycles bounded for predictable performance.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: planning limits to prevent runaway IO.
+///
+/// Why this exists: keep backup cycles bounded for predictable performance.
 pub(crate) fn default_max_plan_items() -> usize {
     20_000
 }
 
-/// Purpose: Supplies the default scan timeout in seconds.
+/// Summary: Supplies the default scan timeout in seconds.
 ///
 /// Inputs: none.
+///
 /// Outputs: the scan timeout in seconds.
-/// Ties to: filesystem scan timeouts.
+///
 /// Side effects: None.
-/// Why: prevent scans from hanging indefinitely on slow filesystems.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: filesystem scan timeouts.
+///
+/// Why this exists: prevent scans from hanging indefinitely on slow filesystems.
 pub(crate) fn default_scan_timeout_seconds() -> u64 {
     300
 }
 
-/// Purpose: Supplies the default scan capacity multiplier for scan result preallocation.
+/// Summary: Supplies the default scan capacity multiplier for scan result preallocation.
 ///
 /// Inputs: none.
+///
 /// Outputs: a multiplier applied to watched path count.
-/// Ties to: scan collection vector sizing.
+///
 /// Side effects: None.
-/// Why: reduce reallocations on large scans.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: scan collection vector sizing.
+///
+/// Why this exists: reduce reallocations on large scans.
 pub(crate) fn default_scan_capacity_multiplier() -> usize {
     16
 }

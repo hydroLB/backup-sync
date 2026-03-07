@@ -1,17 +1,23 @@
 import { correlationId } from './correlation';
-import { Config } from '../components/settings/types';
+import { Config } from '../domain/config';
 import { safeInvoke, wrapError } from './ipc';
 
 const FIXED_AUTOMATIC_INTERVAL_SECONDS = 30 * 60;
 
 /**
- * Purpose: Load the current configuration from the backend.
+ * Summary: Load the current configuration from the backend.
  *
  * Inputs: None.
+ *
  * Outputs: The current `Config` object.
- * Ties to: Settings screens and initial app bootstrap.
+ *
  * Side effects: Invokes IPC calls to the backend.
- * Why: Displays and edits configuration in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Settings screens and initial app bootstrap.
+ *
+ * Why this exists: Displays and edits configuration in the UI.
  */
 export async function loadConfig(): Promise<Config> {
   try {
@@ -22,18 +28,25 @@ export async function loadConfig(): Promise<Config> {
 }
 
 /**
- * Purpose: Save a configuration update to the backend.
+ * Summary: Save a configuration update to the backend.
  *
  * Inputs: `cfg` as the updated configuration object.
+ *
  * Outputs: Resolves when the save completes.
- * Ties to: Settings persistence workflows and config validation.
+ *
  * Side effects: Invokes IPC calls that persist configuration.
- * Why: Persists configuration changes from the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Settings persistence workflows and config validation.
+ *
+ * Why this exists: Persists configuration changes from the UI.
  */
 export async function saveConfig(cfg: Config): Promise<void> {
   try {
+    const nextConfig = { ...cfg, interval_seconds: FIXED_AUTOMATIC_INTERVAL_SECONDS };
     return await safeInvoke('save_config_cmd', {
-      cfg: { ...cfg, interval_seconds: FIXED_AUTOMATIC_INTERVAL_SECONDS },
+      cfg: nextConfig,
       correlationId: correlationId('save'),
     });
   } catch (error) {

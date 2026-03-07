@@ -1,26 +1,43 @@
+use backup_core::logging::redact_text;
 use tauri::async_runtime;
 use tauri::Manager;
+use tracing::{error, warn};
 
 mod actions;
 mod tray_menu;
 mod tray_tooltip;
 mod tuning;
 
-/// Purpose: Builds and runs the Tauri application with tray and command wiring.
+/// Summary: Builds and runs the Tauri application with tray and command wiring.
 ///
 /// Inputs: none.
+///
 /// Outputs: `Ok(())` when the Tauri runtime exits cleanly.
-/// Ties to: GUI startup and lifecycle hooks.
+///
 /// Side effects: Registers panic hooks, spawns background tasks, and starts the GUI runtime.
-/// Why: centralize GUI wiring in one launch routine that is shared by all binaries.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI startup and lifecycle hooks.
+///
+/// Why this exists: centralize GUI wiring in one launch routine that is shared by all binaries.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Log panics to stderr so unexpected failures are visible outside the UI.
-    std::panic::set_hook(Box::new(|info| {
-        eprintln!("[panic] {info}");
+    // Log panics with correlation metadata so crash reports can be grouped.
+    let panic_cid = crate::commands::correlation::cid("gui-panic", None);
+    let startup_cid = crate::commands::correlation::cid("gui-run", None);
+    std::panic::set_hook(Box::new(move |info| {
+        let panic_text = redact_text(&info.to_string());
+        error!(
+            cid = %panic_cid,
+            action = "panic",
+            panic = %panic_text,
+            "gui panic"
+        );
     }));
 
     let runtime = tuning::resolve_runtime_tuning();
     let tray_refresh = std::time::Duration::from_secs(runtime.tray_tooltip_refresh_seconds);
+    let action_state = actions::new_action_state();
 
     let builder = tauri::Builder::default();
 
@@ -35,6 +52,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .setup(move |app| {
+            let setup_cid = startup_cid.clone();
             // Keep tray tooltip updated with daemon status.
             let handle = app.app_handle();
             async_runtime::spawn(async move {
@@ -47,7 +65,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if runtime.gui_start_hidden {
                 // Hide on launch for users that want tray-first behavior.
                 if let Some(window) = app.get_window("main") {
-                    let _ = window.hide();
+                    if let Err(error) = window.hide() {
+                        warn!(
+                            cid = %setup_cid,
+                            error = %error,
+                            "app::run failed to hide main window during startup"
+                        );
+                    }
                 }
             } else {
                 actions::show_main_window(&app.app_handle());
@@ -55,8 +79,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .system_tray(tray_menu::build_tray())
-        .on_system_tray_event(actions::handle_tray_event)
-        .on_window_event(actions::handle_window_event)
+        .on_system_tray_event({
+            let action_state = action_state.clone();
+            move |app, event| actions::handle_tray_event(app, event, &action_state)
+        })
+        .on_window_event({
+            let action_state = action_state.clone();
+            move |event| actions::handle_window_event(event, &action_state)
+        })
         .invoke_handler(tauri::generate_handler![
             crate::commands::status::get_status,
             crate::commands::config::load_config_cmd,

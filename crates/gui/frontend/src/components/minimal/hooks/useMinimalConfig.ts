@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadConfig, saveConfig } from '../../../services/config';
-import { Config, Destination, WatchedPath } from '../../settings/types';
+import { Config, Destination, WatchedPath } from '../../../domain/config';
 import {
   enforceFixedAutomaticInterval,
   ensurePrimaryDestination,
@@ -23,17 +23,22 @@ type MinimalConfigState = {
   busy: boolean;
   setBusy: (busy: boolean) => void;
   setCfg: (cfg: Config | null) => void;
-  persist: (next: Config) => Promise<void>;
+  persist: (next: Config, successMessage?: string) => Promise<void>;
 };
 
 /**
  * Summary: Load, normalize, and persist config for the minimal UI.
  *
  * Inputs: `onEvent` handler for user-visible status and error messages.
+ *
  * Outputs: Config state plus derived primary destination and watched directory list.
+ *
  * Side effects: Reads and writes config via IPC-backed services.
+ *
  * Error handling: Emits actionable error messages via `onEvent`.
+ *
  * Ties to other methods: Used by `MinimalMain` and action hooks to centralize config handling.
+ *
  * Why this exists: Keep the minimal screen orchestration small and ensure config normalization is consistent.
  */
 export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
@@ -103,19 +108,24 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
    * Summary: Persist a full config object and update local state.
    *
    * Inputs: `next` config to write.
+   *
    * Outputs: None.
+   *
    * Side effects: Writes config to disk via IPC and updates local React state.
+   *
    * Error handling: Emits a user-facing save error via `onEvent`.
+   *
    * Ties to other methods: Called by schedule, destination, folder, and running handlers.
+   *
    * Why this exists: Keep save behavior uniform and ensure busy state is applied consistently.
    */
-  const persist = async (next: Config) => {
+  const persist = async (next: Config, successMessage = 'Saved.') => {
     try {
       setBusy(true);
       const normalized = enforceFixedAutomaticInterval(next);
       await saveConfig(normalized);
       setCfg(normalized);
-      onEvent('Saved.', 'ok');
+      onEvent(successMessage, 'ok');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`Save failed: ${reason}`, 'error');

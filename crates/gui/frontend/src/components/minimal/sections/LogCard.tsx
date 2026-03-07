@@ -15,10 +15,15 @@ type Props = {
  * Summary: Render the log tail in a modal popup for minimal mode.
  *
  * Inputs: Open state, busy/loading state, current tail text, and close/refresh handlers.
+ *
  * Outputs: Modal dialog element tree.
+ *
  * Side effects: Calls `onRefresh` for manual refresh and `onClose` for modal dismissal.
+ *
  * Error handling: Delegated to parent via handler.
+ *
  * Ties to other methods: Used by `MinimalMain` as the log popup surface.
+ *
  * Why this exists: Keep logs accessible without stretching the main dashboard layout.
  */
 export function LogCard({ open, busy, loading, tail, onRefresh, onClose }: Props) {

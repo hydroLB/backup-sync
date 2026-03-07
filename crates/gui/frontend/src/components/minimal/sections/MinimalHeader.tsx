@@ -1,4 +1,4 @@
-import { Config } from '../../settings/types';
+import { Config } from '../../../domain/config';
 import { Button } from '../../ui/Button';
 import { DEFAULT_AUTOMATIC_INTERVAL_MINUTES } from '../helpers/interval';
 
@@ -15,10 +15,15 @@ type Props = {
  * Summary: Render the minimal header, including running toggle and fixed automatic schedule summary.
  *
  * Inputs: Current config, busy flags, and header action handlers.
+ *
  * Outputs: Header React element tree.
+ *
  * Side effects: Calls provided handlers on user interaction.
+ *
  * Error handling: Delegated to parent via handlers.
+ *
  * Ties to other methods: Used by `MinimalMain` for header layout consistency.
+ *
  * Why this exists: Keep the primary experience Mac-like by removing schedule tuning from the main UI.
  */
 export function MinimalHeader({
@@ -62,13 +67,19 @@ export function MinimalHeader({
         </div>
       </div>
       <div className="hero-actions">
-        <div className="action-strip" aria-label="Header actions">
-          <Button tone="secondary" onClick={onToggleLog} disabled={busy}>
-            {showLog ? 'Hide log' : 'Show log'}
+        <div className="action-strip action-strip--compact" aria-label="Header actions">
+          <Button
+            tone="secondary"
+            size="sm"
+            onClick={onToggleLog}
+            disabled={busy}
+            title={showLog ? 'Hide recent activity log' : 'Open recent activity log'}
+            aria-label={showLog ? 'Hide activity log' : 'Open activity log'}
+          >
+            {showLog ? 'Hide activity' : 'Activity'}
           </Button>
         </div>
       </div>
     </div>
   );
 }
-

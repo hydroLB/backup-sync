@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use backup_core::{
     backup::versioned,
     fs::watching::{debounce::debounce_and_take, debounce_duration, DirtySet},
+    io::{run_with_policy, BlockingIoPolicy, CancellationFlag},
     Config, HashingTuning, StateStore, StoredState,
 };
 use std::collections::{HashMap, HashSet};
@@ -18,13 +19,19 @@ struct DestinationWriteHealth {
     message: String,
 }
 
-/// Purpose: Runs a full backup cycle including planning, safe mode checks, and execution.
+/// Summary: Runs a full backup cycle including planning, safe mode checks, and execution.
 ///
 /// Inputs: config, dirty set, state store, and shared state.
+///
 /// Outputs: `Ok(())` when the cycle completes without fatal errors.
-/// Ties to: the daemon scheduler loop.
+///
 /// Side effects: Reads filesystem metadata, performs backup IO, mutates state, and emits logs.
-/// Why: encapsulate the end to end backup cycle behavior.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: the daemon scheduler loop.
+///
+/// Why this exists: encapsulate the end to end backup cycle behavior.
 pub async fn run_cycle(
     cfg: &Config,
     dirty: &DirtySet,
@@ -223,13 +230,19 @@ enum ScanDecision<'a> {
     SkipClean { force_due_in: u64 },
 }
 
-/// Purpose: Decide whether the daemon should run a full versioned scan this cycle.
+/// Summary: Decide whether the daemon should run a full versioned scan this cycle.
 ///
 /// Inputs: watcher dirty count, current stored state, and config runtime tuning.
+///
 /// Outputs: a `ScanDecision` indicating whether to run the scan or skip it.
-/// Ties to: `run_cycle` and watcher-based scan skipping behavior.
+///
 /// Side effects: None.
-/// Why: watchers can often detect changes; skipping clean cycles avoids expensive full scans while still forcing periodic safety scans.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `run_cycle` and watcher-based scan skipping behavior.
+///
+/// Why this exists: watchers can often detect changes; skipping clean cycles avoids expensive full scans while still forcing periodic safety scans.
 fn decide_scan<'a>(
     dirty_count: usize,
     state: &StoredState,
@@ -279,13 +292,18 @@ fn decide_scan<'a>(
     }
 }
 
-/// Purpose: Drains the dirty set and returns a debounced count for metrics.
+/// Summary: Drains the dirty set and returns a debounced count for metrics.
 ///
 /// Inputs: config and dirty set.
+///
 /// Outputs: count of dirty paths drained since last call.
+///
 /// Side effects: Drains the dirty set.
+///
 /// Error handling: Never fails; returns 0 on errors.
+///
 /// Ties to other methods: Used by `run_cycle` for UI observability.
+///
 /// Why this exists: Preserve watcher metrics while decoupling from backup engine internals.
 async fn drain_dirty_count(cfg: &Config, dirty: &DirtySet) -> usize {
     if dirty.0.lock().is_empty() {
@@ -295,13 +313,18 @@ async fn drain_dirty_count(cfg: &Config, dirty: &DirtySet) -> usize {
     dirty_paths.len()
 }
 
-/// Purpose: Return the set of destination ids required by enabled watched paths.
+/// Summary: Return the set of destination ids required by enabled watched paths.
 ///
 /// Inputs: loaded config.
+///
 /// Outputs: a set of destination ids referenced by enabled watched entries.
+///
 /// Side effects: None.
+///
 /// Error handling: Never fails; returns an empty set when nothing is watched.
+///
 /// Ties to other methods: Used by destination health checks and write pause decisions.
+///
 /// Why this exists: The daemon should only pause writes for destinations that are actually in use.
 fn required_destination_ids(cfg: &Config) -> HashSet<&str> {
     cfg.watched
@@ -311,13 +334,18 @@ fn required_destination_ids(cfg: &Config) -> HashSet<&str> {
         .collect()
 }
 
-/// Purpose: Probe destinations required by watched paths to decide whether writes can proceed.
+/// Summary: Probe destinations required by watched paths to decide whether writes can proceed.
 ///
 /// Inputs: config and the set of required destination ids.
+///
 /// Outputs: a vector of per destination health results.
+///
 /// Side effects: May create directories under each destination to validate write readiness.
+///
 /// Error handling: Never panics; returns `ok=false` with contextual message when probing fails.
+///
 /// Ties to other methods: Used by `run_cycle` to pause writes when a destination is disconnected.
+///
 /// Why this exists: Detecting disconnected or unwritable destinations early avoids spamming engine errors and enables auto-resume.
 fn probe_required_destinations_for_write(
     cfg: &Config,
@@ -331,21 +359,28 @@ fn probe_required_destinations_for_write(
     needed_ids
         .iter()
         .filter_map(|id| by_id.get(id).copied())
-        .map(|d| probe_destination_for_write(d))
+        .map(|d| probe_destination_for_write(cfg, d))
         .collect()
 }
 
-/// Purpose: Probe a single destination for “write-ready” status.
+/// Summary: Probe a single destination for “write-ready” status.
 ///
 /// Inputs: destination configuration.
+///
 /// Outputs: `DestinationWriteHealth` with `ok=true` when the destination can be written to.
+///
 /// Side effects: May create `.backup_sync` folder under the destination path.
+///
 /// Error handling: Returns a non-OK probe with a clear message on IO failures.
+///
 /// Ties to other methods: Used by `probe_required_destinations_for_write` and `run_cycle`.
+///
 /// Why this exists: Create-dir failures are the most common symptom of disconnected drives or permission issues.
 fn probe_destination_for_write(
+    cfg: &Config,
     d: &backup_core::config::model::Destination,
 ) -> DestinationWriteHealth {
+    let io_policy = BlockingIoPolicy::from_config(cfg);
     let root: &Path = d.path.as_path();
     if root.as_os_str().is_empty() {
         return DestinationWriteHealth {
@@ -377,7 +412,17 @@ fn probe_destination_for_write(
     }
 
     let probe_dir = root.join(".backup_sync");
-    if let Err(e) = fs::create_dir_all(&probe_dir) {
+    if let Err(e) = run_with_policy(
+        "daemon::runtime::probe_destination_for_write create probe directory",
+        &io_policy,
+        CancellationFlag::none(),
+        || {
+            fs::create_dir_all(&probe_dir).map_err(|error| {
+                anyhow::anyhow!(error)
+                    .context("daemon::runtime::probe_destination_for_write failed create_dir_all")
+            })
+        },
+    ) {
         return DestinationWriteHealth {
             id: d.id.clone(),
             ok: false,
@@ -391,13 +436,19 @@ fn probe_destination_for_write(
     }
 }
 
-/// Purpose: Applies safe mode behavior and persists state when writes are skipped.
+/// Summary: Applies safe mode behavior and persists state when writes are skipped.
 ///
 /// Inputs: config, plan, state, store, correlation id, and shared state handle.
+///
 /// Outputs: `Ok(true)` when safe mode short-circuits the cycle.
-/// Ties to: safe mode enforcement and state persistence.
+///
 /// Side effects: Mutates stored state and persists it when safe mode is active.
-/// Why: prevent writes while still updating run metadata.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: safe mode enforcement and state persistence.
+///
+/// Why this exists: prevent writes while still updating run metadata.
 pub(crate) async fn apply_safe_mode(
     cfg: &Config,
     state: &mut StoredState,
@@ -425,13 +476,19 @@ pub(crate) async fn apply_safe_mode(
     Ok(false)
 }
 
-/// Purpose: Runs a verification cycle and persists verification results.
+/// Summary: Runs a verification cycle and persists verification results.
 ///
 /// Inputs: the state store and shared state handle.
+///
 /// Outputs: `Ok(())` after persisting verification updates.
-/// Ties to: scheduled verification flows.
+///
 /// Side effects: Reads backup files for hashing, mutates state, and writes state to disk.
-/// Why: keep verification results up to date for UI and logs.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: scheduled verification flows.
+///
+/// Why this exists: keep verification results up to date for UI and logs.
 pub async fn run_verify_cycle(
     cfg: &Config,
     store: &StateStore,
@@ -534,13 +591,19 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    /// Purpose: Ensures the scan decision runs on first cycle even when no dirty paths exist.
+    /// Summary: Ensures the scan decision runs on first cycle even when no dirty paths exist.
     ///
     /// Inputs: A default stored state with no `last_run_ts`.
+    ///
     /// Outputs: A `RunFullScan` decision.
-    /// Ties to: startup cycle behavior.
+    ///
     /// Side effects: None.
-    /// Why: the first cycle must establish baseline state even if watchers have not fired yet.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: startup cycle behavior.
+    ///
+    /// Why this exists: the first cycle must establish baseline state even if watchers have not fired yet.
     fn decide_scan_runs_on_first_cycle() {
         let mut cfg = Config {
             backup_root: std::path::PathBuf::from("/tmp"),
@@ -562,9 +625,11 @@ mod tests {
             destinations: vec![],
         };
         cfg.runtime.force_full_scan_interval_cycles = 24;
-        let mut state = StoredState::default();
-        state.start_ts = Some(10);
-        state.last_run_ts = Some(1);
+        let state = StoredState {
+            start_ts: Some(10),
+            last_run_ts: Some(1),
+            ..StoredState::default()
+        };
         let decision = decide_scan(0, &state, &cfg, false);
         assert!(
             matches!(decision, ScanDecision::RunFullScan { .. }),
@@ -573,13 +638,19 @@ mod tests {
     }
 
     #[test]
-    /// Purpose: Ensures clean cycles are skipped until the forced full-scan interval is due.
+    /// Summary: Ensures clean cycles are skipped until the forced full-scan interval is due.
     ///
     /// Inputs: A stored state with a prior run, no dirty paths, and a configured interval.
+    ///
     /// Outputs: Skip decision before due and run decision when due.
-    /// Ties to: watcher-based scan skipping.
+    ///
     /// Side effects: None.
-    /// Why: avoid expensive scans when nothing changed while still providing a periodic safety scan.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: watcher-based scan skipping.
+    ///
+    /// Why this exists: avoid expensive scans when nothing changed while still providing a periodic safety scan.
     fn decide_scan_skips_clean_until_due() {
         let mut cfg = Config {
             backup_root: std::path::PathBuf::from("/tmp"),
@@ -601,8 +672,10 @@ mod tests {
             destinations: vec![],
         };
         cfg.runtime.force_full_scan_interval_cycles = 3;
-        let mut state = StoredState::default();
-        state.last_run_ts = Some(1);
+        let mut state = StoredState {
+            last_run_ts: Some(1),
+            ..StoredState::default()
+        };
 
         state.cycles_since_full_scan = 0;
         let d0 = decide_scan(0, &state, &cfg, false);
@@ -618,13 +691,19 @@ mod tests {
     }
 
     #[test]
-    /// Purpose: Ensures destination recovery forces a full scan even when nothing is dirty.
+    /// Summary: Ensures destination recovery forces a full scan even when nothing is dirty.
     ///
     /// Inputs: Clean cycle state with `force_full_scan=true`.
+    ///
     /// Outputs: A `RunFullScan` decision.
-    /// Ties to: destination health auto-resume behavior.
+    ///
     /// Side effects: None.
-    /// Why: watchers do not track destination availability; a recovery must trigger a scan so backups resume promptly.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: destination health auto-resume behavior.
+    ///
+    /// Why this exists: watchers do not track destination availability; a recovery must trigger a scan so backups resume promptly.
     fn decide_scan_forced_on_destination_recovery() {
         let cfg = Config {
             backup_root: std::path::PathBuf::from("/tmp"),
@@ -653,13 +732,19 @@ mod tests {
         );
     }
 
-    /// Purpose: Runs apply_safe_mode with a configured safe_mode setting and returns results.
+    /// Summary: Runs apply_safe_mode with a configured safe_mode setting and returns results.
     ///
     /// Inputs: the desired safe_mode flag.
+    ///
     /// Outputs: the resulting state and skip flag.
-    /// Ties to: safe mode behavior tests.
+    ///
     /// Side effects: None.
-    /// Why: keep test setup for safe mode behavior consistent.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: safe mode behavior tests.
+    ///
+    /// Why this exists: keep test setup for safe mode behavior consistent.
     async fn apply_safe_mode_case(safe_mode: bool) -> (StoredState, bool) {
         let _tmp = tempdir().expect("cycle::apply_safe_mode_case failed to create temp dir");
         let root = _tmp.path().to_path_buf();
@@ -703,13 +788,19 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Purpose: Ensures safe mode short-circuits execution and updates state.
+    /// Summary: Ensures safe mode short-circuits execution and updates state.
     ///
     /// Inputs: a safe_mode enabled config.
+    ///
     /// Outputs: a skipped flag and updated state fields.
-    /// Ties to: safe mode enforcement.
+    ///
     /// Side effects: None.
-    /// Why: avoid writes while reporting safe mode status.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: safe mode enforcement.
+    ///
+    /// Why this exists: avoid writes while reporting safe mode status.
     async fn safe_mode_short_circuits_and_sets_state() {
         let (state, skipped) = apply_safe_mode_case(true).await;
         assert!(skipped, "safe mode should short-circuit execution");
@@ -719,13 +810,19 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Purpose: Ensures normal execution continues when safe mode is disabled.
+    /// Summary: Ensures normal execution continues when safe mode is disabled.
     ///
     /// Inputs: a safe_mode disabled config.
+    ///
     /// Outputs: a skip flag set to false.
-    /// Ties to: safe mode enforcement.
+    ///
     /// Side effects: None.
-    /// Why: allow backups when safe mode is off.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: safe mode enforcement.
+    ///
+    /// Why this exists: allow backups when safe mode is off.
     async fn safe_mode_disabled_continues() {
         let (_state, skipped) = apply_safe_mode_case(false).await;
         assert!(!skipped, "should continue when safe mode disabled");

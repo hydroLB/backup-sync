@@ -12,7 +12,7 @@ Backup Sync is a simple desktop backup app for space efficient, versioned backup
 
 Note on engines:
 - The production workflow uses the **versioned engine** under `crates/core/src/backup/versioned`.
-- The original scan plan execute file copy engine is retained behind the `legacy-engine` feature for reference and optional benchmarking, but is not used by the daemon, CLI, or GUI.
+- The original scan plan execute file copy engine remains in `crates/core/src/backup/{planning,execution,retention}` for internal tests and reference, but the daemon, CLI, and GUI run on the versioned engine.
 
 ## System overview
 - By default every 30 minutes (configurable), the daemon scans each configured folder and builds a snapshot manifest.
@@ -22,7 +22,36 @@ Note on engines:
 - Restore reconstructs a selected version either to a new directory or in place (in place removes files not present in the selected version).
 - When the backup destination is disconnected or unavailable, the daemon pauses writes, reports the issue, and auto-resumes when the destination returns.
 
-Details: see `docs/storage.md` and `docs/ui.md`.
+Details: see [`docs/storage.md`](docs/storage.md) and [`docs/ui.md`](docs/ui.md).
+
+## Project docs
+- Contributor guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Code ownership: [`.github/CODEOWNERS`](.github/CODEOWNERS)
+- Environment template: [`.env.example`](.env.example)
+- Standards: [`docs/standards.md`](docs/standards.md)
+- Module boundaries: [`docs/module-boundaries.md`](docs/module-boundaries.md)
+- Public API surface: [`docs/public-api.md`](docs/public-api.md)
+- Deprecation policy: [`docs/deprecation-policy.md`](docs/deprecation-policy.md)
+- Operability primitives: [`docs/operability.md`](docs/operability.md)
+- Incident runbooks index: [`docs/runbooks/README.md`](docs/runbooks/README.md)
+- Runbook: destination offline: [`docs/runbooks/destination-offline.md`](docs/runbooks/destination-offline.md)
+- Runbook: verify failure: [`docs/runbooks/verify-failure.md`](docs/runbooks/verify-failure.md)
+- Runbook: corruption suspicion: [`docs/runbooks/corruption-suspicion.md`](docs/runbooks/corruption-suspicion.md)
+- Runbook: stuck daemon: [`docs/runbooks/stuck-daemon.md`](docs/runbooks/stuck-daemon.md)
+- Threat model notes: [`docs/threat-model.md`](docs/threat-model.md)
+- Security runbook: [`docs/security-runbook.md`](docs/security-runbook.md)
+- Architecture narrative: [`docs/architecture.md`](docs/architecture.md)
+- ADR index: [`docs/adr/README.md`](docs/adr/README.md)
+- Design principles: [`docs/design-principles.md`](docs/design-principles.md)
+- Risk register: [`docs/risk-register.md`](docs/risk-register.md)
+- Delivery roadmap: [`docs/roadmap.md`](docs/roadmap.md)
+- Branch protection policy: [`docs/branch-protection.md`](docs/branch-protection.md)
+- Release process: [`docs/release.md`](docs/release.md)
+- Release notes template: [`docs/templates/release-notes.md`](docs/templates/release-notes.md)
+- Performance tuning guide: [`docs/performance-tuning.md`](docs/performance-tuning.md)
+- Storage architecture: [`docs/storage.md`](docs/storage.md)
+- UI architecture: [`docs/ui.md`](docs/ui.md)
 
 ## Setup
 1. Install Rust stable, Node 18 or newer, and npm.
@@ -57,6 +86,11 @@ Quickstart (dev):
 
 Config file path:
 - `~/.config/backup_sync/config.toml`
+
+Environment layering for startup config:
+- `BACKUP_SYNC_CONFIG` overrides the config file path.
+- `BACKUP_SYNC_INTERVAL_SECONDS` overrides `interval_seconds`.
+- `BACKUP_SYNC_SAFE_MODE` overrides `safe_mode` (`true/false/1/0/yes/no/on/off`).
 
 State file path:
 - `~/.config/backup_sync/state.json`
@@ -143,12 +177,19 @@ max_backups_per_file = 10
 - Performance baselines are recorded by `scripts/perf/record_baseline.sh` into `docs/perf-baseline.json`.
 - Regression checks run via `scripts/perf/check_baseline.sh` and are enforced in CI.
 - Hot paths are exercised in `crates/core/src/bin/perf_guard.rs`.
+- IPC critical-flow load checks run via `make perf-ipc-load` and are included in `make perf-check`.
+- Resource tuning guidance is documented in [`docs/performance-tuning.md`](docs/performance-tuning.md).
 
 ## Testing
 - Backend unit and integration tests: `cargo test -p backup_core -p daemon -p cli`
 - Frontend unit tests: `npm --prefix crates/gui/frontend test`
 - End to end smoke test: `cargo test -p backup_core --test e2e_smoke`
 - Format and lint: `cargo fmt --all`, `cargo clippy --all-targets --all-features -- -D warnings`, `npm --prefix crates/gui/frontend run lint`
+- Operability policy enforcement: `make operability-check`
+- Lockfile hygiene check: `make lockfile-check`
+- Cargo deny policy check: `make deny`
+- Security gate bundle: `make security-check`
+- Secret scanning (working tree + full history): `make secrets`
 - Perf guard: `make perf-check`
 - Full quality gate run: `make ci` (format, lint, typecheck, tests with coverage, perf guard, security audits)
 
@@ -158,10 +199,15 @@ max_backups_per_file = 10
 - If verification reports issues, run `backup-sync verify` and review recent logs.
 - For detailed diagnostics, export a doctor report from the UI or CLI.
 - If the dev server port conflicts with another program, set `BACKUP_SYNC_DEV_PORT` or let Vite pick the repo-specific default in `crates/gui/frontend/vite.config.ts`.
+- Incident playbooks:
+  - destination offline: `docs/runbooks/destination-offline.md`
+  - verify failure: `docs/runbooks/verify-failure.md`
+  - corruption suspicion: `docs/runbooks/corruption-suspicion.md`
+  - stuck daemon: `docs/runbooks/stuck-daemon.md`
 
 ## Release notes
 - Changes are tracked in `CHANGELOG.md`.
-- Versioning and tagging guidance lives in `docs/release.md`.
+- Versioning and tagging guidance lives in [`docs/release.md`](docs/release.md).
 
 ## Notable code paths
 This system emphasizes bounded IO, explicit config validation, and performance guardrails that stay visible in code review.

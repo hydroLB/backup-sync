@@ -1,13 +1,19 @@
-import { Config } from '../components/settings/types';
+import { Config } from '../domain/config';
 
 /**
- * Purpose: Status payload returned by the backend.
+ * Summary: Status payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed status object for the UI.
- * Ties to: status panels and activity feeds.
+ *
  * Side effects: None.
- * Why: keep status data strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: status panels and activity feeds.
+ *
+ * Why this exists: keep status data strongly typed in the frontend.
  */
 export type StatusDto = {
   last_run_ts: number | null;
@@ -43,13 +49,19 @@ export type StatusDto = {
 };
 
 /**
- * Purpose: Safety warning payload returned by the backend.
+ * Summary: Safety warning payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed warning object for UI display.
- * Ties to: minimal warning banners and tray tooltip state.
+ *
  * Side effects: None.
- * Why: keep safety warnings strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: minimal warning banners and tray tooltip state.
+ *
+ * Why this exists: keep safety warnings strongly typed in the frontend.
  */
 export type SafetyWarningDto = {
   ts: number;
@@ -59,13 +71,19 @@ export type SafetyWarningDto = {
 };
 
 /**
- * Purpose: Destination status payload returned by the backend.
+ * Summary: Destination status payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed destination status object.
- * Ties to: status panels and destination cards.
+ *
  * Side effects: None.
- * Why: keep destination metadata strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: status panels and destination cards.
+ *
+ * Why this exists: keep destination metadata strongly typed in the frontend.
  */
 export type DestinationStatus = {
   id: string;
@@ -78,13 +96,19 @@ export type DestinationStatus = {
 };
 
 /**
- * Purpose: Service status payload returned by the backend.
+ * Summary: Service status payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed service status object.
- * Ties to: service banners and diagnostics.
+ *
  * Side effects: None.
- * Why: keep service metadata strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: service banners and diagnostics.
+ *
+ * Why this exists: keep service metadata strongly typed in the frontend.
  */
 export type ServiceStatusDto = {
   installed: boolean;
@@ -96,13 +120,19 @@ export type ServiceStatusDto = {
 };
 
 /**
- * Purpose: Simulation result payload returned by the backend.
+ * Summary: Simulation result payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed simulation result.
- * Ties to: simulation previews.
+ *
  * Side effects: None.
- * Why: keep simulation output strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: simulation previews.
+ *
+ * Why this exists: keep simulation output strongly typed in the frontend.
  */
 export type SimulationResult = {
   items: number;
@@ -112,13 +142,19 @@ export type SimulationResult = {
 };
 
 /**
- * Purpose: Verify result payload returned by the backend.
+ * Summary: Verify result payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed verification result.
- * Ties to: verification status displays.
+ *
  * Side effects: None.
- * Why: keep verification output strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: verification status displays.
+ *
+ * Why this exists: keep verification output strongly typed in the frontend.
  */
 export type VerifyResult = {
   ok: number;
@@ -182,24 +218,36 @@ export type RestoreFilesArgs = {
 };
 
 /**
- * Purpose: Destination validation payload returned by the backend.
+ * Summary: Destination validation payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed destination check result.
- * Ties to: destination pickers.
+ *
  * Side effects: None.
- * Why: keep destination validation output strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: destination pickers.
+ *
+ * Why this exists: keep destination validation output strongly typed in the frontend.
  */
 export type DestinationCheck = { writable: boolean; free_bytes: number | null; message: string };
 
 /**
- * Purpose: Access probe payload returned by the backend.
+ * Summary: Access probe payload returned by the backend.
  *
  * Inputs: deserialized from IPC responses.
+ *
  * Outputs: a typed access probe structure.
- * Ties to: access tests and diagnostics views.
+ *
  * Side effects: None.
- * Why: keep access test results strongly typed in the frontend.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: access tests and diagnostics views.
+ *
+ * Why this exists: keep access test results strongly typed in the frontend.
  */
 export type AccessProbe = {
   destination_writable: boolean;
@@ -210,13 +258,19 @@ export type AccessProbe = {
 };
 
 /**
- * Purpose: Watched-path issue returned by hardening checks.
+ * Summary: Watched-path issue returned by hardening checks.
  *
  * Inputs: Deserialized from IPC.
+ *
  * Outputs: A typed issue object suitable for UI display.
- * Ties to: First-run hardening wizard.
+ *
  * Side effects: None.
- * Why: Make hardening failures actionable and precise.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: First-run hardening wizard.
+ *
+ * Why this exists: Make hardening failures actionable and precise.
  */
 export type HardeningWatchedIssue = {
   path: string;
@@ -225,13 +279,19 @@ export type HardeningWatchedIssue = {
 };
 
 /**
- * Purpose: Destination hardening result returned by hardening checks.
+ * Summary: Destination hardening result returned by hardening checks.
  *
  * Inputs: Deserialized from IPC.
+ *
  * Outputs: A typed destination result.
- * Ties to: First-run hardening wizard.
+ *
  * Side effects: None.
- * Why: Surface which destination is blocking scheduling.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: First-run hardening wizard.
+ *
+ * Why this exists: Surface which destination is blocking scheduling.
  */
 export type HardeningDestinationResult = {
   id: string;
@@ -243,13 +303,19 @@ export type HardeningDestinationResult = {
 };
 
 /**
- * Purpose: Snapshot capability result returned by hardening checks.
+ * Summary: Snapshot capability result returned by hardening checks.
  *
  * Inputs: Deserialized from IPC.
+ *
  * Outputs: A typed snapshot result.
- * Ties to: First-run hardening wizard.
+ *
  * Side effects: None.
- * Why: Allow optional validation of snapshot support before enabling scheduling.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: First-run hardening wizard.
+ *
+ * Why this exists: Allow optional validation of snapshot support before enabling scheduling.
  */
 export type HardeningSnapshotResult = {
   checked: boolean;
@@ -258,13 +324,19 @@ export type HardeningSnapshotResult = {
 };
 
 /**
- * Purpose: Hardening report returned by the backend.
+ * Summary: Hardening report returned by the backend.
  *
  * Inputs: Deserialized from IPC.
+ *
  * Outputs: A typed hardening report.
- * Ties to: First-run wizard gating in minimal/settings UIs.
+ *
  * Side effects: None.
- * Why: Scheduling should only be enabled once prerequisites are satisfied.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: First-run wizard gating in minimal/settings UIs.
+ *
+ * Why this exists: Scheduling should only be enabled once prerequisites are satisfied.
  */
 export type HardeningReport = {
   ok: boolean;
@@ -276,12 +348,18 @@ export type HardeningReport = {
 };
 
 /**
- * Purpose: Config payload that already satisfies validation rules.
+ * Summary: Config payload that already satisfies validation rules.
  *
  * Inputs: loaded or validated config objects.
+ *
  * Outputs: a strongly typed config alias.
- * Ties to: settings state and validation hooks.
+ *
  * Side effects: None.
- * Why: document intent when a config is known to be valid.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: settings state and validation hooks.
+ *
+ * Why this exists: document intent when a config is known to be valid.
  */
 export type ConfigWithValidation = Config;

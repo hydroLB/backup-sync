@@ -68,12 +68,30 @@ pub(crate) const STORE_SCHEMA_VERSION: u32 = 1;
  * Summary: Best-effort directory fsync helper for crash-consistent commits.
  *
  * Inputs: `path` directory path to sync.
+ *
  * Outputs: `Ok(())` when the directory metadata is durably flushed.
+ *
  * Side effects: Opens a directory handle and invokes `sync_all` on it.
+ *
  * Error handling: On Unix, returns contextual errors; on non-Unix, it is a no-op.
+ *
  * Ties to other methods: Used by `create_dir_all_durable`, `write_json_atomic_durable`, and `write_blob_durable`.
+ *
  * Why this exists: Atomic rename is not durable across power loss without syncing the parent directory.
  */
+/// Summary: sync_dir orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_family = "unix")]
 fn sync_dir(path: &Path) -> Result<()> {
     let dir = fs::File::open(path)
@@ -87,12 +105,30 @@ fn sync_dir(path: &Path) -> Result<()> {
  * Summary: Best-effort directory fsync helper for crash-consistent commits.
  *
  * Inputs: `path` directory path to sync.
+ *
  * Outputs: `Ok(())` always.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `create_dir_all_durable`, `write_json_atomic_durable`, and `write_blob_durable`.
+ *
  * Why this exists: Some platforms do not support opening directories with `std::fs::File` reliably.
  */
+/// Summary: sync_dir orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(not(target_family = "unix"))]
 fn sync_dir(_path: &Path) -> Result<()> {
     Ok(())
@@ -102,12 +138,30 @@ fn sync_dir(_path: &Path) -> Result<()> {
  * Summary: Create a directory tree and fsync its parent directories for durability.
  *
  * Inputs: `path` directory to create; `durability_root` root directory to stop syncing at.
+ *
  * Outputs: `Ok(())` when the directory exists and parent entries are durably flushed.
+ *
  * Side effects: Creates directories and performs directory fsync operations.
+ *
  * Error handling: Returns contextual errors when create or sync steps fail.
+ *
  * Ties to other methods: Used to prepare `blobs_root` and `manifests_root` before durable writes.
+ *
  * Why this exists: Directory creation and atomic renames are not crash-safe without syncing parents.
  */
+/// Summary: create_dir_all_durable orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn create_dir_all_durable(path: &Path, durability_root: &Path) -> Result<()> {
     if path != durability_root && !path.starts_with(durability_root) {
         anyhow::bail!(
@@ -151,11 +205,15 @@ fn create_dir_all_durable(path: &Path, durability_root: &Path) -> Result<()> {
  * Summary: Retry helper that runs an operation with backoff and optional overall timeout.
  *
  * Inputs: `label` used for error context, `timeout_seconds` as an overall time bound, `retry_delays`
- * as backoff schedule, and `op` as the fallible operation.
+ *
  * Outputs: On success, returns `(value, attempts_used)`. On failure, returns the last error.
+ *
  * Side effects: Sleeps between attempts when retries are configured.
+ *
  * Error handling: Preserves the last error and adds context including attempt count and timeout status.
+ *
  * Ties to other methods: Used by file hashing, blob writing, and metadata reads for glitch resilience.
+ *
  * Why this exists: Make transient IO failures first-class without failing an entire backup cycle.
  */
 fn retry_with_backoff<T, F>(
@@ -194,6 +252,19 @@ where
         .with_context(|| format!("{label} failed after {max_attempts} attempts"))
 }
 
+/// Summary: run_backup_cycle orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
     let destinations_by_id: HashMap<&str, &Destination> = cfg
         .destinations
@@ -242,12 +313,30 @@ pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
  * Summary: Removes a kept safety version (pending or pinned baseline) for a watched source.
  *
  * Inputs: Destination root containing the versioned store and the watched source path.
+ *
  * Outputs: `Ok(Some(version_id))` when a kept version was removed, `Ok(None)` when none existed.
+ *
  * Side effects: Updates `index.json`, deletes the pinned manifest file, and runs blob GC.
+ *
  * Error handling: Returns contextual errors for index IO/serialization and manifest deletion failures.
+ *
  * Ties to other methods: Clears pins set by `maybe_pin_large_deletion_baseline` and relies on `gc_unreferenced_blobs`.
+ *
  * Why this exists: Let users explicitly drop the extra baseline when a shrink was expected.
  */
+/// Summary: remove_kept_safety_version orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn remove_kept_safety_version(
     destination_root: &Path,
     source_path: &Path,
@@ -291,7 +380,13 @@ pub fn remove_kept_safety_version(
             manifest_path
         )
     })?;
-    let _ = sync_dir(&manifests_root);
+    if let Err(error) = sync_dir(&manifests_root) {
+        tracing::warn!(
+            path = %redact_path(&manifests_root),
+            error = %error,
+            "versioned::remove_kept_safety_version failed syncing manifests directory"
+        );
+    }
     gc_unreferenced_blobs(&store_root, &blobs_root)?;
 
     Ok(Some(kept))
@@ -301,12 +396,30 @@ pub fn remove_kept_safety_version(
  * Summary: Compute a stable "size" summary for a manifest for safety comparisons.
  *
  * Inputs: A manifest representing a watched file or directory state.
+ *
  * Outputs: `ManifestSize` containing file count and total file bytes.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `maybe_pin_large_deletion_baseline` to detect large shrink events.
+ *
  * Why this exists: Provide a deterministic, cheap metric to detect suspicious mass deletions.
  */
+/// Summary: manifest_size orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn manifest_size(manifest: &Manifest) -> ManifestSize {
     let mut out = ManifestSize::default();
     for e in manifest.entries.values() {
@@ -323,12 +436,30 @@ fn manifest_size(manifest: &Manifest) -> ManifestSize {
  * Summary: Compute the maximum shrink ratio between two manifest sizes.
  *
  * Inputs: previous and next manifest size summaries.
+ *
  * Outputs: Optional shrink ratio in `[0.0, 1.0]` when a baseline is available.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `maybe_pin_large_deletion_baseline`.
+ *
  * Why this exists: Detect suspicious deletions using both byte and file-count heuristics.
  */
+/// Summary: shrink_ratio orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn shrink_ratio(prev: ManifestSize, next: ManifestSize) -> Option<f64> {
     let bytes_ratio = if prev.file_bytes > 0 && next.file_bytes <= prev.file_bytes {
         (prev.file_bytes - next.file_bytes) as f64 / prev.file_bytes as f64
@@ -351,12 +482,30 @@ fn shrink_ratio(prev: ManifestSize, next: ManifestSize) -> Option<f64> {
  * Summary: Pin a pre-change version when a watched path shrinks dramatically.
  *
  * Inputs: Config, watched path, previous manifest, next manifest, and a mutable version index.
+ *
  * Outputs: A `SafetyWarning` when pinning occurred; otherwise `None`.
+ *
  * Side effects: Mutates the index to set `safety_pinned_version_id` for retention.
+ *
  * Error handling: Best-effort, returns `None` when required metadata is unavailable.
+ *
  * Ties to other methods: Called by `backup_one_folder` before pruning, and persisted via `write_index`.
+ *
  * Why this exists: Prevent silent "bad runs" from pruning the last known-good full version.
  */
+/// Summary: maybe_pin_large_deletion_baseline orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn maybe_pin_large_deletion_baseline(
     cfg: &Config,
     watched: &WatchedPath,
@@ -370,7 +519,7 @@ fn maybe_pin_large_deletion_baseline(
     if had_read_failures {
         return (None, false);
     }
-    if !(threshold > 0.0) {
+    if threshold <= 0.0 {
         return (None, false);
     }
 
@@ -487,10 +636,15 @@ fn maybe_pin_large_deletion_baseline(
 /// Summary: Simulate a versioned backup cycle without writing to the destination store.
 ///
 /// Inputs: a validated config with watched paths and destinations.
+///
 /// Outputs: a `SimulationSummary` describing what would change and what would be written.
+///
 /// Side effects: Reads filesystem metadata and file contents for hashing; reads existing store manifests/blobs.
+///
 /// Error handling: Returns contextual errors for invalid config references, scan/hashing failures, and store reads.
+///
 /// Ties to other methods: Mirrors the scan and equivalence logic used by `run_backup_cycle` and `backup_one_folder`.
+///
 /// Why this exists: Provide a safe preview of changes and expected IO before running a real backup.
 pub fn simulate_backup_cycle(cfg: &Config) -> Result<SimulationSummary> {
     let sample_limit = cfg.runtime.simulation_sample_limit;
@@ -500,10 +654,15 @@ pub fn simulate_backup_cycle(cfg: &Config) -> Result<SimulationSummary> {
 /// Summary: Simulate a versioned backup cycle with an explicit sample limit override.
 ///
 /// Inputs: config and a maximum number of sample paths to return.
+///
 /// Outputs: a `SimulationSummary` describing planned changes.
+///
 /// Side effects: Same as `simulate_backup_cycle`.
+///
 /// Error handling: Same as `simulate_backup_cycle`.
+///
 /// Ties to other methods: Used by tests and callers that need a smaller sample cap.
+///
 /// Why this exists: Allow deterministic and bounded simulation output.
 pub fn simulate_backup_cycle_with_sample_limit(
     cfg: &Config,
@@ -583,6 +742,19 @@ pub fn simulate_backup_cycle_with_sample_limit(
     Ok(summary)
 }
 
+/// Summary: backup_one_folder orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn backup_one_folder(
     cfg: &Config,
     watched: &WatchedPath,
@@ -812,7 +984,7 @@ fn backup_one_folder(
             protected.push(pinned);
         }
         if let Some(pending) = index.safety_pending_version_id.as_deref() {
-            if !protected.iter().any(|p| *p == pending) {
+            if !protected.contains(&pending) {
                 protected.push(pending);
             }
         }
@@ -821,7 +993,7 @@ fn backup_one_folder(
             let remove_pos = index
                 .versions
                 .iter()
-                .position(|v| !protected.iter().any(|p| *p == v.id.as_str()));
+                .position(|v| !protected.contains(&v.id.as_str()));
             let Some(pos) = remove_pos else { break };
             pruned.push(index.versions.remove(pos));
         }
@@ -838,15 +1010,42 @@ fn backup_one_folder(
     if !pruned.is_empty() {
         for v in pruned.iter() {
             let path = manifests_root.join(format!("{}.json", v.id));
-            let _ = fs::remove_file(&path);
+            if let Err(error) = fs::remove_file(&path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(
+                        path = %redact_path(&path),
+                        error = %error,
+                        "versioned::backup_folder failed removing pruned manifest"
+                    );
+                }
+            }
         }
-        let _ = sync_dir(&manifests_root);
+        if let Err(error) = sync_dir(&manifests_root) {
+            tracing::warn!(
+                path = %redact_path(&manifests_root),
+                error = %error,
+                "versioned::backup_folder failed syncing manifests directory after prune"
+            );
+        }
         gc_unreferenced_blobs(&store_root, &blobs_root)?;
     }
 
     Ok(written)
 }
 
+/// Summary: diff_for_simulation orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn diff_for_simulation(
     watched: &WatchedPath,
     prev: Option<&Manifest>,
@@ -865,9 +1064,9 @@ fn diff_for_simulation(
         let change = match prev.and_then(|p| p.entries.get(k)) {
             None => Some('+'),
             Some(prev_e) => {
-                if prev_e.kind != entry.kind {
-                    Some('~')
-                } else if entry.kind == ManifestEntryKind::File && prev_e.sha256 != entry.sha256 {
+                if prev_e.kind != entry.kind
+                    || (entry.kind == ManifestEntryKind::File && prev_e.sha256 != entry.sha256)
+                {
                     Some('~')
                 } else {
                     None
@@ -925,6 +1124,19 @@ fn diff_for_simulation(
     )
 }
 
+/// Summary: format_change_sample orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn format_change_sample(prefix: char, watched: &WatchedPath, rel_path: &str) -> String {
     let full = match watched.kind {
         WatchedKind::File => watched.path.clone(),
@@ -944,12 +1156,30 @@ mod tests {
      * Summary: Build a minimal config for versioned backup tests.
      *
      * Inputs: Source and destination paths and keep versions count.
+     *
      * Outputs: A config suitable for calling `run_backup_cycle`.
+     *
      * Side effects: None.
+     *
      * Error handling: Propagates default config creation failures.
+     *
      * Ties to other methods: Used by durability and pruning tests in this module.
+     *
      * Why this exists: Avoid duplicating verbose config initialization in each test.
      */
+    /// Summary: test_config orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn test_config(source: &Path, destination: &Path, keep_versions: usize) -> Result<Config> {
         let mut cfg = config_defaults()?;
         cfg.backup_root = destination.to_path_buf();
@@ -974,13 +1204,31 @@ mod tests {
      * Summary: Ensure pruning does not delete manifests unless the index commit succeeds.
      *
      * Inputs: None.
+     *
      * Outputs: None.
+     *
      * Side effects: Creates temp directories, writes files, runs backups, and toggles permissions.
+     *
      * Error handling: Fails the test with actionable context on unexpected backup behavior.
+     *
      * Ties to other methods: Exercises `backup_one_folder` prune pipeline and `write_index` durability.
+     *
      * Why this exists: A crash or write failure during `index.json` update must not strand an index that
-     * points at a deleted manifest.
      */
+    /// Summary: pruning_is_deferred_until_index_commit orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
+
     #[test]
     #[cfg(target_family = "unix")]
     fn pruning_is_deferred_until_index_commit() -> Result<()> {
@@ -1049,20 +1297,72 @@ mod tests {
     }
 }
 
+/// Summary: store_root orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn store_root(destination_root: &Path) -> PathBuf {
     destination_root
         .join(STORE_DIR)
         .join(format!("v{STORE_SCHEMA_VERSION}"))
 }
 
+/// Summary: sources_root orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn sources_root(store_root: &Path) -> PathBuf {
     store_root.join("sources")
 }
 
+/// Summary: blobs_root orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn blobs_root(store_root: &Path) -> PathBuf {
     store_root.join("blobs").join("sha256")
 }
 
+/// Summary: blob_path orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn blob_path(blobs_root: &Path, hash: &str) -> PathBuf {
     let prefix = &hash[0..2];
     blobs_root.join(prefix).join(hash)
@@ -1072,12 +1372,30 @@ pub(crate) fn blob_path(blobs_root: &Path, hash: &str) -> PathBuf {
  * Summary: Write a content-addressed blob durably (fsync file and parent directory).
  *
  * Inputs: Source file path, destination blob path, timeout in seconds, and `durability_root`.
+ *
  * Outputs: `(blobs_written, bytes_written)` for accounting.
+ *
  * Side effects: Reads from the source filesystem and writes a new blob file under the destination store.
+ *
  * Error handling: Returns contextual errors for create, IO, timeout, fsync, and rename failures.
+ *
  * Ties to other methods: Called by `backup_one_folder` before writing the manifest that references blobs.
+ *
  * Why this exists: A blob referenced by a manifest must be durable across power loss before the manifest commit.
  */
+/// Summary: write_blob orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn write_blob(
     src_path: &Path,
     blob_path: &Path,
@@ -1107,12 +1425,30 @@ fn write_blob(
  * Summary: Single-attempt blob write (used by retry wrapper).
  *
  * Inputs: Source file path, destination blob path, and timeout in seconds.
+ *
  * Outputs: Number of bytes written to the blob temp file.
+ *
  * Side effects: Reads from source, writes temp file, fsyncs, renames, and fsyncs the parent directory.
+ *
  * Error handling: Returns contextual errors for IO, timeout, fsync, and rename operations.
+ *
  * Ties to other methods: Called by `write_blob` via `retry_with_backoff`.
+ *
  * Why this exists: Allow clean retry semantics without partial blob files surviving failed attempts.
  */
+/// Summary: write_blob_once orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn write_blob_once(
     src_path: &Path,
     blob_path: &Path,
@@ -1165,6 +1501,19 @@ fn write_blob_once(
     Ok(written)
 }
 
+/// Summary: scan_snapshot orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn scan_snapshot(
     cfg: &Config,
     watched: &WatchedPath,
@@ -1306,12 +1655,30 @@ fn scan_snapshot(
  * Summary: Carry forward previous manifest entries for an unreadable subtree.
  *
  * Inputs: Current `entries` map, optional previous manifest, and a relative path prefix.
+ *
  * Outputs: Adds any missing prior entries under the prefix to `entries`.
+ *
  * Side effects: Mutates the provided `entries` map.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `scan_snapshot` when `walkdir` yields permission or IO errors.
+ *
  * Why this exists: Prevent transient directory read failures from being interpreted as deletions.
  */
+/// Summary: carry_forward_prev_prefix orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn carry_forward_prev_prefix(
     entries: &mut BTreeMap<String, ManifestEntry>,
     prev: Option<&Manifest>,
@@ -1339,12 +1706,30 @@ fn carry_forward_prev_prefix(
  * Summary: Classify a scan failure into a stable phase for reporting.
  *
  * Inputs: A scan-related error.
+ *
  * Outputs: A `ReadFailurePhase` value indicating the most likely failure phase.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `scan_snapshot` when recording `read_failures`.
+ *
  * Why this exists: Keep failure reporting useful without plumbing custom error types everywhere.
  */
+/// Summary: classify_scan_failure orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn classify_scan_failure(error: &anyhow::Error) -> ReadFailurePhase {
     let msg = format!("{error:#}");
     if msg.contains("failed to stat file") || msg.contains("metadata") {
@@ -1354,6 +1739,19 @@ fn classify_scan_failure(error: &anyhow::Error) -> ReadFailurePhase {
     }
 }
 
+/// Summary: scan_one_file orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn scan_one_file(
     abs_path: &Path,
     rel_path: &str,
@@ -1371,12 +1769,13 @@ fn scan_one_file(
             )
         })
     })?;
-    let (mtime_unix, mtime_nanos) = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| (d.as_secs() as i64, d.subsec_nanos()))
-        .unwrap_or((0, 0));
+    let (mtime_unix, mtime_nanos) = match meta.modified() {
+        Ok(modified) => match modified.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => (duration.as_secs() as i64, duration.subsec_nanos()),
+            Err(_) => (0, 0),
+        },
+        Err(_) => (0, 0),
+    };
     let len = meta.len();
     if let Some(prev) = prev.get(rel_path) {
         if prev.kind == ManifestEntryKind::File
@@ -1406,6 +1805,19 @@ fn scan_one_file(
     })
 }
 
+/// Summary: manifests_equivalent orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn manifests_equivalent(prev: &Manifest, next: &Manifest) -> bool {
     if prev.entries.len() != next.entries.len() {
         return false;
@@ -1425,6 +1837,19 @@ fn manifests_equivalent(prev: &Manifest, next: &Manifest) -> bool {
     true
 }
 
+/// Summary: load_index orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn load_index(source_root: &Path, source_path: &Path) -> Result<VersionIndex> {
     let path = source_root.join("index.json");
     if !path.exists() {
@@ -1448,12 +1873,30 @@ fn load_index(source_root: &Path, source_path: &Path) -> Result<VersionIndex> {
  * Summary: Persist the version index durably (atomic rename plus fsync).
  *
  * Inputs: `source_root` folder, `index` payload, and `durability_root` stop directory for fsync.
+ *
  * Outputs: `Ok(())` when the updated index is durably persisted.
+ *
  * Side effects: Writes `index.json` under the source root.
+ *
  * Error handling: Returns contextual errors from serialization, IO, fsync, and rename operations.
+ *
  * Ties to other methods: Called after `write_json_atomic_durable` writes the manifest for a new version.
+ *
  * Why this exists: The index is the commit pointer; it must not reference versions that are not durable on disk.
  */
+/// Summary: write_index orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn write_index(source_root: &Path, index: &VersionIndex, durability_root: &Path) -> Result<()> {
     let path = source_root.join("index.json");
     write_json_atomic_durable(&path, index, durability_root).with_context(|| {
@@ -1481,13 +1924,30 @@ struct LastScanReport<'a> {
  * Summary: Persist the last scan report for a watched source.
  *
  * Inputs: `source_root` destination store source directory, scanned `snapshot`, optional committed
- * version id, and `durability_root` for directory fsync bounds.
+ *
  * Outputs: `Ok(())` when the report is durably written.
+ *
  * Side effects: Writes `last_scan_report.json` under the source directory.
+ *
  * Error handling: Returns contextual errors for serialization, IO, fsync, and rename operations.
+ *
  * Ties to other methods: Called by `backup_one_folder` after scans and commits (or skipped commits).
+ *
  * Why this exists: Make read failures visible and inspectable even when a version cannot be safely created.
  */
+/// Summary: write_scan_report orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn write_scan_report(
     source_root: &Path,
     snapshot: &Manifest,
@@ -1512,6 +1972,19 @@ fn write_scan_report(
     })
 }
 
+/// Summary: latest_manifest orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn latest_manifest(manifests_root: &Path, index: &VersionIndex) -> Result<Option<Manifest>> {
     let last = match index.versions.last() {
         None => return Ok(None),
@@ -1532,10 +2005,15 @@ fn latest_manifest(manifests_root: &Path, index: &VersionIndex) -> Result<Option
  * Summary: Atomically write JSON and make it durable with fsync.
  *
  * Inputs: `path` destination file path, `value` JSON-serializable payload, and `durability_root`.
+ *
  * Outputs: `Ok(())` when the file is atomically replaced and durably committed.
+ *
  * Side effects: Writes a temp file, fsyncs it, renames it into place, and fsyncs the parent directory.
+ *
  * Error handling: Returns contextual errors for create, serialize, write, fsync, and rename failures.
+ *
  * Ties to other methods: Used for both manifests and `index.json` writes in the commit pipeline.
+ *
  * Why this exists: Without fsync, a power loss can leave a missing or truncated file after an atomic rename.
  */
 fn write_json_atomic_durable<T: serde::Serialize>(
@@ -1575,6 +2053,19 @@ fn write_json_atomic_durable<T: serde::Serialize>(
     Ok(())
 }
 
+/// Summary: sha256_file orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn sha256_file(
     path: &Path,
     tuning: &crate::config::model::HashingTuning,
@@ -1587,6 +2078,19 @@ fn sha256_file(
     Ok(hash)
 }
 
+/// Summary: normalize_rel orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn normalize_rel(path: &Path) -> String {
     let s = path.to_string_lossy().replace('\\', "/");
     if s.starts_with("./") {
@@ -1596,6 +2100,19 @@ pub(crate) fn normalize_rel(path: &Path) -> String {
     }
 }
 
+/// Summary: is_hidden orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn is_hidden(rel: &Path) -> bool {
     rel.components().any(|c| {
         let name = c.as_os_str().to_string_lossy();
@@ -1603,11 +2120,24 @@ fn is_hidden(rel: &Path) -> bool {
     })
 }
 
+/// Summary: build_ignore_set orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_ignore_set(patterns: &[String]) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for p in patterns {
         if let Ok(g) = Glob::new(p) {
-            let _ = builder.add(g);
+            builder.add(g);
         }
     }
     builder
@@ -1615,6 +2145,19 @@ fn build_ignore_set(patterns: &[String]) -> Result<GlobSet> {
         .context("versioned::build_ignore_set failed to build ignore set")
 }
 
+/// Summary: gc_unreferenced_blobs orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn gc_unreferenced_blobs(store_root: &Path, blobs_root: &Path) -> Result<()> {
     let sources = sources_root(store_root);
     if !sources.exists() {
@@ -1679,7 +2222,15 @@ fn gc_unreferenced_blobs(store_root: &Path, blobs_root: &Path) -> Result<()> {
                 Some(n) => n,
             };
             if !referenced.contains(name) {
-                let _ = fs::remove_file(&path);
+                if let Err(error) = fs::remove_file(&path) {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        tracing::warn!(
+                            path = %redact_path(&path),
+                            error = %error,
+                            "versioned::gc_unreferenced_blobs failed deleting unreferenced blob"
+                        );
+                    }
+                }
             }
         }
     }

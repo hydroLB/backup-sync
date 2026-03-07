@@ -1,13 +1,19 @@
-use gui::commands::correlation::cid;
+use gui::observability::cid;
 
 #[test]
-/// Purpose: Ensure correlation ids include prefixes and remain unique.
+/// Summary: Ensure correlation ids include prefixes and remain unique.
 ///
 /// Inputs: None.
+///
 /// Outputs: Asserts prefix and uniqueness of correlation ids.
-/// Ties to: `gui::commands::correlation::cid`.
+///
 /// Side effects: None.
-/// Why: Keep traceability consistent across GUI command calls.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `gui::observability::cid`.
+///
+/// Why this exists: Keep traceability consistent across GUI command calls.
 fn cid_prefix_and_unique() {
     let a = cid("test", None);
     let b = cid("test", None);

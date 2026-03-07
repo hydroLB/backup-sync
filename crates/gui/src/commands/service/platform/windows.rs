@@ -2,16 +2,22 @@ use crate::commands::error::ErrorEnvelope;
 use crate::commands::service::common::{
     run_command, run_command_with_retry, write_text_file, ServiceStatus,
 };
-use daemon::integration::windows_service;
+use backup_core::service::windows_service;
 use std::path::PathBuf;
 
-/// Purpose: Writes the scheduled task XML to disk.
+/// Summary: Writes the scheduled task XML to disk.
 ///
 /// Inputs: the executable path.
+///
 /// Outputs: the destination XML path.
-/// Ties to: service installation on Windows.
+///
 /// Side effects: Writes the scheduled task XML to disk.
-/// Why: install a scheduled task for the daemon.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation on Windows.
+///
+/// Why this exists: install a scheduled task for the daemon.
 pub fn write_task(exec: &PathBuf) -> Result<PathBuf, ErrorEnvelope> {
     let dest = windows_service::default_task_xml_path().map_err(|e| {
         ErrorEnvelope::new(
@@ -35,13 +41,19 @@ pub fn write_task(exec: &PathBuf) -> Result<PathBuf, ErrorEnvelope> {
     Ok(dest)
 }
 
-/// Purpose: Enables the scheduled task using schtasks.
+/// Summary: Enables the scheduled task using schtasks.
 ///
 /// Inputs: the task XML path.
+///
 /// Outputs: `Ok(())` when registration succeeds.
-/// Ties to: service installation on Windows.
+///
 /// Side effects: Runs schtasks to register the scheduled task.
-/// Why: register the daemon task for automatic execution.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation on Windows.
+///
+/// Why this exists: register the daemon task for automatic execution.
 pub fn enable_task(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
     let dest_str = dest.to_str().ok_or_else(|| {
         ErrorEnvelope::new(
@@ -60,13 +72,19 @@ pub fn enable_task(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
     )
 }
 
-/// Purpose: Builds the service status payload for Windows.
+/// Summary: Builds the service status payload for Windows.
 ///
 /// Inputs: daemon reachability and runtime metadata.
+///
 /// Outputs: a populated `ServiceStatus`.
-/// Ties to: GUI status reporting.
+///
 /// Side effects: Reads filesystem metadata to check task XML presence.
-/// Why: surface service health and fixes in the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI status reporting.
+///
+/// Why this exists: surface service health and fixes in the UI.
 pub fn status_windows(
     reachable: bool,
     uptime_secs: Option<i64>,
@@ -108,13 +126,19 @@ pub fn status_windows(
     })
 }
 
-/// Purpose: Restarts the daemon by triggering the scheduled task.
+/// Summary: Restarts the daemon by triggering the scheduled task.
 ///
 /// Inputs: none.
+///
 /// Outputs: a success message string.
-/// Ties to: GUI restart actions on Windows.
+///
 /// Side effects: Runs schtasks to trigger the scheduled task.
-/// Why: allow users to recover a stuck daemon.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI restart actions on Windows.
+///
+/// Why this exists: allow users to recover a stuck daemon.
 pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
     run_command(
         "schtasks",

@@ -35,10 +35,15 @@ type MinimalFeedbackState = {
  * Summary: Provide a unified feedback path for minimal mode events and toasts.
  *
  * Inputs: Parent `onEvent` callback for external activity logging.
+ *
  * Outputs: Toast state and an `emitEvent` helper.
+ *
  * Side effects: Starts/stops toast auto-dismiss timers.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `MinimalMain` and modal callbacks for consistent feedback.
+ *
  * Why this exists: Ensure success/error/info messages are always visible in minimal mode.
  */
 export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
@@ -61,10 +66,15 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
    * Summary: Show the Saved badge and (optionally) restart its animation.
    *
    * Inputs: A `tag` describing the trigger source.
+   *
    * Outputs: None.
+   *
    * Side effects: Updates React state and increments `savedBadgeNonce` to restart animations.
+   *
    * Error handling: Best-effort; never throws.
+   *
    * Ties to other methods: Used by `emitEvent` for all success confirmations.
+   *
    * Why this exists: Prevent duplicate Saved flashes while still providing crisp feedback.
    */
   const triggerSavedBadge = useCallback((tag: string) => {
@@ -88,7 +98,11 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
         savedBadgeVisibleRef.current = false;
         setShowSavedBadge(false);
       }, 1500);
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[useMinimalFeedback::triggerSavedBadge] Failed to animate saved badge: ${reason}`,
+      );
       savedBadgeVisibleRef.current = true;
       setShowSavedBadge(true);
     }
@@ -99,6 +113,7 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
       const isPauseEvent = kind === 'ok' && /\bpaused\b/i.test(msg);
       const isSuccessEvent = kind === 'ok';
       const isSavedEvent = isSuccessEvent && /^saved\.$/i.test(msg.trim());
+      const isRunningEvent = kind === 'ok' && /\brunning\b/i.test(msg);
       const shouldShowSavedBadge = isPauseEvent || pulseScope !== 'none' || isSavedEvent;
       if (isPauseEvent) {
         setToast(null);
@@ -113,6 +128,9 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
         setPausePulseActive(false);
         setSavePulseScope(pulseScope);
         setSavePulseActive(pulseScope !== 'none');
+        if (!isSavedEvent && !isRunningEvent && pulseScope !== 'none') {
+          setInline({ msg, kind: 'success' });
+        }
         // Only show Saved for user-driven operations. Background "ok" transitions
         // (for example, destination health recovered) should not surface as "Saved".
         if (shouldShowSavedBadge) {

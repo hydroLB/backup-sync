@@ -1,5 +1,3 @@
-#![cfg(feature = "legacy-engine")]
-
 use backup_core::{
     backup::{execution::BackupExecutor, planning},
     config::model::{
@@ -12,13 +10,19 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
-/// Purpose: Ensures unchanged files are not re-backed up after state reload.
+/// Summary: Ensures unchanged files are not re-backed up after state reload.
 ///
 /// Inputs: a stable file, persisted state, and a reloaded plan.
+///
 /// Outputs: an empty plan on the second run.
-/// Ties to: planner stability checks and stored state reuse.
+///
 /// Side effects: None.
-/// Why: avoid redundant backups when nothing has changed.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: planner stability checks and stored state reuse.
+///
+/// Why this exists: avoid redundant backups when nothing has changed.
 fn no_rebackup_when_state_reloaded_and_unchanged() {
     let dir = tempdir().expect(
         "no_rebackup_hash::no_rebackup_when_state_reloaded_and_unchanged failed to create temp dir",

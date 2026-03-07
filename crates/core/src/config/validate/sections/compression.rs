@@ -2,13 +2,19 @@ use crate::config::model::Config;
 use crate::config::validate::ValidationLimits;
 use anyhow::{bail, Result};
 
-/// Purpose: Validates blob compression configuration.
+/// Summary: Validates blob compression configuration.
 ///
 /// Inputs: the config, validation limits, and a label prefix.
+///
 /// Outputs: `Ok(())` when compression is disabled or when enabled fields are within guardrails.
-/// Ties to: versioned blob compression for write paths.
+///
 /// Side effects: None.
-/// Why: prevent surprising memory usage or invalid codec settings.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: versioned blob compression for write paths.
+///
+/// Why this exists: prevent surprising memory usage or invalid codec settings.
 pub(crate) fn validate_compression(
     cfg: &Config,
     limits: &ValidationLimits,

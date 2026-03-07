@@ -1,4 +1,6 @@
 use crate::commands::error::ErrorEnvelope;
+use crate::commands::io_policy::run_blocking_io;
+use anyhow::Context;
 use chrono::Utc;
 use serde::Deserialize;
 use std::cmp::Ordering;
@@ -12,13 +14,19 @@ struct UpdateFeed {
     published_at: Option<String>,
 }
 
-/// Purpose: Resolves the local update feed path.
+/// Summary: Resolves the local update feed path.
 ///
 /// Inputs: none, uses environment overrides.
+///
 /// Outputs: the update feed path.
-/// Ties to: update checks that read from disk.
+///
 /// Side effects: Reads environment variables and config directories.
-/// Why: allow update checks without network access.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: update checks that read from disk.
+///
+/// Why this exists: allow update checks without network access.
 fn update_feed_path() -> Result<PathBuf, ErrorEnvelope> {
     if let Some(path) = std::env::var_os("BACKUP_SYNC_UPDATE_FEED") {
         return Ok(PathBuf::from(path));
@@ -33,13 +41,19 @@ fn update_feed_path() -> Result<PathBuf, ErrorEnvelope> {
     Ok(base)
 }
 
-/// Purpose: Parses a dotted version string into numeric components.
+/// Summary: Parses a dotted version string into numeric components.
 ///
 /// Inputs: a version string like 1.2.3.
+///
 /// Outputs: a vector of numeric components.
-/// Ties to: update comparison logic.
+///
 /// Side effects: Emits warnings for invalid version components.
-/// Why: allow deterministic version comparisons without external crates.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: update comparison logic.
+///
+/// Why this exists: allow deterministic version comparisons without external crates.
 fn parse_version(version: &str) -> Vec<u64> {
     version
         .split('.')
@@ -56,13 +70,19 @@ fn parse_version(version: &str) -> Vec<u64> {
         .collect()
 }
 
-/// Purpose: Compares two version strings using numeric components.
+/// Summary: Compares two version strings using numeric components.
 ///
 /// Inputs: the latest version and the current version.
+///
 /// Outputs: an ordering result.
-/// Ties to: update availability checks.
+///
 /// Side effects: None.
-/// Why: determine whether an update is available.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: update availability checks.
+///
+/// Why this exists: determine whether an update is available.
 fn compare_versions(latest: &str, current: &str) -> Ordering {
     let a = parse_version(latest);
     let b = parse_version(current);
@@ -78,13 +98,19 @@ fn compare_versions(latest: &str, current: &str) -> Ordering {
     Ordering::Equal
 }
 
-/// Purpose: Returns the current build version string.
+/// Summary: Returns the current build version string.
 ///
 /// Inputs: none.
+///
 /// Outputs: the build version string.
-/// Ties to: update check reporting.
+///
 /// Side effects: None.
-/// Why: report the current version in update responses.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: update check reporting.
+///
+/// Why this exists: report the current version in update responses.
 fn current_version() -> String {
     option_env!("CARGO_PKG_VERSION")
         .unwrap_or("0.0.0")
@@ -92,13 +118,19 @@ fn current_version() -> String {
 }
 
 #[tauri::command]
-/// Purpose: Checks for updates using a local feed file.
+/// Summary: Checks for updates using a local feed file.
 ///
 /// Inputs: none.
+///
 /// Outputs: a message describing update status.
-/// Ties to: GUI update checks.
+///
 /// Side effects: Reads the local update feed file from disk.
-/// Why: provide update information without network access.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI update checks.
+///
+/// Why this exists: provide update information without network access.
 pub async fn check_updates_cmd() -> Result<String, ErrorEnvelope> {
     let version = current_version();
     let ts = Utc::now().format("%Y-%m-%d %H:%M:%S");
@@ -111,7 +143,15 @@ pub async fn check_updates_cmd() -> Result<String, ErrorEnvelope> {
             ts
         ));
     }
-    let raw = std::fs::read_to_string(&feed_path).map_err(|e| {
+    let raw = run_blocking_io("gui::updates::check_updates_cmd read update feed", || {
+        std::fs::read_to_string(&feed_path).with_context(|| {
+            format!(
+                "updates::check_updates_cmd failed to read update feed {:?}",
+                feed_path
+            )
+        })
+    })
+    .map_err(|e| {
         ErrorEnvelope::new(
             "UPDATE_READ",
             format!(

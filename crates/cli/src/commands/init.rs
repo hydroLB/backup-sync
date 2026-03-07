@@ -2,22 +2,29 @@ use crate::prompt::{expand_tilde, prompt_path, prompt_string, prompt_yes};
 use anyhow::{Context, Result};
 use backup_core::{
     config::model::{Destination, WatchedKind, WatchedPath},
-    load_config,
+    load_validated_config,
     platform::paths,
     save_config, validate,
 };
 use std::path::PathBuf;
 
-/// Purpose: Runs an interactive setup wizard for initial configuration.
+/// Summary: Runs an interactive setup wizard for initial configuration.
 ///
 /// Inputs: none, relies on user prompts.
+///
 /// Outputs: `Ok(())` after saving config and optionally running a backup.
-/// Ties to: CLI initialization flow and config persistence.
+///
 /// Side effects: Prompts the user and writes the config file to disk.
-/// Why: guide first time setup for backup configuration.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI initialization flow and config persistence.
+///
+/// Why this exists: guide first time setup for backup configuration.
 pub async fn init_wizard() -> Result<()> {
     println!("Backup Sync setup - just answer a couple quick questions.");
-    let mut cfg = load_config().context("cli::init_wizard failed to load config for setup")?;
+    let mut cfg =
+        load_validated_config().context("cli::init_wizard failed to load config for setup")?;
     if cfg.destinations.is_empty() {
         cfg.destinations.push(Destination {
             id: "default".into(),

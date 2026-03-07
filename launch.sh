@@ -6,31 +6,48 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GUI_ROOT="$ROOT/crates/gui"
 FRONTEND="$GUI_ROOT/frontend"
-TAURI_CONF="$GUI_ROOT/src-tauri/tauri.conf.json"
+TAURI_CONF="$GUI_ROOT/tauri.conf.json"
 NPM_CACHE_DIR="$ROOT/.npm-cache"
+DEFAULT_TAURI_DEV_PORT="5173"
 DAEMON_PID=""
 
 error() { echo "Error: $1" >&2; exit 1; }
 
+assert_live_mode_config() {
+  local conf_path="$1"
+  rg -q '"beforeDevCommand"[[:space:]]*:[[:space:]]*"cd \.\./frontend && npm run dev"' "$conf_path" \
+    || error "Live mode requires beforeDevCommand to run the Vite dev server in $conf_path"
+  rg -q '"devPath"[[:space:]]*:[[:space:]]*"http://localhost:5173"' "$conf_path" \
+    || error "Live mode requires devPath to point at http://localhost:5173 in $conf_path"
+}
+
 command -v npm >/dev/null 2>&1 || error "npm is not installed or not on PATH."
+command -v cargo >/dev/null 2>&1 || error "cargo is not installed or not on PATH."
+command -v rustc >/dev/null 2>&1 || error "rustc is not installed or not on PATH."
+command -v python3 >/dev/null 2>&1 || error "python3 is not installed or not on PATH."
 [ -d "$GUI_ROOT" ] || error "Expected gui folder at $GUI_ROOT"
 [ -f "$FRONTEND/package.json" ] || error "Missing frontend/package.json (are you in the repo root?)."
 [ -f "$TAURI_CONF" ] || error "Missing Tauri config at $TAURI_CONF"
+
+if [ "${BACKUP_SYNC_FORCE_LIVE_MODE:-0}" = "1" ]; then
+  assert_live_mode_config "$TAURI_CONF"
+fi
 
 # Use a repo-local npm cache so dev workflows are resilient to global cache permission issues.
 mkdir -p "$NPM_CACHE_DIR" || error "Failed to create npm cache directory at $NPM_CACHE_DIR"
 export npm_config_cache="$NPM_CACHE_DIR"
 
-# Tauri validates `build.devPath` at compile time in `tauri::generate_context!()`.
-# The configured path points at the Vite output directory, which may not exist on a
-# fresh clone or after cleaning build artifacts.
-mkdir -p "$FRONTEND/dist" || error "Failed to create expected Vite output folder at $FRONTEND/dist"
-
-DAEMON_BIN="$ROOT/target/debug/daemon"
-if [ ! -x "$DAEMON_BIN" ]; then
-  echo "Building daemon (target/debug/daemon)..."
-  cargo build -p daemon || error "Failed to build daemon. Ensure Rust is installed and the workspace builds: cargo build -p daemon"
+echo "Checking and downloading Rust dependencies..."
+if [ -f "$ROOT/Cargo.lock" ]; then
+  cargo fetch --locked --manifest-path "$ROOT/Cargo.toml" || error "cargo fetch --locked failed. Ensure Cargo.lock is up to date and dependencies are reachable."
+else
+  cargo fetch --manifest-path "$ROOT/Cargo.toml" || error "cargo fetch failed. Ensure dependencies are reachable."
 fi
+
+echo "Building daemon (target/debug/daemon)..."
+cargo build -p daemon || error "Failed to build daemon. Ensure Rust is installed and the workspace builds: cargo build -p daemon"
+DAEMON_BIN="$ROOT/target/debug/daemon"
+[ -x "$DAEMON_BIN" ] || error "Daemon binary missing after build at $DAEMON_BIN"
 
 config_dir() {
   if [ -n "${XDG_CONFIG_HOME:-}" ]; then
@@ -132,10 +149,8 @@ start_daemon_in_background &
 
 cd "$GUI_ROOT"
 
-if [ ! -d "$FRONTEND/node_modules" ]; then
-  echo "Installing frontend dependencies..."
-  npm --prefix "$FRONTEND" ci || error "npm ci failed in $FRONTEND"
-fi
+echo "Checking and downloading frontend dependencies..."
+npm --prefix "$FRONTEND" ci || error "npm ci failed in $FRONTEND"
 
 # Ensure Tauri CLI binary exists (installed in frontend devDependencies)
 TAURI_BIN="$FRONTEND/node_modules/.bin/tauri"
@@ -144,4 +159,12 @@ TAURI_BIN="$FRONTEND/node_modules/.bin/tauri"
 echo "Starting Tauri app..."
 # Run Tauri from the gui crate (so Cargo.toml/src-tauri are discoverable)
 cd "$GUI_ROOT"
-"$TAURI_BIN" dev --config src-tauri/tauri.conf.json || error "Tauri failed to start"
+
+# Keep Tauri devPath and Vite dev server port aligned by default.
+if [ "${BACKUP_SYNC_FORCE_LIVE_MODE:-0}" = "1" ]; then
+  export BACKUP_SYNC_DEV_PORT="$DEFAULT_TAURI_DEV_PORT"
+else
+  export BACKUP_SYNC_DEV_PORT="${BACKUP_SYNC_DEV_PORT:-$DEFAULT_TAURI_DEV_PORT}"
+fi
+
+"$TAURI_BIN" dev --config "$TAURI_CONF" || error "Tauri failed to start"

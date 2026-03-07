@@ -1,13 +1,19 @@
 import { safeInvoke, wrapError } from './ipc';
 
 /**
- * Purpose: Fetch the recent log tail from the backend.
+ * Summary: Fetch the recent log tail from the backend.
  *
  * Inputs: None.
+ *
  * Outputs: The log tail string.
- * Ties to: Log viewer panels and diagnostic widgets.
+ *
  * Side effects: Invokes IPC calls to the backend.
- * Why: Shows recent daemon activity in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Log viewer panels and diagnostic widgets.
+ *
+ * Why this exists: Shows recent daemon activity in the UI.
  */
 export async function getLogTail(): Promise<string> {
   try {
@@ -18,13 +24,19 @@ export async function getLogTail(): Promise<string> {
 }
 
 /**
- * Purpose: Export logs to the Desktop directory.
+ * Summary: Export logs to the Desktop directory.
  *
  * Inputs: None.
+ *
  * Outputs: The path to the exported log file.
- * Ties to: Log export actions and support workflows.
+ *
  * Side effects: Invokes IPC calls that write log files.
- * Why: Allows users to share logs for diagnostics.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Log export actions and support workflows.
+ *
+ * Why this exists: Allows users to share logs for diagnostics.
  */
 export async function exportLogs(): Promise<string> {
   try {

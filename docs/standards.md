@@ -14,7 +14,7 @@ This project follows official language and ecosystem standards and applies them 
 - TSDoc conventions for function and method documentation
 
 ## Documentation format
-- Every function or method uses the same doc comment headings in this order: Purpose, Inputs, Outputs, Ties to, Side effects, Why.
+- Every function or method uses the same doc comment headings in this order: Summary, Inputs, Outputs, Side effects, Error handling, Ties to other methods, Why this exists.
 - Each heading is a single sentence or short clause describing the method in that section.
 - Comments are ASCII only and avoid em dashes.
 

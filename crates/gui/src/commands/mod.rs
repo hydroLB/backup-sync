@@ -5,6 +5,7 @@ pub mod correlation;
 pub mod destination;
 pub mod error;
 pub mod hardening;
+pub mod io_policy;
 pub mod logs;
 pub mod service;
 pub mod status;

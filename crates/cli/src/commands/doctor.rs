@@ -1,16 +1,31 @@
 use anyhow::{Context, Result};
-use backup_core::{load_config, platform::paths, state::store::StateStore, ValidationLimits};
+use backup_core::{
+    io::{run_with_policy, BlockingIoPolicy, CancellationFlag},
+    load_validated_config,
+    logging::cid,
+    platform::paths,
+    state::store::StateStore,
+    ValidationLimits,
+};
 use fs2::free_space;
+use tracing::warn;
 
-/// Purpose: Prints a doctor report with common misconfiguration checks.
+/// Summary: Prints a doctor report with common misconfiguration checks.
 ///
 /// Inputs: none.
+///
 /// Outputs: `Ok(())` after printing diagnostic lines.
-/// Ties to: CLI diagnostics output.
+///
 /// Side effects: Reads config/state, writes a probe file, and prints to stdout.
-/// Why: surface common configuration and environment issues quickly.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI diagnostics output.
+///
+/// Why this exists: surface common configuration and environment issues quickly.
 pub fn doctor() -> Result<()> {
-    let cfg = load_config().context("cli::doctor failed to load config")?;
+    let cfg = load_validated_config().context("cli::doctor failed to load config")?;
+    let io_policy = BlockingIoPolicy::from_config(&cfg);
     let limits = ValidationLimits::default();
     println!(
         "Config file: {:?}",
@@ -61,9 +76,38 @@ pub fn doctor() -> Result<()> {
             }
             // Write probe: try to create/remove a temp file
             let probe = cfg.backup_root.join(".backup_sync_probe");
-            match std::fs::write(&probe, b"probe") {
+            match run_with_policy(
+                "cli::doctor write probe file",
+                &io_policy,
+                CancellationFlag::none(),
+                || {
+                    std::fs::write(&probe, b"probe")
+                        .map_err(|error| anyhow::anyhow!(error))
+                        .with_context(|| format!("cli::doctor failed writing probe {:?}", probe))
+                },
+            ) {
                 Ok(_) => {
-                    let _ = std::fs::remove_file(&probe);
+                    if let Err(error) = run_with_policy(
+                        "cli::doctor remove probe file",
+                        &io_policy,
+                        CancellationFlag::none(),
+                        || {
+                            std::fs::remove_file(&probe)
+                                .map_err(|err| anyhow::anyhow!(err))
+                                .with_context(|| {
+                                    format!("cli::doctor failed removing probe {:?}", probe)
+                                })
+                        },
+                    ) {
+                        let correlation_id = cid("cli-doctor");
+                        warn!(
+                            cid = %correlation_id,
+                            action = "probe_cleanup_failed",
+                            probe_path = %backup_core::logging::redact_path(&probe),
+                            error = %error,
+                            "cli::doctor failed to remove probe file; continuing"
+                        );
+                    }
                     println!("Write check: OK");
                 }
                 Err(e) => println!(

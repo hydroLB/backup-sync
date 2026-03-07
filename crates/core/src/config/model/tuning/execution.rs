@@ -16,16 +16,26 @@ pub struct ExecutionTuning {
     pub retry_delays_ms: Vec<u64>,
     #[serde(default = "crate::config::model::defaults::default_retry_jitter_pct")]
     pub retry_jitter_pct: f64,
+    #[serde(
+        default = "crate::config::model::defaults::default_blocking_io_backoff_poll_interval_ms"
+    )]
+    pub blocking_io_backoff_poll_interval_ms: u64,
 }
 
 impl Default for ExecutionTuning {
-    /// Purpose: Builds a baseline execution tuning profile for copy, safety, and retry behavior.
+    /// Summary: Builds a baseline execution tuning profile for copy, safety, and retry behavior.
     ///
     /// Inputs: the default functions in `config::model::defaults`.
+    ///
     /// Outputs: a fully populated tuning profile.
-    /// Ties to: `BackupExecutor` for copy buffering, free space checks, and retry backoff.
+    ///
     /// Side effects: None.
-    /// Why: centralize execution knobs so defaults stay aligned across the codebase.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: `BackupExecutor` for copy buffering, free space checks, and retry backoff.
+    ///
+    /// Why this exists: centralize execution knobs so defaults stay aligned across the codebase.
     fn default() -> Self {
         Self {
             copy_buffer_bytes: crate::config::model::defaults::default_copy_buffer_bytes(),
@@ -35,18 +45,26 @@ impl Default for ExecutionTuning {
             recent_activity_cap: crate::config::model::defaults::default_recent_activity_cap(),
             retry_delays_ms: crate::config::model::defaults::default_retry_delays_ms(),
             retry_jitter_pct: crate::config::model::defaults::default_retry_jitter_pct(),
+            blocking_io_backoff_poll_interval_ms:
+                crate::config::model::defaults::default_blocking_io_backoff_poll_interval_ms(),
         }
     }
 }
 
 impl ExecutionTuning {
-    /// Purpose: Converts configured millisecond delays into `Duration` values.
+    /// Summary: Converts configured millisecond delays into `Duration` values.
     ///
     /// Inputs: the configured list of delay milliseconds.
+    ///
     /// Outputs: a vector of `Duration` values in the same order.
-    /// Ties to: `BackupExecutor::execute` for retry scheduling.
+    ///
     /// Side effects: Reads system time for jitter entropy.
-    /// Why: avoid duplicating conversion logic across execution paths.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: `BackupExecutor::execute` for retry scheduling.
+    ///
+    /// Why this exists: avoid duplicating conversion logic across execution paths.
     pub(crate) fn retry_delays(&self) -> Vec<Duration> {
         self.retry_delays_ms
             .iter()
@@ -58,13 +76,19 @@ impl ExecutionTuning {
     }
 }
 
-/// Purpose: Applies jitter to a base duration using a percentage window.
+/// Summary: Applies jitter to a base duration using a percentage window.
 ///
 /// Inputs: the base delay and jitter percentage.
+///
 /// Outputs: a jittered delay duration.
-/// Ties to: `ExecutionTuning::retry_delays` for retry scheduling variance.
+///
 /// Side effects: Reads system time for jitter entropy.
-/// Why: reduce coordinated retries while preserving average backoff.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `ExecutionTuning::retry_delays` for retry scheduling variance.
+///
+/// Why this exists: reduce coordinated retries while preserving average backoff.
 fn jitter_duration(delay: Duration, jitter_pct: f64) -> Duration {
     if jitter_pct <= 0.0 {
         return delay;

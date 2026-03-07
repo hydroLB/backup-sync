@@ -1,5 +1,8 @@
 use crate::commands::error::ErrorEnvelope;
-use backup_core::{backup::versioned, fs::snapshots::prepare_source_view, load_config, validate};
+use crate::commands::io_policy::run_blocking_io;
+use anyhow::Context;
+use backup_core::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
+use backup_core::{backup::versioned, fs::snapshots::prepare_source_view, load_validated_config};
 use fs2::free_space;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -7,16 +10,20 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const SNAPSHOT_PROBE_TIMEOUT_SECONDS: u64 = 5;
-
 #[derive(Debug, Clone, Deserialize)]
-/// Purpose: Request payload controlling hardening checks.
+/// Summary: Request payload controlling hardening checks.
 ///
 /// Inputs: Deserialized from IPC.
+///
 /// Outputs: A typed request used by `hardening_check_cmd`.
-/// Ties to: First-run wizard gating in the frontend.
+///
 /// Side effects: None.
-/// Why: Keep optional checks explicit so potentially privileged operations are opt-in.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: First-run wizard gating in the frontend.
+///
+/// Why this exists: Keep optional checks explicit so potentially privileged operations are opt-in.
 pub struct HardeningCheckRequest {
     pub check_snapshots: bool,
     #[serde(default)]
@@ -24,13 +31,19 @@ pub struct HardeningCheckRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Purpose: Structured result describing a watched-path permission probe outcome.
+/// Summary: Structured result describing a watched-path permission probe outcome.
 ///
 /// Inputs: Derived from filesystem access tests.
+///
 /// Outputs: A serializable issue record.
-/// Ties to: First-run wizard display and gating.
+///
 /// Side effects: None.
-/// Why: Provide actionable feedback on which path is blocking scheduling.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: First-run wizard display and gating.
+///
+/// Why this exists: Provide actionable feedback on which path is blocking scheduling.
 pub struct WatchedIssue {
     pub path: String,
     pub kind: String,
@@ -38,13 +51,19 @@ pub struct WatchedIssue {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Purpose: Structured result describing a destination preflight check.
+/// Summary: Structured result describing a destination preflight check.
 ///
 /// Inputs: Derived from store write probes and free-space checks.
+///
 /// Outputs: A serializable destination result.
-/// Ties to: First-run wizard display and gating.
+///
 /// Side effects: May create and remove a tiny probe file under the destination store.
-/// Why: Backups should not begin scheduling when the destination is unwritable or nearly full.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: First-run wizard display and gating.
+///
+/// Why this exists: Backups should not begin scheduling when the destination is unwritable or nearly full.
 pub struct DestinationHardening {
     pub id: String,
     pub path: String,
@@ -55,13 +74,19 @@ pub struct DestinationHardening {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Purpose: Structured result describing snapshot capability probing.
+/// Summary: Structured result describing snapshot capability probing.
 ///
 /// Inputs: Derived from best-effort snapshot preparation.
+///
 /// Outputs: A serializable snapshot probe result.
-/// Ties to: First-run wizard optional snapshot validation.
+///
 /// Side effects: May invoke OS snapshot tooling when enabled.
-/// Why: Snapshot-backed scans reduce the chance of inconsistent versions on changing sources.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: First-run wizard optional snapshot validation.
+///
+/// Why this exists: Snapshot-backed scans reduce the chance of inconsistent versions on changing sources.
 pub struct SnapshotHardening {
     pub checked: bool,
     pub supported: bool,
@@ -69,13 +94,19 @@ pub struct SnapshotHardening {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Purpose: Report payload describing whether it is safe to enable scheduling.
+/// Summary: Report payload describing whether it is safe to enable scheduling.
 ///
 /// Inputs: Derived from config and filesystem probes.
+///
 /// Outputs: A serializable hardening report.
-/// Ties to: First-run wizard gating in Settings and Minimal UI.
+///
 /// Side effects: May create destination store directories and probe files; may run snapshot tooling when opted in.
-/// Why: Prevent enabling background writes before basic prerequisites are satisfied.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: First-run wizard gating in Settings and Minimal UI.
+///
+/// Why this exists: Prevent enabling background writes before basic prerequisites are satisfied.
 pub struct HardeningReport {
     pub ok: bool,
     pub message: String,
@@ -86,13 +117,19 @@ pub struct HardeningReport {
 }
 
 #[tauri::command]
-/// Purpose: Run first-run hardening checks before enabling scheduling.
+/// Summary: Run first-run hardening checks before enabling scheduling.
 ///
 /// Inputs: A `HardeningCheckRequest` specifying whether to probe snapshot capability.
+///
 /// Outputs: A `HardeningReport` or an error envelope on config load/validation failures.
-/// Ties to: First-run wizard and "enable running" gating.
+///
 /// Side effects: Reads filesystem metadata; may create and remove a tiny destination probe file; may invoke OS snapshot tooling.
-/// Why: Scheduling should only be enabled once the app can reliably read sources and write to the destination.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: First-run wizard and "enable running" gating.
+///
+/// Why this exists: Scheduling should only be enabled once the app can reliably read sources and write to the destination.
 pub fn hardening_check_cmd(
     request: Option<HardeningCheckRequest>,
 ) -> Result<HardeningReport, ErrorEnvelope> {
@@ -100,16 +137,10 @@ pub fn hardening_check_cmd(
         check_snapshots: false,
         require_snapshots: false,
     });
-    let cfg = load_config().map_err(|e| {
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!("hardening::hardening_check_cmd failed to load config: {e}"),
-        )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_VALIDATE",
-            format!("hardening::hardening_check_cmd config validation failed: {e}"),
         )
     })?;
 
@@ -201,14 +232,19 @@ pub fn hardening_check_cmd(
     })
 }
 
-/// Purpose: Probe a watched path for basic readability.
+/// Summary: Probe a watched path for basic readability.
 ///
 /// Inputs: Filesystem path and watched kind.
+///
 /// Outputs: `Ok(())` when the path is accessible; otherwise an issue string.
+///
 /// Side effects: Reads filesystem metadata and may open the path.
+///
 /// Error handling: Returns a precise issue string for UI display.
+///
 /// Ties to other methods: Used by `hardening_check_cmd`.
-/// Why: Scheduling should not be enabled if the daemon cannot read the source.
+///
+/// Why this exists: Scheduling should not be enabled if the daemon cannot read the source.
 fn probe_watched_path(
     path: &Path,
     kind: &backup_core::config::model::WatchedKind,
@@ -216,30 +252,57 @@ fn probe_watched_path(
     if !path.exists() {
         return Err("missing".to_string());
     }
-    if let Err(e) = fs::metadata(path) {
+    if let Err(e) = run_blocking_io("gui::hardening::probe_watched_path metadata", || {
+        fs::metadata(path).map(|_| ()).with_context(|| {
+            format!(
+                "hardening::probe_watched_path metadata failed for {:?}",
+                path
+            )
+        })
+    }) {
         return Err(format!("metadata failed: {e}"));
     }
     match kind {
         backup_core::config::model::WatchedKind::File => {
-            fs::File::open(path).map_err(|e| format!("open failed: {e}"))?;
+            run_blocking_io("gui::hardening::probe_watched_path file open", || {
+                fs::File::open(path).map(|_| ()).with_context(|| {
+                    format!("hardening::probe_watched_path open failed for {:?}", path)
+                })
+            })
+            .map_err(|e| format!("open failed: {e}"))?;
         }
         backup_core::config::model::WatchedKind::Directory => {
-            let mut rd = fs::read_dir(path).map_err(|e| format!("read_dir failed: {e}"))?;
+            let mut rd = run_blocking_io("gui::hardening::probe_watched_path read_dir", || {
+                fs::read_dir(path).with_context(|| {
+                    format!(
+                        "hardening::probe_watched_path read_dir failed for {:?}",
+                        path
+                    )
+                })
+            })
+            .map_err(|e| format!("read_dir failed: {e}"))?;
             // Force at least one iteration attempt to surface permission issues consistently.
-            let _ = rd.next();
+            if let Some(entry) = rd.next() {
+                entry.map_err(|e| format!("read_dir iteration failed: {e}"))?;
+            }
         }
     }
     Ok(())
 }
 
-/// Purpose: Probe destination store writability and free space.
+/// Summary: Probe destination store writability and free space.
 ///
 /// Inputs: destination id, destination root path, and required free space threshold.
+///
 /// Outputs: A `DestinationHardening` record.
+///
 /// Side effects: May create store directories and create/remove a tiny probe file.
+///
 /// Error handling: Never panics; records a `ok=false` message on failures.
+///
 /// Ties to other methods: Used by `hardening_check_cmd`.
-/// Why: Backups require creating `.backup_sync/v1` and writing blobs/manifests without disk-full failures.
+///
+/// Why this exists: Backups require creating `.backup_sync/v1` and writing blobs/manifests without disk-full failures.
 fn probe_destination_store(
     id: &str,
     destination_root: &Path,
@@ -268,7 +331,17 @@ fn probe_destination_store(
         };
     }
 
-    if let Err(e) = fs::create_dir_all(destination_root) {
+    if let Err(e) = run_blocking_io(
+        "gui::hardening::probe_destination_store create destination directory",
+        || {
+            fs::create_dir_all(destination_root).with_context(|| {
+                format!(
+                    "hardening::probe_destination_store failed creating destination directory {:?}",
+                    destination_root
+                )
+            })
+        },
+    ) {
         return DestinationHardening {
             id: id.to_string(),
             path: path_str,
@@ -305,7 +378,17 @@ fn probe_destination_store(
     }
 
     let store_root = versioned::store_root_path(destination_root);
-    if let Err(e) = fs::create_dir_all(&store_root) {
+    if let Err(e) = run_blocking_io(
+        "gui::hardening::probe_destination_store create store directory",
+        || {
+            fs::create_dir_all(&store_root).with_context(|| {
+                format!(
+                    "hardening::probe_destination_store failed creating store directory {:?}",
+                    store_root
+                )
+            })
+        },
+    ) {
         return DestinationHardening {
             id: id.to_string(),
             path: path_str,
@@ -339,40 +422,87 @@ fn probe_destination_store(
     }
 }
 
-/// Purpose: Write and fsync a small probe file under the store root.
+/// Summary: Write and fsync a small probe file under the store root.
 ///
 /// Inputs: Store root directory path.
+///
 /// Outputs: `Ok(())` when write + fsync succeed.
+///
 /// Side effects: Creates and deletes a small file.
+///
 /// Error handling: Returns a contextual error string for UI display.
+///
 /// Ties to other methods: Used by `probe_destination_store`.
-/// Why: Free-space checks do not guarantee write permission; a real write probe catches mount/ACL issues.
+///
+/// Why this exists: Free-space checks do not guarantee write permission; a real write probe catches mount/ACL issues.
 fn write_probe_file(store_root: &Path) -> Result<(), String> {
+    let policy = BlockingIoPolicy::single_attempt(BlockingIoPolicy::bootstrap_defaults().timeout);
     let token = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let probe_path: PathBuf = store_root.join(format!(".hardening_probe_{token}.bin"));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&probe_path)
-        .map_err(|e| format!("cannot create probe file {}: {e}", probe_path.display()))?;
-    file.write_all(b"backup_sync_probe")
-        .map_err(|e| format!("cannot write probe file {}: {e}", probe_path.display()))?;
-    file.sync_all()
-        .map_err(|e| format!("cannot fsync probe file {}: {e}", probe_path.display()))?;
+    let mut file = run_with_policy(
+        "gui::hardening::write_probe_file create probe file",
+        &policy,
+        CancellationFlag::none(),
+        || {
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&probe_path)
+                .with_context(|| {
+                    format!(
+                        "hardening::write_probe_file failed creating probe file {:?}",
+                        probe_path
+                    )
+                })
+        },
+    )
+    .map_err(|e| format!("cannot create probe file {}: {e}", probe_path.display()))?;
+    run_with_policy(
+        "gui::hardening::write_probe_file write+sync probe file",
+        &policy,
+        CancellationFlag::none(),
+        || {
+            file.write_all(b"backup_sync_probe").with_context(|| {
+                format!("hardening::write_probe_file write failed {:?}", probe_path)
+            })?;
+            file.sync_all().with_context(|| {
+                format!("hardening::write_probe_file fsync failed {:?}", probe_path)
+            })?;
+            Ok(())
+        },
+    )
+    .map_err(|e| format!("cannot write probe file {}: {e}", probe_path.display()))?;
     drop(file);
-    fs::remove_file(&probe_path)
-        .map_err(|e| format!("cannot remove probe file {}: {e}", probe_path.display()))?;
+    run_with_policy(
+        "gui::hardening::write_probe_file remove probe file",
+        &policy,
+        CancellationFlag::none(),
+        || {
+            fs::remove_file(&probe_path).with_context(|| {
+                format!(
+                    "hardening::write_probe_file failed removing probe file {:?}",
+                    probe_path
+                )
+            })
+        },
+    )
+    .map_err(|e| format!("cannot remove probe file {}: {e}", probe_path.display()))?;
     Ok(())
 }
 
-/// Purpose: Probe OS snapshot capability (best-effort) for the current config.
+/// Summary: Probe OS snapshot capability (best-effort) for the current config.
 ///
 /// Inputs: Config and whether snapshots are required.
+///
 /// Outputs: A `SnapshotHardening` report describing support and a user-facing message.
+///
 /// Side effects: May invoke OS snapshot tooling.
+///
 /// Error handling: Never fails the overall hardening command; reports issues in the message.
+///
 /// Ties to other methods: Uses `prepare_source_view`, consistent with versioned backup scanning.
-/// Why: Snapshot-backed scans reduce inconsistencies when sources change during backup.
+///
+/// Why this exists: Snapshot-backed scans reduce inconsistencies when sources change during backup.
 fn probe_snapshots(cfg: &backup_core::Config, require_snapshots: bool) -> SnapshotHardening {
     let Some(sample) = cfg.watched.iter().find(|w| w.enabled) else {
         return SnapshotHardening {
@@ -384,12 +514,8 @@ fn probe_snapshots(cfg: &backup_core::Config, require_snapshots: bool) -> Snapsh
     let timeout_seconds = cfg
         .runtime
         .source_snapshot_timeout_seconds
-        .min(SNAPSHOT_PROBE_TIMEOUT_SECONDS);
-    match prepare_source_view(
-        &sample.path,
-        true,
-        timeout_seconds,
-    ) {
+        .min(cfg.runtime.hardening_snapshot_probe_timeout_seconds.max(1));
+    match prepare_source_view(&sample.path, true, timeout_seconds) {
         Ok(view) => {
             if view.snapshot().is_some() {
                 SnapshotHardening {

@@ -10,13 +10,19 @@ import {
 import { safeInvoke, wrapError } from './ipc';
 
 /**
- * Purpose: List available restore versions for each watched folder.
+ * Summary: List available restore versions for each watched folder.
  *
  * Inputs: None.
+ *
  * Outputs: A list of watched folders and their known versions.
- * Ties to: The Restore UI flow.
+ *
  * Side effects: Invokes IPC calls to the backend.
- * Why: Enables selecting a restore version from the GUI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: The Restore UI flow.
+ *
+ * Why this exists: Enables selecting a restore version from the GUI.
  */
 export async function listVersions(): Promise<FolderVersionsDto[]> {
   try {
@@ -29,13 +35,19 @@ export async function listVersions(): Promise<FolderVersionsDto[]> {
 }
 
 /**
- * Purpose: Restore a selected version for a watched folder.
+ * Summary: Restore a selected version for a watched folder.
  *
  * Inputs: Restore args (source folder, version id, mode, optional target dir).
+ *
  * Outputs: A restore result summary.
- * Ties to: The Restore UI flow.
+ *
  * Side effects: Writes files to disk and may delete files during in-place restores.
- * Why: Provides the end user restore behavior for versioned backups.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: The Restore UI flow.
+ *
+ * Why this exists: Provides the end user restore behavior for versioned backups.
  */
 export async function restoreVersion(args: RestoreArgs): Promise<RestoreResultDto> {
   try {
@@ -49,15 +61,23 @@ export async function restoreVersion(args: RestoreArgs): Promise<RestoreResultDt
 }
 
 /**
- * Purpose: List files within a specific version for file-level restore flows.
+ * Summary: List files within a specific version for file-level restore flows.
  *
  * Inputs: Source folder, version id, optional query, and optional limit.
+ *
  * Outputs: A list of matching file entries and a total file count.
- * Ties to: File-level Restore UI flow.
+ *
  * Side effects: Invokes IPC calls to the backend.
- * Why: Enables searching within a version manifest without loading everything client-side.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: File-level Restore UI flow.
+ *
+ * Why this exists: Enables searching within a version manifest without loading everything client-side.
  */
-export async function listVersionFiles(args: ListVersionFilesArgs): Promise<ListVersionFilesResultDto> {
+export async function listVersionFiles(
+  args: ListVersionFilesArgs,
+): Promise<ListVersionFilesResultDto> {
   try {
     return await safeInvoke<ListVersionFilesResultDto>('list_version_files_cmd', {
       args,
@@ -69,13 +89,19 @@ export async function listVersionFiles(args: ListVersionFilesArgs): Promise<List
 }
 
 /**
- * Purpose: Restore individual files from a selected version.
+ * Summary: Restore individual files from a selected version.
  *
  * Inputs: Source folder, version id, rel paths, mode, and optional target dir.
+ *
  * Outputs: A restore result summary.
- * Ties to: File-level Restore UI flow.
+ *
  * Side effects: Writes selected files to disk; does not delete extraneous files.
- * Why: Provide a safer restore option when only a few files are needed.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: File-level Restore UI flow.
+ *
+ * Why this exists: Provide a safer restore option when only a few files are needed.
  */
 export async function restoreFiles(args: RestoreFilesArgs): Promise<RestoreResultDto> {
   try {

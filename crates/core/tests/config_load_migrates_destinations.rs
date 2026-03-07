@@ -1,6 +1,19 @@
 use backup_core::{load_from_path, validate};
 use std::fs;
 
+/// Summary: load_from_path_migrates_missing_destinations_and_validates orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn load_from_path_migrates_missing_destinations_and_validates() {
     let temp = tempfile::tempdir().expect("tempdir");

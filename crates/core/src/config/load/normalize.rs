@@ -3,10 +3,15 @@ use crate::config::model::{self, Config, Destination};
 /// Summary: Normalizes a loaded config to keep backward compatibility across schema versions.
 ///
 /// Inputs: A parsed `Config` value (possibly from an older on-disk schema).
+///
 /// Outputs: A `Config` with required derived fields populated.
+///
 /// Side effects: None.
+///
 /// Error handling: None (best-effort normalization only; never fails).
+///
 /// Ties to other methods: Called by `config::load::file::{load_config, load_from_path}`.
+///
 /// Why this exists: Older configs may omit newer fields (like `destinations`), but validation and runtime require them.
 pub fn normalize_loaded_config(mut cfg: Config) -> Config {
     if cfg.destinations.is_empty() {

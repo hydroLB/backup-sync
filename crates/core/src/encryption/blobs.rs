@@ -38,13 +38,18 @@ pub struct BlobCodec {
 }
 
 impl BlobCodec {
-    /// Purpose: Build a reusable blob codec from the provided config.
+    /// Summary: Build a reusable blob codec from the provided config.
     ///
     /// Inputs: Loaded config.
+    ///
     /// Outputs: A `BlobCodec` that can write and decode blobs according to config.
+    ///
     /// Side effects: Loads encryption key material when encryption is enabled.
+    ///
     /// Error handling: Returns contextual errors for key loading and config inconsistencies.
+    ///
     /// Ties to other methods: Used by versioned backup write, restore, and scrub routines.
+    ///
     /// Why this exists: Avoid reloading key files and re-parsing config for each blob operation.
     pub fn from_config(cfg: &Config) -> Result<Self> {
         let cipher = BlobCipher::from_config(cfg)?;
@@ -56,13 +61,18 @@ impl BlobCodec {
         })
     }
 
-    /// Purpose: Encode and write a blob from a source file according to config.
+    /// Summary: Encode and write a blob from a source file according to config.
     ///
     /// Inputs: Source file path, output writer, and timeout in seconds.
+    ///
     /// Outputs: `Ok(plaintext_len)` when the source bytes are fully processed.
+    ///
     /// Side effects: Reads from disk, may compress and or encrypt, and writes blob bytes to `out`.
+    ///
     /// Error handling: Returns contextual errors for IO, compression, encryption, and timeouts.
+    ///
     /// Ties to other methods: Called by the versioned store when persisting new blobs.
+    ///
     /// Why this exists: Centralize blob encoding decisions so store logic stays simple.
     pub fn write_blob_from_file_to_writer(
         &self,
@@ -93,13 +103,18 @@ impl BlobCodec {
         copy_plain_file_to_writer(src_path, out, timeout_seconds)
     }
 
-    /// Purpose: Copy blob plaintext bytes to the provided writer, decoding as needed.
+    /// Summary: Copy blob plaintext bytes to the provided writer, decoding as needed.
     ///
     /// Inputs: Blob path, output writer, and timeout in seconds.
+    ///
     /// Outputs: Number of plaintext bytes written.
+    ///
     /// Side effects: Reads blob bytes and may decrypt and or decompress.
+    ///
     /// Error handling: Returns contextual errors for IO, decoding, and timeouts.
+    ///
     /// Ties to other methods: Used by restore to reconstruct files from stored blobs.
+    ///
     /// Why this exists: Restore must always operate on plaintext bytes regardless of blob encoding.
     pub fn copy_blob_plaintext_to_writer(
         &self,
@@ -116,13 +131,18 @@ impl BlobCodec {
         )
     }
 
-    /// Purpose: Compute a SHA-256 of blob plaintext bytes, decoding as needed.
+    /// Summary: Compute a SHA-256 of blob plaintext bytes, decoding as needed.
     ///
     /// Inputs: Blob path and timeout in seconds.
+    ///
     /// Outputs: Hex SHA-256 of plaintext bytes.
+    ///
     /// Side effects: Reads blob bytes and may decrypt and or decompress.
+    ///
     /// Error handling: Returns contextual errors for IO, decoding, and timeouts.
+    ///
     /// Ties to other methods: Used by scrub to compare stored blob contents to manifest hashes.
+    ///
     /// Why this exists: Verification must hash the original plaintext even when blobs are stored encoded.
     pub fn sha256_plaintext_blob(&self, blob_path: &Path, timeout_seconds: u64) -> Result<String> {
         sha256_plaintext_blob_impl(
@@ -135,13 +155,19 @@ impl BlobCodec {
 }
 
 impl BlobCipher {
-    /// Purpose: Build a blob cipher from config when encryption is enabled.
+    /// Summary: Build a blob cipher from config when encryption is enabled.
     ///
     /// Inputs: a loaded config.
+    ///
     /// Outputs: `Ok(Some(cipher))` when enabled, otherwise `Ok(None)`.
-    /// Ties to: versioned blob writes, restore reads, and scrub hashing.
+    ///
     /// Side effects: Reads key material from disk when enabled.
-    /// Why: avoid repeatedly loading key files on hot paths.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: versioned blob writes, restore reads, and scrub hashing.
+    ///
+    /// Why this exists: avoid repeatedly loading key files on hot paths.
     pub fn from_config(cfg: &Config) -> Result<Option<Self>> {
         if !cfg.encryption.enabled {
             return Ok(None);
@@ -171,14 +197,19 @@ impl BlobCipher {
         }))
     }
 
-    /// Purpose: Encrypt a source file into the provided writer using a streaming AEAD format.
+    /// Summary: Encrypt a source file into the provided writer using a streaming AEAD format.
     ///
     /// Inputs: source file path, output writer, and timeout in seconds.
+    ///
     /// Outputs: `Ok(plaintext_len)` when encryption completes.
-    /// Ties to: versioned blob write pipeline.
+    ///
     /// Side effects: Reads from source disk and writes ciphertext to the output writer.
+    ///
     /// Error handling: Returns contextual errors on IO failures, encryption failures, or timeouts.
-    /// Why: avoid loading entire files into memory while providing authenticated encryption.
+    ///
+    /// Ties to other methods: versioned blob write pipeline.
+    ///
+    /// Why this exists: avoid loading entire files into memory while providing authenticated encryption.
     pub fn encrypt_file_to_writer(
         &self,
         src_path: &Path,
@@ -196,13 +227,18 @@ impl BlobCipher {
         )
     }
 
-    /// Purpose: Encrypt a source file after per-chunk Zstd compression into the provided writer.
+    /// Summary: Encrypt a source file after per-chunk Zstd compression into the provided writer.
     ///
     /// Inputs: source file path, output writer, timeout seconds, and zstd compression level.
+    ///
     /// Outputs: `Ok(plaintext_len)` when encoding completes.
+    ///
     /// Side effects: Reads plaintext from disk, compresses, encrypts, and writes ciphertext to `out`.
+    ///
     /// Error handling: Returns contextual errors for IO, compression, encryption, and timeouts.
+    ///
     /// Ties to other methods: Used when both encryption and compression are enabled.
+    ///
     /// Why this exists: Compression before encryption reduces destination size while keeping AEAD integrity meaningful.
     pub fn encrypt_file_to_writer_zstd_chunked(
         &self,
@@ -222,6 +258,19 @@ impl BlobCipher {
         )
     }
 
+    /// Summary: copy_blob_plaintext_to_writer orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn copy_blob_plaintext_to_writer(
         &self,
         blob_path: &Path,
@@ -237,10 +286,36 @@ impl BlobCipher {
         )
     }
 
+    /// Summary: sha256_plaintext_blob orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn sha256_plaintext_blob(&self, blob_path: &Path, timeout_seconds: u64) -> Result<String> {
         sha256_plaintext_blob_impl(blob_path, timeout_seconds, Instant::now(), Some(self))
     }
 
+    /// Summary: decrypt_stream_to_writer orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn decrypt_stream_to_writer(
         &self,
         file: &mut dyn Read,
@@ -302,6 +377,19 @@ impl BlobCipher {
         Ok(total)
     }
 
+    /// Summary: decrypt_stream_to_hasher orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn decrypt_stream_to_hasher(
         &self,
         file: &mut dyn Read,
@@ -351,14 +439,53 @@ impl BlobCipher {
     }
 }
 
+/// Summary: blob_cipher_from_config orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn blob_cipher_from_config(cfg: &Config) -> Result<Option<BlobCipher>> {
     BlobCipher::from_config(cfg)
 }
 
+/// Summary: blob_codec_from_config orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn blob_codec_from_config(cfg: &Config) -> Result<BlobCodec> {
     BlobCodec::from_config(cfg)
 }
 
+/// Summary: copy_blob_plaintext_to_writer orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn copy_blob_plaintext_to_writer(
     cfg: &Config,
     blob_path: &Path,
@@ -368,6 +495,19 @@ pub fn copy_blob_plaintext_to_writer(
     BlobCodec::from_config(cfg)?.copy_blob_plaintext_to_writer(blob_path, out, timeout_seconds)
 }
 
+/// Summary: sha256_plaintext_blob orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn sha256_plaintext_blob(
     cfg: &Config,
     blob_path: &Path,
@@ -389,6 +529,19 @@ enum ProbedMagic {
     Plain,
 }
 
+/// Summary: encrypt_file_to_writer_enc_stream orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn encrypt_file_to_writer_enc_stream(
     src_path: &Path,
     out: &mut dyn Write,
@@ -484,6 +637,19 @@ fn encrypt_file_to_writer_enc_stream(
     Ok(total_plain)
 }
 
+/// Summary: copy_plain_file_to_writer orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn copy_plain_file_to_writer(
     src_path: &Path,
     out: &mut dyn Write,
@@ -499,6 +665,19 @@ fn copy_plain_file_to_writer(
     copy_plain_stream(&mut file, out, timeout_seconds, start)
 }
 
+/// Summary: compress_file_to_writer_zstd_chunked orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn compress_file_to_writer_zstd_chunked(
     src_path: &Path,
     out: &mut dyn Write,
@@ -544,6 +723,19 @@ fn compress_file_to_writer_zstd_chunked(
     Ok(total_plain)
 }
 
+/// Summary: copy_blob_plaintext_to_writer_impl orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn copy_blob_plaintext_to_writer_impl(
     blob_path: &Path,
     out: &mut dyn Write,
@@ -596,6 +788,19 @@ fn copy_blob_plaintext_to_writer_impl(
     }
 }
 
+/// Summary: sha256_plaintext_blob_impl orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn sha256_plaintext_blob_impl(
     blob_path: &Path,
     timeout_seconds: u64,
@@ -668,6 +873,19 @@ fn sha256_plaintext_blob_impl(
     Ok(crate::hashing::hex_lower(digest.as_slice()))
 }
 
+/// Summary: read_encrypted_header orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn read_encrypted_header(
     input: &mut dyn Read,
     timeout_seconds: u64,
@@ -699,6 +917,19 @@ fn read_encrypted_header(
     })
 }
 
+/// Summary: read_compressed_header orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn read_compressed_header(
     input: &mut dyn Read,
     timeout_seconds: u64,
@@ -724,6 +955,19 @@ fn read_compressed_header(
     Ok(alg)
 }
 
+/// Summary: probe_magic_prefix orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn probe_magic_prefix(
     input: &mut dyn Read,
     timeout_seconds: u64,
@@ -761,6 +1005,19 @@ fn probe_magic_prefix(
     Ok((ProbedMagic::Plain, magic.to_vec()))
 }
 
+/// Summary: build_zstd_payload orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_zstd_payload(pt: &[u8], level: i32) -> Result<Vec<u8>> {
     if pt.len() > u32::MAX as usize {
         anyhow::bail!(
@@ -778,6 +1035,19 @@ fn build_zstd_payload(pt: &[u8], level: i32) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Summary: decompress_zstd_payload orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn decompress_zstd_payload(payload: &[u8]) -> Result<Vec<u8>> {
     if payload.len() < 4 {
         anyhow::bail!(
@@ -805,6 +1075,19 @@ fn decompress_zstd_payload(payload: &[u8]) -> Result<Vec<u8>> {
         .context("encryption::decompress_zstd_payload zstd decompress failed")
 }
 
+/// Summary: decompress_stream_to_writer orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn decompress_stream_to_writer(
     input: &mut dyn Read,
     out: &mut dyn Write,
@@ -827,6 +1110,19 @@ fn decompress_stream_to_writer(
     Ok(total)
 }
 
+/// Summary: decompress_stream_to_hasher orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn decompress_stream_to_hasher(
     input: &mut dyn Read,
     hasher: &mut Sha256,
@@ -846,6 +1142,19 @@ fn decompress_stream_to_hasher(
     Ok(())
 }
 
+/// Summary: copy_plain_stream orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn copy_plain_stream(
     input: &mut dyn Read,
     out: &mut dyn Write,
@@ -874,6 +1183,19 @@ fn copy_plain_stream(
     Ok(total)
 }
 
+/// Summary: read_chunk orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn read_chunk(
     input: &mut fs::File,
     buf: &mut [u8],
@@ -891,6 +1213,19 @@ fn read_chunk(
         .context("encryption::read_chunk failed reading source bytes")
 }
 
+/// Summary: read_exact_timeout orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn read_exact_timeout(
     input: &mut dyn Read,
     buf: &mut [u8],
@@ -916,6 +1251,19 @@ fn read_exact_timeout(
     Ok(())
 }
 
+/// Summary: write_framed_chunk orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn write_framed_chunk(out: &mut dyn Write, chunk: &[u8], is_last: bool) -> Result<()> {
     if chunk.len() > 0x7FFF_FFFF {
         anyhow::bail!(
@@ -934,6 +1282,19 @@ fn write_framed_chunk(out: &mut dyn Write, chunk: &[u8], is_last: bool) -> Resul
     Ok(())
 }
 
+/// Summary: read_framed_chunk orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn read_framed_chunk(
     input: &mut dyn Read,
     timeout_seconds: u64,
@@ -951,6 +1312,19 @@ fn read_framed_chunk(
     Ok((buf, is_last))
 }
 
+/// Summary: timed_out orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn timed_out(timeout_seconds: u64, start: Instant) -> bool {
     timeout_seconds > 0 && start.elapsed() > Duration::from_secs(timeout_seconds)
 }

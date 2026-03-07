@@ -1,14 +1,20 @@
 use tokio::signal;
 use tracing::warn;
 
-/// Purpose: Waits for a shutdown signal such as Ctrl C.
+/// Summary: Waits for a shutdown signal such as Ctrl C.
 ///
 /// Inputs: none.
+///
 /// Outputs: `()` after the signal is observed or an error is logged.
-/// Ties to: daemon shutdown handling.
+///
 /// Side effects: Registers signal listeners and awaits signal streams.
-/// Why: provide a unified shutdown hook for the daemon.
-pub async fn shutdown_signal() {
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: daemon shutdown handling.
+///
+/// Why this exists: provide a unified shutdown hook for the daemon.
+pub(crate) async fn shutdown_signal() {
     #[cfg(unix)]
     let mut term = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
         Ok(stream) => Some(stream),

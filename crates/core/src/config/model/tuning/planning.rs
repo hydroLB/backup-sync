@@ -13,13 +13,19 @@ pub struct PlanningTuning {
 }
 
 impl Default for PlanningTuning {
-    /// Purpose: Builds a baseline planning tuning profile for hashing cadence and plan caps.
+    /// Summary: Builds a baseline planning tuning profile for hashing cadence and plan caps.
     ///
     /// Inputs: the default functions in `config::model::defaults`.
+    ///
     /// Outputs: a fully populated tuning profile.
-    /// Ties to: backup planning and guardrail enforcement.
+    ///
     /// Side effects: None.
-    /// Why: centralize planning knobs so defaults stay aligned across the codebase.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: backup planning and guardrail enforcement.
+    ///
+    /// Why this exists: centralize planning knobs so defaults stay aligned across the codebase.
     fn default() -> Self {
         Self {
             hash_check_interval: crate::config::model::defaults::default_hash_check_interval(),
