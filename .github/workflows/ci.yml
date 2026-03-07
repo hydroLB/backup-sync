@@ -372,7 +372,7 @@ jobs:
         run: |
           mkdir -p .reports/ci
           make -n ci > .reports/ci/ci-contract.txt
-          grep -E "fmt-check|clippy|boundaries-check|operability-check|frontend-lint|frontend-format-check|frontend-typecheck|hygiene-check|lockfile-check|perf-check|coverage|security-check|deny|audit|secrets" .reports/ci/ci-contract.txt
+          grep -E "fmt-check|clippy|boundaries-check|operability-check|frontend-lint|frontend-format-check|frontend-typecheck|hygiene-check|lockfile-check|perf-check|coverage|security-check|deny|audit|secrets|check-repo-hygiene" .reports/ci/ci-contract.txt
 
       - name: Upload CI contract artifact
         uses: actions/upload-artifact@v4

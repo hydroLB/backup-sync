@@ -66,6 +66,11 @@ Quickstart (dev):
 Local-only paths:
 - `.env`, `.env.*` except `.env.example`, `.reports/`, `.npm-cache/`, `.vscode/`, `.codex/`, `projects/`, and frontend coverage output are intentionally ignored so local state and secrets do not enter Git.
 
+Public-repo contract:
+- Git must contain everything required to rebuild the app from a clean clone except local secrets and machine-specific runtime state.
+- Pre-commit, pre-push, and CI all run a repository hygiene gate that blocks tracked local state, machine-specific absolute paths, restore-breaking omissions, and oversized tracked files.
+- To restore after local disk loss, clone the repo, install toolchains, run `make frontend-install`, then `make build` or `make run`.
+
 ## Usage
 
 ### Desktop app

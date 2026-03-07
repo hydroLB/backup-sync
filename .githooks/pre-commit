@@ -8,6 +8,7 @@ make frontend-format-check
 make clippy
 make frontend-lint
 make frontend-typecheck
+make hygiene-check
 make secrets-working-tree
 make test
 make frontend-test

@@ -62,6 +62,7 @@ hygiene-check:
 		git ls-files | rg "(^|/)\\.DS_Store$$|Thumbs\\.db$$|Desktop\\.ini$$"; \
 		exit 1; \
 	fi
+	./scripts/check-repo-hygiene.sh
 
 boundaries-check:
 	./scripts/check-boundaries.sh
