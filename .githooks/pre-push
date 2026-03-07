@@ -7,6 +7,9 @@ cargo test -p backup_core -p daemon -p cli
 echo "[pre-push] Running frontend tests"
 ( cd crates/gui/frontend && npm test )
 
+echo "[pre-push] Running repository hygiene gate"
+make hygiene-check
+
 echo "[pre-push] Running full git history secret scan"
 make secrets-history
 
