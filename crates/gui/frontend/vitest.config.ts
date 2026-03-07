@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    pool: "threads",
+    fileParallelism: false,
+    maxWorkers: 1,
     setupFiles: ["./vitest.setup.ts"],
     include: ["src/utils/__tests__/**/*.test.ts", "src/**/*.test.tsx"],
     coverage: {

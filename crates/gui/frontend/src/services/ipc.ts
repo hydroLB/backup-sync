@@ -263,7 +263,7 @@ export async function safeInvokeWithTimeout<T>(
   return await withTimeout(invoke<T>(cmd, args), effectiveTimeout, `IPC ${cmd}`);
 }
 
-type TauriModule = typeof import('@tauri-apps/api/tauri');
+type TauriModule = typeof import('@tauri-apps/api/core');
 let tauriModulePromise: Promise<TauriModule> | null = null;
 
 /**
@@ -284,7 +284,7 @@ let tauriModulePromise: Promise<TauriModule> | null = null;
 export async function loadTauriInvoke(): Promise<TauriModule> {
   try {
     if (!tauriModulePromise) {
-      tauriModulePromise = import('@tauri-apps/api/tauri');
+      tauriModulePromise = import('@tauri-apps/api/core');
     }
     return await tauriModulePromise;
   } catch (error) {

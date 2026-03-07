@@ -4,9 +4,11 @@ use crate::commands::service::common::run_command;
 use crate::tray;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::api::dialog;
 use tauri::async_runtime;
-use tauri::{Manager, SystemTrayEvent, WindowEvent};
+use tauri::menu::MenuEvent;
+use tauri::tray::TrayIconEvent;
+use tauri::{Manager, WindowEvent};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tracing::warn;
 
 /// Summary: Stores mutable app-action lifecycle flags used by tray/window handlers.
@@ -61,7 +63,7 @@ pub(crate) fn new_action_state() -> SharedActionState {
 ///
 /// Why this exists: provide a consistent way to surface the UI.
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_window("main") {
+    if let Some(window) = app.get_webview_window("main") {
         if let Err(error) = window.unminimize() {
             warn!(
                 error = %error,
@@ -98,21 +100,38 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
 /// Why this exists: keep the `tauri::Builder` wiring readable and keep the tray UX minimal.
 pub(crate) fn handle_tray_event(
     app: &tauri::AppHandle,
-    event: SystemTrayEvent,
+    event: TrayIconEvent,
     state: &SharedActionState,
 ) {
     if state.is_quitting.load(Ordering::Relaxed) {
         return;
     }
     match event {
-        // macOS convention: left click opens the tray menu. Avoid forcing the main window
-        // to the foreground on every click.
-        SystemTrayEvent::DoubleClick { .. } => show_main_window(app),
-        SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
-            tray::SHOW => show_main_window(app),
-            tray::QUIT => confirm_and_quit(app, state.clone()),
-            _ => {}
-        },
+        TrayIconEvent::DoubleClick { .. } => show_main_window(app),
+        _ => {}
+    }
+}
+
+/// Summary: Routes tray menu events to application actions.
+///
+/// Inputs: the app handle, the menu event, and shared action state.
+///
+/// Outputs: `()` after dispatching the selected action.
+///
+/// Side effects: May show the main window or initiate application quit.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `handle_tray_event` and tray wiring in `app::run`.
+///
+/// Why this exists: Tauri 2 tray-menu activation is delivered via the global menu event stream.
+pub(crate) fn handle_menu_event(app: &tauri::AppHandle, event: MenuEvent, state: &SharedActionState) {
+    if state.is_quitting.load(Ordering::Relaxed) {
+        return;
+    }
+    match event.id().as_ref() {
+        tray::SHOW => show_main_window(app),
+        tray::QUIT => confirm_and_quit(app, state.clone()),
         _ => {}
     }
 }
@@ -130,8 +149,12 @@ pub(crate) fn handle_tray_event(
 /// Ties to other methods: lifecycle wiring in `app::run`.
 ///
 /// Why this exists: avoid macOS-specific close quirks leaving a blank re-opened window.
-pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent, state: &SharedActionState) {
-    if let WindowEvent::CloseRequested { api, .. } = event.event() {
+pub(crate) fn handle_window_event(
+    window: &tauri::Window,
+    event: &WindowEvent,
+    state: &SharedActionState,
+) {
+    if let WindowEvent::CloseRequested { api, .. } = event {
         let runtime = super::tuning::resolve_runtime_tuning();
         let close_final_backup_debounce =
             std::time::Duration::from_millis(runtime.gui_close_final_backup_debounce_ms.max(1));
@@ -144,7 +167,7 @@ pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent, state: &Share
         }
         // Prevent the app from fully quitting on window close. The menu bar icon remains active.
         api.prevent_close();
-        if let Err(error) = event.window().hide() {
+        if let Err(error) = window.hide() {
             warn!(
                 error = %error,
                 "app::actions::handle_window_event failed to hide main window"
@@ -208,11 +231,15 @@ fn confirm_and_quit(app: &tauri::AppHandle, state: SharedActionState) {
 
     let handle = app.clone();
     let confirm_state = state.clone();
-    dialog::confirm(
-        Option::<&tauri::Window>::None,
-        "Quit Backup Sync?",
-        "Quitting will stop background backups. Are you sure you want to quit?",
-        move |confirmed| {
+    handle
+        .dialog()
+        .message("Quitting will stop background backups. Are you sure you want to quit?")
+        .title("Quit Backup Sync?")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit".to_string(),
+            "Cancel".to_string(),
+        ))
+        .show(move |confirmed| {
             if !confirmed {
                 return;
             }
@@ -221,21 +248,22 @@ fn confirm_and_quit(app: &tauri::AppHandle, state: SharedActionState) {
             }
 
             // Disable tray quit item immediately to prevent duplicate clicks.
-            let tray_handle = handle.tray_handle();
-            if let Err(error) = tray_handle.get_item(tray::QUIT).set_enabled(false) {
-                warn!(
-                    error = %error,
-                    "app::actions::confirm_and_quit failed disabling quit tray item"
-                );
-            }
-            if let Err(error) = tray_handle.get_item(tray::QUIT).set_title("Quitting…") {
-                warn!(
-                    error = %error,
-                    "app::actions::confirm_and_quit failed updating quit tray item title"
-                );
+            if let Some(quit_item) = super::tray_menu::quit_handle() {
+                if let Err(error) = quit_item.set_enabled(false) {
+                    warn!(
+                        error = %error,
+                        "app::actions::confirm_and_quit failed disabling quit tray item"
+                    );
+                }
+                if let Err(error) = quit_item.set_text("Quitting...") {
+                    warn!(
+                        error = %error,
+                        "app::actions::confirm_and_quit failed updating quit tray item title"
+                    );
+                }
             }
 
-            if let Some(window) = handle.get_window("main") {
+            if let Some(window) = handle.get_webview_window("main") {
                 if let Err(error) = window.hide() {
                     warn!(
                         error = %error,
@@ -247,8 +275,7 @@ fn confirm_and_quit(app: &tauri::AppHandle, state: SharedActionState) {
             async_runtime::spawn(async move {
                 quit_sequence(handle).await;
             });
-        },
-    );
+        });
 }
 
 /// Summary: Run one last backup before quitting with a time bound.
@@ -332,7 +359,7 @@ async fn quit_sequence(app: tauri::AppHandle) {
     pause_backups_best_effort();
     stop_background_daemon_best_effort_async(daemon_stop_timeout).await;
 
-    if let Some(window) = app.get_window("main") {
+    if let Some(window) = app.get_webview_window("main") {
         if let Err(error) = window.close() {
             warn!(
                 error = %error,

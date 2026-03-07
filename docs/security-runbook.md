@@ -57,6 +57,14 @@ If `make deny` fails:
 3. Ban/wildcard issue:
    - pin explicit version in `Cargo.toml` and regenerate `Cargo.lock`.
 
+## Current Rust Advisory Exceptions
+The Rust advisory allowlist is currently limited to upstream Tauri desktop-stack warnings that remain unresolved in published dependencies:
+
+1. GTK3 and related Linux webview or tray crates pulled by `tauri`, `wry`, and tray or dialog support.
+2. `urlpattern` unicode helper crates pulled transitively by `tauri-utils`.
+
+Re-check these exceptions whenever Tauri, WRY, or the dialog or tray plugins are upgraded. Do not add unrelated advisory IDs to the allowlist.
+
 ## Incident Notes Template
 For security-impacting PRs, include:
 
