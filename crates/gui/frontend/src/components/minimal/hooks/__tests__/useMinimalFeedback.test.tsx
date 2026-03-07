@@ -13,10 +13,15 @@ type Controller = {
  * Summary: Harness component to render feedback hook state for tests.
  *
  * Inputs: `onEvent` callback and an imperative controller ref.
+ *
  * Outputs: Renders "Saved" when the badge is visible.
+ *
  * Side effects: Exposes the hook `emitEvent` method via a ref.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Tests `useMinimalFeedback` behavior in isolation.
+ *
  * Why this exists: Keep badge and toast logic testable without relying on full screen renders.
  */
 function Harness({
@@ -26,7 +31,7 @@ function Harness({
   onEvent: (msg: string, kind?: EventKind) => void;
   controllerRef: React.MutableRefObject<Controller | null>;
 }) {
-  const { emitEvent, showSavedBadge, savedBadgeNonce } = useMinimalFeedback({ onEvent });
+  const { emitEvent, inline, showSavedBadge, savedBadgeNonce } = useMinimalFeedback({ onEvent });
   const emitRef = useRef(emitEvent);
   emitRef.current = emitEvent;
 
@@ -38,7 +43,12 @@ function Harness({
     };
   }, [controllerRef]);
 
-  return <>{showSavedBadge ? <div key={savedBadgeNonce}>Saved</div> : null}</>;
+  return (
+    <>
+      {showSavedBadge ? <div key={savedBadgeNonce}>Saved</div> : null}
+      {inline ? <div>{inline.msg}</div> : null}
+    </>
+  );
 }
 
 describe('useMinimalFeedback', () => {
@@ -84,5 +94,17 @@ describe('useMinimalFeedback', () => {
 
     const second = screen.getByText('Saved');
     expect(second).not.toBe(first);
+  });
+
+  it('shows inline success for scoped success messages', async () => {
+    const controllerRef = { current: null as Controller | null };
+    render(<Harness onEvent={() => undefined} controllerRef={controllerRef} />);
+
+    await act(async () => {
+      controllerRef.current?.emit('Primary destination set to /tmp/backups.', 'ok', 'destination');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    expect(screen.getByText('Primary destination set to /tmp/backups.')).toBeInTheDocument();
   });
 });

@@ -7,6 +7,19 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
+/// Summary: build_cfg orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_cfg(source: &Path, dest: &Path) -> Config {
     Config {
         backup_root: dest.to_path_buf(),
@@ -41,6 +54,19 @@ fn build_cfg(source: &Path, dest: &Path) -> Config {
     }
 }
 
+/// Summary: simulate_reports_changes_and_dedupe_savings orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn simulate_reports_changes_and_dedupe_savings() {
     let tmp = tempdir().expect("versioned_simulate::simulate_reports_changes tempdir");
@@ -88,6 +114,19 @@ fn simulate_reports_changes_and_dedupe_savings() {
     assert_eq!(sim2.bytes_to_write, 0);
 }
 
+/// Summary: simulate_counts_adds_and_deletes orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn simulate_counts_adds_and_deletes() {
     let tmp = tempdir().expect("versioned_simulate::simulate_counts_adds tempdir");

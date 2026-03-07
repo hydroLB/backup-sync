@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Config, WatchedPath } from '../../settings/types';
+import { Config, WatchedPath } from '../../../domain/config';
 import { ensurePrimaryDestination, normalizeWatched } from '../helpers/config';
 
 type EventKind = 'ok' | 'error' | 'info';
@@ -16,7 +16,7 @@ type Pickers = {
 type Params = {
   cfg: Config | null;
   primaryId: string | null;
-  persist: (next: Config) => Promise<void>;
+  persist: (next: Config, successMessage?: string) => Promise<void>;
   pickers: Pickers;
   onEvent: (msg: string, kind?: EventKind) => void;
 };
@@ -27,7 +27,11 @@ type MinimalActions = {
   removeDestination: (destinationId: string) => Promise<void>;
   addFolder: () => Promise<void>;
   addFile: () => Promise<void>;
-  removePath: (path: string, kind: 'File' | 'Directory', sourceDestinationId: string) => Promise<void>;
+  removePath: (
+    path: string,
+    kind: 'File' | 'Directory',
+    sourceDestinationId: string,
+  ) => Promise<void>;
   updateKeep: (
     path: string,
     kind: 'File' | 'Directory',
@@ -43,19 +47,40 @@ type MinimalActions = {
 };
 
 /**
+ * Summary: Format a user-facing label for the number of affected destinations.
+ *
+ * Inputs: `count` as the number of configured destinations touched by an action.
+ *
+ * Outputs: Singular or plural destination label text.
+ *
+ * Side effects: None.
+ *
+ * Error handling: None.
+ *
+ * Ties to other methods: Used by add-path success feedback.
+ *
+ * Why this exists: Keep minimal success messages concise and grammatically correct.
+ */
+function destinationCountLabel(count: number): string {
+  return `${count} destination${count === 1 ? '' : 's'}`;
+}
+
+/**
  * Summary: Resolve watched destination id with a safe fallback.
  *
  * Inputs: Watched entry and fallback destination id.
+ *
  * Outputs: Destination id that should be used for matching.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by add, remove, and update handlers for exact row targeting.
+ *
  * Why this exists: Older configs can omit destination ids and still need deterministic behavior.
  */
-function resolveWatchedDestinationId(
-  watched: WatchedPath,
-  fallbackDestinationId: string,
-): string {
+function resolveWatchedDestinationId(watched: WatchedPath, fallbackDestinationId: string): string {
   return watched.destination_id ?? fallbackDestinationId;
 }
 
@@ -63,10 +88,15 @@ function resolveWatchedDestinationId(
  * Summary: Build a stable source key for watched entries ignoring destination assignment.
  *
  * Inputs: Source path and watched kind.
+ *
  * Outputs: Source key string.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used when cloning watched items across destinations.
+ *
  * Why this exists: A source path should be uniquely tracked per kind when expanding to all destinations.
  */
 function sourceKey(path: string, kind: 'File' | 'Directory'): string {
@@ -77,10 +107,15 @@ function sourceKey(path: string, kind: 'File' | 'Directory'): string {
  * Summary: Build a unique destination id for newly added destinations.
  *
  * Inputs: Config containing the existing destination list.
+ *
  * Outputs: Collision-safe destination id.
+ *
  * Side effects: None.
+ *
  * Error handling: Falls back to a timestamp suffix if deterministic ids are exhausted.
+ *
  * Ties to other methods: Used by `addDestination`.
+ *
  * Why this exists: Keep destination creation deterministic and avoid id conflicts.
  */
 function nextDestinationId(cfg: Config): string {
@@ -98,13 +133,24 @@ function nextDestinationId(cfg: Config): string {
  * Summary: Build minimal-mode action handlers that mutate config.
  *
  * Inputs: Current config, primary destination id, persist function, picker service, and event handler.
+ *
  * Outputs: A set of stable async handlers for destination selection and watched folder management.
+ *
  * Side effects: Opens native pickers and persists config updates via IPC services.
+ *
  * Error handling: Emits user-visible errors via `onEvent`.
+ *
  * Ties to other methods: Used by `MinimalMain` to wire section components without inline handler bodies.
+ *
  * Why this exists: Centralize config mutation logic so UI components remain presentational.
  */
-export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }: Params): MinimalActions {
+export function useMinimalActions({
+  cfg,
+  primaryId,
+  persist,
+  pickers,
+  onEvent,
+}: Params): MinimalActions {
   const chooseDestination = useCallback(async () => {
     if (!cfg) return;
     try {
@@ -116,7 +162,7 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
         backup_root: picked,
         destinations: [{ ...dest, path: picked }, ...normalized.destinations.slice(1)],
       };
-      await persist(next);
+      await persist(next, `Primary destination set to ${picked}.`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`[useMinimalActions] Failed to choose destination: ${reason}`, 'error');
@@ -158,11 +204,14 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           destination_id: newDestinationId,
         });
       }
-      await persist({
-        ...normalized,
-        destinations: nextDestinations,
-        watched: [...normalized.watched, ...additions],
-      });
+      await persist(
+        {
+          ...normalized,
+          destinations: nextDestinations,
+          watched: [...normalized.watched, ...additions],
+        },
+        `Added destination ${picked}. Existing protected paths now target it too.`,
+      );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`[useMinimalActions] Failed to add destination: ${reason}`, 'error');
@@ -178,7 +227,9 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           onEvent('At least one destination is required.', 'info');
           return;
         }
-        const exists = normalized.destinations.some((destination) => destination.id === destinationId);
+        const exists = normalized.destinations.some(
+          (destination) => destination.id === destinationId,
+        );
         if (!exists) {
           onEvent('Destination no longer exists. Reload and try again.', 'error');
           return;
@@ -188,7 +239,9 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           .filter((destination) => destination.id !== destinationId)
           .map((destination) => ({
             ...destination,
-            replicate_to: (destination.replicate_to || []).filter((destId) => destId !== destinationId),
+            replicate_to: (destination.replicate_to || []).filter(
+              (destId) => destId !== destinationId,
+            ),
           }));
 
         const nextPrimary = nextDestinations[0];
@@ -217,12 +270,15 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           }));
         const nextWatched = [...remainingWatched, ...backfilledWatched];
 
-        await persist({
-          ...normalized,
-          backup_root: nextPrimary.path,
-          destinations: nextDestinations,
-          watched: nextWatched,
-        });
+        await persist(
+          {
+            ...normalized,
+            backup_root: nextPrimary.path,
+            destinations: nextDestinations,
+            watched: nextWatched,
+          },
+          'Destination removed. Protected paths now use the remaining destinations.',
+        );
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         onEvent(`[useMinimalActions] Failed to remove destination: ${reason}`, 'error');
@@ -231,47 +287,56 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
     [cfg, onEvent, persist],
   );
 
-  const addPath = useCallback(async (kind: 'File' | 'Directory') => {
-    if (!cfg || !primaryId) return;
-    try {
-      await pickers.pickPathForDest(primaryId, kind, async (path, pickedKind, _destId) => {
-        try {
-          const { cfg: normalized } = ensurePrimaryDestination(cfg);
-          const fallbackDestinationId = normalized.destinations[0]?.id || primaryId;
-          const destinationIds = normalized.destinations.map((destination) => destination.id);
-          const existingDestinationIds = new Set(
-            normalized.watched
-              .filter(
-                (entry) => entry.path === path && (entry.kind ?? 'Directory') === pickedKind,
-              )
-              .map((entry) => resolveWatchedDestinationId(entry, fallbackDestinationId)),
-          );
-          const destinationIdsToAdd = destinationIds.filter(
-            (destinationId) => !existingDestinationIds.has(destinationId),
-          );
-          if (destinationIdsToAdd.length === 0) {
-            onEvent('That path is already protected for all destinations.', 'info');
-            return;
+  const addPath = useCallback(
+    async (kind: 'File' | 'Directory') => {
+      if (!cfg || !primaryId) return;
+      try {
+        await pickers.pickPathForDest(primaryId, kind, async (path, pickedKind, _destId) => {
+          try {
+            const { cfg: normalized } = ensurePrimaryDestination(cfg);
+            const fallbackDestinationId = normalized.destinations[0]?.id || primaryId;
+            const destinationIds = normalized.destinations.map((destination) => destination.id);
+            const existingDestinationIds = new Set(
+              normalized.watched
+                .filter(
+                  (entry) => entry.path === path && (entry.kind ?? 'Directory') === pickedKind,
+                )
+                .map((entry) => resolveWatchedDestinationId(entry, fallbackDestinationId)),
+            );
+            const destinationIdsToAdd = destinationIds.filter(
+              (destinationId) => !existingDestinationIds.has(destinationId),
+            );
+            if (destinationIdsToAdd.length === 0) {
+              onEvent('That path is already protected for all destinations.', 'info');
+              return;
+            }
+            const nextWatched = destinationIdsToAdd.map((destinationId) =>
+              normalizeWatched(
+                { path, kind: pickedKind, enabled: true, destination_id: destinationId },
+                fallbackDestinationId,
+                normalized.max_backups_per_file,
+              ),
+            );
+            const next: Config = {
+              ...normalized,
+              watched: [...normalized.watched, ...nextWatched],
+            };
+            await persist(
+              next,
+              `Added ${path} to ${destinationCountLabel(destinationIdsToAdd.length)}.`,
+            );
+          } catch (innerError) {
+            const reason = innerError instanceof Error ? innerError.message : String(innerError);
+            onEvent(`[useMinimalActions] Failed to add path: ${reason}`, 'error');
           }
-          const nextWatched = destinationIdsToAdd.map((destinationId) =>
-            normalizeWatched(
-              { path, kind: pickedKind, enabled: true, destination_id: destinationId },
-              fallbackDestinationId,
-              normalized.max_backups_per_file,
-            ),
-          );
-          const next: Config = { ...normalized, watched: [...normalized.watched, ...nextWatched] };
-          await persist(next);
-        } catch (innerError) {
-          const reason = innerError instanceof Error ? innerError.message : String(innerError);
-          onEvent(`[useMinimalActions] Failed to add path: ${reason}`, 'error');
-        }
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      onEvent(`[useMinimalActions] Path picker failed: ${reason}`, 'error');
-    }
-  }, [cfg, onEvent, persist, pickers, primaryId]);
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        onEvent(`[useMinimalActions] Path picker failed: ${reason}`, 'error');
+      }
+    },
+    [cfg, onEvent, persist, pickers, primaryId],
+  );
 
   const addFolder = useCallback(async () => {
     await addPath('Directory');
@@ -295,7 +360,7 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           );
         }),
       };
-      await persist(next);
+      await persist(next, `Removed ${path} from protection.`);
     },
     [cfg, persist, primaryId],
   );
@@ -318,7 +383,7 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           max_backups_per_file: nextKeep,
         };
       });
-      await persist({ ...cfg, watched: nextWatched });
+      await persist({ ...cfg, watched: nextWatched }, `Backups to keep updated for ${path}.`);
     },
     [cfg, persist, primaryId],
   );
@@ -331,6 +396,22 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
       destinationId: string,
     ) => {
       if (!cfg || !primaryId) return;
+      /**
+       * Summary: hasDestination orchestrates this method's core behavior.
+       *
+       * Inputs: Method parameters and required receiver state.
+       *
+       * Outputs: Return value and observable result for callers.
+       *
+       * Side effects: None beyond this method's explicit operations.
+       *
+       * Error handling: Propagates contextual errors to the caller when operations fail.
+       *
+       * Ties to other methods: Invoked by and composes with adjacent module methods.
+       *
+       * Why this exists: Keeps this behavior isolated, testable, and reusable.
+       */
+
       const hasDestination = (cfg.destinations || []).some(
         (destination) => destination.id === destinationId,
       );
@@ -357,8 +438,14 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
             currentDestinationId === sourceDestinationId
           );
         });
-        await persist({ ...cfg, watched: nextWatched });
-        onEvent('Path already exists at that destination, so the source destination entry was removed.', 'info');
+        await persist(
+          { ...cfg, watched: nextWatched },
+          `Moved ${path} to the selected destination.`,
+        );
+        onEvent(
+          'Path already exists at that destination, so the source destination entry was removed.',
+          'info',
+        );
         return;
       }
 
@@ -376,7 +463,7 @@ export function useMinimalActions({ cfg, primaryId, persist, pickers, onEvent }:
           destination_id: destinationId,
         };
       });
-      await persist({ ...cfg, watched: nextWatched });
+      await persist({ ...cfg, watched: nextWatched }, `Moved ${path} to the selected destination.`);
     },
     [cfg, onEvent, persist, primaryId],
   );

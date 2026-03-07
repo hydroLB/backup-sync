@@ -1,13 +1,19 @@
 import { formatBytes, formatDuration, formatDateTime, formatSince } from '../format';
 
 /**
- * Purpose: Verify null and undefined bytes format to a fallback.
+ * Summary: Verify null and undefined bytes format to a fallback.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts fallback strings.
- * Ties to: `formatBytes` null handling.
+ *
  * Side effects: None.
- * Why: Keep missing values readable in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatBytes` null handling.
+ *
+ * Why this exists: Keep missing values readable in the UI.
  */
 function assertFormatBytesHandlesNull(): void {
   try {
@@ -20,13 +26,19 @@ function assertFormatBytesHandlesNull(): void {
 }
 
 /**
- * Purpose: Verify byte formatting for small numbers.
+ * Summary: Verify byte formatting for small numbers.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts formatted byte label.
- * Ties to: `formatBytes` small number formatting.
+ *
  * Side effects: None.
- * Why: Ensure small sizes display correctly.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatBytes` small number formatting.
+ *
+ * Why this exists: Ensure small sizes display correctly.
  */
 function assertFormatBytesSmallNumbers(): void {
   try {
@@ -38,13 +50,19 @@ function assertFormatBytesSmallNumbers(): void {
 }
 
 /**
- * Purpose: Verify byte formatting for KB, MB, and GB.
+ * Summary: Verify byte formatting for KB, MB, and GB.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts formatted unit labels.
- * Ties to: `formatBytes` unit scaling.
+ *
  * Side effects: None.
- * Why: Keep consistent unit labels across UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatBytes` unit scaling.
+ *
+ * Why this exists: Keep consistent unit labels across UI.
  */
 function assertFormatBytesUnits(): void {
   try {
@@ -58,13 +76,19 @@ function assertFormatBytesUnits(): void {
 }
 
 /**
- * Purpose: Verify duration formatting handles null and negative values.
+ * Summary: Verify duration formatting handles null and negative values.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts fallback strings.
- * Ties to: `formatDuration` null handling.
+ *
  * Side effects: None.
- * Why: Prevent invalid durations from rendering as real values.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatDuration` null handling.
+ *
+ * Why this exists: Prevent invalid durations from rendering as real values.
  */
 function assertFormatDurationHandlesNull(): void {
   try {
@@ -77,13 +101,19 @@ function assertFormatDurationHandlesNull(): void {
 }
 
 /**
- * Purpose: Verify duration formatting for minutes and hours.
+ * Summary: Verify duration formatting for minutes and hours.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts formatted duration strings.
- * Ties to: `formatDuration` output formatting.
+ *
  * Side effects: None.
- * Why: Keep uptime displays consistent.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatDuration` output formatting.
+ *
+ * Why this exists: Keep uptime displays consistent.
  */
 function assertFormatDurationMinutesHours(): void {
   try {
@@ -96,13 +126,19 @@ function assertFormatDurationMinutesHours(): void {
 }
 
 /**
- * Purpose: Verify missing timestamps render as "Never".
+ * Summary: Verify missing timestamps render as "Never".
  *
  * Inputs: None.
+ *
  * Outputs: Asserts the "Never" label.
- * Ties to: `formatDateTime` null handling.
+ *
  * Side effects: None.
- * Why: Keep missing timestamps obvious in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatDateTime` null handling.
+ *
+ * Why this exists: Keep missing timestamps obvious in the UI.
  */
 function assertFormatDateTimeMissing(): void {
   try {
@@ -114,13 +150,19 @@ function assertFormatDateTimeMissing(): void {
 }
 
 /**
- * Purpose: Verify timestamps render human-readable dates.
+ * Summary: Verify timestamps render human-readable dates.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts formatted date contains the expected year.
- * Ties to: `formatDateTime` date formatting.
+ *
  * Side effects: None.
- * Why: Ensure audit timestamps are readable.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatDateTime` date formatting.
+ *
+ * Why this exists: Ensure audit timestamps are readable.
  */
 function assertFormatDateTimeTimestamp(): void {
   try {
@@ -133,13 +175,19 @@ function assertFormatDateTimeTimestamp(): void {
 }
 
 /**
- * Purpose: Verify missing timestamps for "since" render as "never".
+ * Summary: Verify missing timestamps for "since" render as "never".
  *
  * Inputs: None.
+ *
  * Outputs: Asserts the "never" label.
- * Ties to: `formatSince` null handling.
+ *
  * Side effects: None.
- * Why: Keep stale timestamps obvious in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatSince` null handling.
+ *
+ * Why this exists: Keep stale timestamps obvious in the UI.
  */
 function assertFormatSinceMissing(): void {
   try {
@@ -151,13 +199,19 @@ function assertFormatSinceMissing(): void {
 }
 
 /**
- * Purpose: Verify "since" formatting for minutes and hours.
+ * Summary: Verify "since" formatting for minutes and hours.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts formatted relative time strings.
- * Ties to: `formatSince` time delta formatting.
+ *
  * Side effects: None.
- * Why: Ensure relative timestamps are consistent.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `formatSince` time delta formatting.
+ *
+ * Why this exists: Ensure relative timestamps are consistent.
  */
 function assertFormatSinceMinutesHours(): void {
   try {

@@ -1,7 +1,15 @@
+use crate::commands::correlation;
 use crate::commands::error::ErrorEnvelope;
+use crate::commands::io_policy::run_blocking_io;
 use crate::commands::status::get_status;
+use anyhow::Context;
 use backup_core::config::load::default_config;
-use backup_core::{load_config, platform::paths, state::store::StateStore};
+use backup_core::{
+    load_validated_config,
+    logging::{redact_path, redact_text},
+    platform::paths,
+    state::store::StateStore,
+};
 use chrono::Utc;
 use dirs::desktop_dir;
 use fs2::free_space;
@@ -9,22 +17,28 @@ use serde::Serialize;
 use serde_json::json;
 use std::fs;
 use std::io::{Seek, Write};
-use tracing::warn;
+use tracing::{info, warn};
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
 #[tauri::command]
-/// Purpose: Generates a doctor report and writes it to the Desktop.
+/// Summary: Generates a doctor report and writes it to the Desktop.
 ///
 /// Inputs: an optional correlation id and auth state.
+///
 /// Outputs: the report path string or an error envelope.
-/// Ties to: GUI diagnostics commands.
+///
 /// Side effects: Reads config/state data, writes a report file, and emits logs.
-/// Why: provide a quick diagnostic snapshot for users.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI diagnostics commands.
+///
+/// Why this exists: provide a quick diagnostic snapshot for users.
 pub async fn doctor_report_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
-    let cid = correlation_id.unwrap_or_else(|| format!("doctor-{}", Utc::now().timestamp_millis()));
-    eprintln!("[cid={}] doctor report start", cid);
-    let cfg = load_config().map_err(|e| {
+    let cid = correlation::cid("doctor", correlation_id);
+    info!(cid = %cid, action = "doctor_report_start", "gui doctor report requested");
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!("support::doctor_report_cmd failed to load config: {}", e),
@@ -61,23 +75,38 @@ pub async fn doctor_report_cmd(correlation_id: Option<String>) -> Result<String,
         .ok_or_else(|| ErrorEnvelope::new("NO_DESKTOP", "No desktop directory available"))?;
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
     let dest = dest_dir.join(format!("BackupSync-doctor-{}.txt", ts));
-    fs::write(&dest, report).map_err(|e| {
+    run_blocking_io("gui::support::doctor_report_cmd write report", || {
+        fs::write(&dest, report.as_bytes())
+            .with_context(|| format!("support::doctor_report_cmd failed to write {:?}", dest))
+    })
+    .map_err(|e| {
         ErrorEnvelope::new(
             "DOCTOR_WRITE",
             format!("support::doctor_report_cmd failed to write report: {}", e),
         )
     })?;
-    eprintln!("[cid={}] doctor report written -> {}", cid, dest.display());
+    info!(
+        cid = %cid,
+        action = "doctor_report_complete",
+        report_path = %redact_path(&dest),
+        "gui doctor report written"
+    );
     Ok(dest.display().to_string())
 }
 
-/// Purpose: Builds the doctor report body from config and state data.
+/// Summary: Builds the doctor report body from config and state data.
 ///
 /// Inputs: config, state, and resolved config and state paths.
+///
 /// Outputs: the report string content.
-/// Ties to: doctor report generation.
+///
 /// Side effects: Reads filesystem metadata and writes a probe file via helpers.
-/// Why: centralize report formatting.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: doctor report generation.
+///
+/// Why this exists: centralize report formatting.
 fn build_doctor_report(
     cfg: &backup_core::Config,
     state: &backup_core::state::StoredState,
@@ -87,14 +116,17 @@ fn build_doctor_report(
     let mut report = String::new();
     report.push_str("# Backup Sync Doctor Report\n");
     report.push_str(&format!("Generated: {}\n\n", Utc::now()));
-    report.push_str(&format!("Config file: {:?}\n", config_path));
-    report.push_str(&format!("State file: {:?}\n", state_path));
+    report.push_str(&format!("Config file: {}\n", redact_path(config_path)));
+    report.push_str(&format!("State file: {}\n", redact_path(state_path)));
     let dest_path = cfg
         .destinations
         .first()
         .map(|d| d.path.clone())
         .unwrap_or_else(|| cfg.backup_root.clone());
-    report.push_str(&format!("Backup destination: {:?}\n", dest_path));
+    report.push_str(&format!(
+        "Backup destination: {}\n",
+        redact_path(&dest_path)
+    ));
     report.push_str(&format!(
         "Destinations defined: {}\n",
         cfg.destinations.len()
@@ -111,13 +143,19 @@ fn build_doctor_report(
     Ok(report)
 }
 
-/// Purpose: Appends missing watched path information to the report.
+/// Summary: Appends missing watched path information to the report.
 ///
 /// Inputs: the config and the report buffer.
+///
 /// Outputs: `()` after appending text.
-/// Ties to: doctor report generation.
+///
 /// Side effects: Reads filesystem metadata to detect missing paths.
-/// Why: surface missing paths in diagnostics.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: doctor report generation.
+///
+/// Why this exists: surface missing paths in diagnostics.
 fn append_missing_paths(cfg: &backup_core::Config, out: &mut String) {
     if cfg.watched.is_empty() {
         out.push_str("Problem: no watched paths configured.\n");
@@ -126,18 +164,24 @@ fn append_missing_paths(cfg: &backup_core::Config, out: &mut String) {
     if !missing.is_empty() {
         out.push_str(&format!("Missing watched paths ({}):\n", missing.len()));
         for m in missing {
-            out.push_str(&format!("  {:?}\n", m.path));
+            out.push_str(&format!("  {}\n", redact_path(&m.path)));
         }
     }
 }
 
-/// Purpose: Appends free space information to the report.
+/// Summary: Appends free space information to the report.
 ///
 /// Inputs: the config, destination path, and report buffer.
+///
 /// Outputs: `()` after appending text.
-/// Ties to: doctor report generation.
+///
 /// Side effects: Reads filesystem free space metadata.
-/// Why: surface free space issues in diagnostics.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: doctor report generation.
+///
+/// Why this exists: surface free space issues in diagnostics.
 fn append_free_space(cfg: &backup_core::Config, dest_path: &std::path::Path, out: &mut String) {
     match free_space(dest_path) {
         Ok(bytes) => {
@@ -155,18 +199,44 @@ fn append_free_space(cfg: &backup_core::Config, dest_path: &std::path::Path, out
     }
 }
 
-/// Purpose: Appends a write probe result to the report.
+/// Summary: Appends a write probe result to the report.
 ///
 /// Inputs: the destination path and report buffer.
+///
 /// Outputs: `()` after appending text.
-/// Ties to: doctor report generation.
+///
 /// Side effects: Writes and removes a probe file to verify writability.
-/// Why: surface writability issues in diagnostics.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: doctor report generation.
+///
+/// Why this exists: surface writability issues in diagnostics.
 fn append_write_probe(_cfg: &backup_core::Config, dest_path: &std::path::Path, out: &mut String) {
     let probe = dest_path.join(".backup_sync_probe");
-    match fs::write(&probe, b"probe") {
+    match run_blocking_io("gui::support::append_write_probe write probe", || {
+        fs::write(&probe, b"probe")
+            .with_context(|| format!("support::append_write_probe failed to write {:?}", probe))
+    }) {
         Ok(_) => {
-            let _ = fs::remove_file(&probe);
+            if let Err(error) =
+                run_blocking_io("gui::support::append_write_probe remove probe", || {
+                    fs::remove_file(&probe).with_context(|| {
+                        format!(
+                            "support::append_write_probe failed to remove probe {:?}",
+                            probe
+                        )
+                    })
+                })
+            {
+                let warn_cid = correlation::cid("doctor", None);
+                warn!(
+                    cid = %warn_cid,
+                    probe_path = %redact_path(&probe),
+                    error = %error,
+                    "support::append_write_probe failed to remove probe file"
+                );
+            }
             out.push_str("Write check: OK\n");
         }
         Err(e) => out.push_str(&format!(
@@ -177,13 +247,19 @@ fn append_write_probe(_cfg: &backup_core::Config, dest_path: &std::path::Path, o
 }
 
 #[derive(Serialize)]
-/// Purpose: Redacted configuration payload for diagnostics bundles.
+/// Summary: Redacted configuration payload for diagnostics bundles.
 ///
 /// Inputs: derived from the config.
+///
 /// Outputs: a redacted config snapshot.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: None.
-/// Why: include config metadata without sensitive path details.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: include config metadata without sensitive path details.
 struct RedactedConfig {
     backup_root: String,
     watched_count: usize,
@@ -211,16 +287,22 @@ struct RedactedConfig {
     scan_capacity_multiplier: usize,
 }
 
-/// Purpose: Builds a redacted config payload for diagnostics.
+/// Summary: Builds a redacted config payload for diagnostics.
 ///
 /// Inputs: the config.
+///
 /// Outputs: a redacted config struct.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: None.
-/// Why: share configuration metadata safely.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: share configuration metadata safely.
 fn build_redacted(cfg: &backup_core::Config) -> RedactedConfig {
     RedactedConfig {
-        backup_root: cfg.backup_root.display().to_string(),
+        backup_root: redact_path(&cfg.backup_root),
         watched_count: cfg.watched.len(),
         interval_seconds: cfg.interval_seconds,
         max_parallel_copies: cfg.max_parallel_copies,
@@ -247,18 +329,26 @@ fn build_redacted(cfg: &backup_core::Config) -> RedactedConfig {
     }
 }
 
-/// Purpose: Builds a diff between current config and defaults for diagnostics.
+/// Summary: Builds a diff between current config and defaults for diagnostics.
 ///
 /// Inputs: the config.
+///
 /// Outputs: a JSON diff payload.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: Reads platform defaults for comparison.
-/// Why: surface deviations from defaults in support bundles.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: surface deviations from defaults in support bundles.
 fn build_diff(cfg: &backup_core::Config) -> serde_json::Value {
     let defaults = match default_config() {
         Ok(defaults) => defaults,
         Err(e) => {
+            let warn_cid = correlation::cid("diag", None);
             warn!(
+                cid = %warn_cid,
                 "support::build_diff failed to load default config, using current config: {}",
                 e
             );
@@ -291,40 +381,58 @@ fn build_diff(cfg: &backup_core::Config) -> serde_json::Value {
     })
 }
 
-/// Purpose: Returns the tail of the log file for diagnostics.
+/// Summary: Returns the tail of the log file for diagnostics.
 ///
 /// Inputs: the log file path.
+///
 /// Outputs: the tail string.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: Reads the log file from disk.
-/// Why: include recent logs in support bundles.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: include recent logs in support bundles.
 fn tail_logs(path: &std::path::Path, max_lines: usize) -> String {
-    let logs = match std::fs::read_to_string(path) {
+    let logs = match run_blocking_io("gui::support::tail_logs read log", || {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("support::tail_logs failed to read {:?}", path))
+    }) {
         Ok(data) => data,
         Err(e) => {
             return format!(
-                "support::tail_logs failed to read log file {:?}: {}",
-                path, e
+                "support::tail_logs failed to read log file {}: {}",
+                redact_path(path),
+                e
             );
         }
     };
-    logs.lines()
+    let tail = logs
+        .lines()
         .rev()
         .take(max_lines)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    redact_text(&tail)
 }
 
-/// Purpose: Serializes a value to pretty JSON with a labeled error message on failure.
+/// Summary: Serializes a value to pretty JSON with a labeled error message on failure.
 ///
 /// Inputs: a label string and a serializable value reference.
+///
 /// Outputs: a JSON string or an error message string.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: None.
-/// Why: avoid silent serialization failures while keeping the bundle readable.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: avoid silent serialization failures while keeping the bundle readable.
 fn serialize_json<T: Serialize>(label: &str, value: &T) -> String {
     match serde_json::to_string_pretty(value) {
         Ok(data) => data,
@@ -332,30 +440,49 @@ fn serialize_json<T: Serialize>(label: &str, value: &T) -> String {
     }
 }
 
-/// Purpose: Formats recent activity entries for diagnostics.
+/// Summary: Formats recent activity entries for diagnostics.
 ///
 /// Inputs: stored state.
+///
 /// Outputs: a vector of formatted activity strings.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: None.
-/// Why: include recent activity in support bundles.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: include recent activity in support bundles.
 fn recent_activity_lines(state: &backup_core::state::StoredState) -> Vec<String> {
     state
         .recent_activity
         .iter()
         .rev()
         .take(20)
-        .map(|a| format!("{} • {} bytes • {}", a.path, a.bytes, a.ts))
+        .map(|a| {
+            format!(
+                "{} • {} bytes • {}",
+                redact_path(std::path::Path::new(&a.path)),
+                a.bytes,
+                a.ts
+            )
+        })
         .collect()
 }
 
-/// Purpose: Builds the primary diagnostic text file content.
+/// Summary: Builds the primary diagnostic text file content.
 ///
 /// Inputs: paths, state, and recent activity lines.
+///
 /// Outputs: the diagnostic text content.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: None.
-/// Why: provide a human readable summary in the bundle.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: provide a human readable summary in the bundle.
 fn build_primary_text(
     config_path: &std::path::Path,
     state_path: &std::path::Path,
@@ -368,13 +495,15 @@ fn build_primary_text(
     primary.push_str(&format!("Generated: {}\n\n", Utc::now()));
     primary.push_str("## Paths\n");
     primary.push_str(&format!(
-        "Config file: {:?}\nState file: {:?}\nLog file: {:?}\n",
-        config_path, state_path, log_path
+        "Config file: {}\nState file: {}\nLog file: {}\n",
+        redact_path(config_path),
+        redact_path(state_path),
+        redact_path(log_path)
     ));
     primary.push_str("\n## State summary\n");
     primary.push_str(&format!(
-        "Last error: {:?}\nLast verify: {:?} (issues: {:?})\nRecent activity: {} items\n",
-        state.last_error,
+        "Last error: {}\nLast verify: {:?} (issues: {:?})\nRecent activity: {} items\n",
+        redact_text(&format!("{:?}", state.last_error)),
         state.last_verify_ts,
         state.last_verify_issues,
         state.recent_activity.len()
@@ -384,13 +513,19 @@ fn build_primary_text(
     primary
 }
 
-/// Purpose: Writes a text entry to the diagnostics zip bundle.
+/// Summary: Writes a text entry to the diagnostics zip bundle.
 ///
 /// Inputs: the zip writer, entry name, data, and options.
+///
 /// Outputs: `Ok(())` when the entry is written.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: Writes entries into the diagnostics zip archive.
-/// Why: keep zip writing logic centralized.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: keep zip writing logic centralized.
 fn write_zip_entry<W: Write + Seek>(
     zip: &mut ZipWriter<W>,
     name: &str,
@@ -412,19 +547,29 @@ fn write_zip_entry<W: Write + Seek>(
 }
 
 #[tauri::command]
-/// Purpose: Exports a diagnostics bundle zip to the Desktop.
+/// Summary: Exports a diagnostics bundle zip to the Desktop.
 ///
 /// Inputs: an optional correlation id and auth state.
+///
 /// Outputs: the path to the bundle or an error envelope.
-/// Ties to: GUI diagnostics actions.
+///
 /// Side effects: Reads config/state/logs and writes a diagnostics zip bundle.
-/// Why: provide a comprehensive bundle for support.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI diagnostics actions.
+///
+/// Why this exists: provide a comprehensive bundle for support.
 pub async fn export_diagnostic_bundle_cmd(
     correlation_id: Option<String>,
 ) -> Result<String, ErrorEnvelope> {
-    let cid = correlation_id.unwrap_or_else(|| format!("diag-{}", Utc::now().timestamp_millis()));
-    eprintln!("[cid={}] diagnostic bundle start", cid);
-    let cfg = load_config().map_err(|e| {
+    let cid = correlation::cid("diag", correlation_id);
+    info!(
+        cid = %cid,
+        action = "diagnostic_bundle_start",
+        "gui diagnostic bundle requested"
+    );
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
@@ -476,7 +621,10 @@ pub async fn export_diagnostic_bundle_cmd(
     let tail = tail_logs(&log_path, cfg.runtime.log_tail_lines);
     let recent_activity = recent_activity_lines(&state);
     let status_json = match status_result {
-        Ok(status) => serialize_json("support::export_diagnostic_bundle_cmd status", &status),
+        Ok(status) => redact_text(&serialize_json(
+            "support::export_diagnostic_bundle_cmd status",
+            &status,
+        )),
         Err(e) => format!(
             "support::export_diagnostic_bundle_cmd status unavailable: {}",
             e.message
@@ -491,7 +639,18 @@ pub async fn export_diagnostic_bundle_cmd(
     })?;
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
     let dest = dest_dir.join(format!("BackupSync-support-{}.zip", ts));
-    let file = std::fs::File::create(&dest).map_err(|e| {
+    let file = run_blocking_io(
+        "gui::support::export_diagnostic_bundle_cmd create bundle file",
+        || {
+            std::fs::File::create(&dest).with_context(|| {
+                format!(
+                    "support::export_diagnostic_bundle_cmd failed to create {:?}",
+                    dest
+                )
+            })
+        },
+    )
+    .map_err(|e| {
         ErrorEnvelope::new(
             "DIAG_WRITE",
             format!(
@@ -539,37 +698,50 @@ pub async fn export_diagnostic_bundle_cmd(
             ),
         )
     })?;
-    eprintln!(
-        "[cid={}] diagnostic bundle written -> {}",
-        cid,
-        dest.display()
+    info!(
+        cid = %cid,
+        action = "diagnostic_bundle_complete",
+        bundle_path = %redact_path(&dest),
+        "gui diagnostic bundle written"
     );
     Ok(dest.display().to_string())
 }
 
-/// Purpose: Adds state.json to the diagnostics bundle when it exists.
+/// Summary: Adds state.json to the diagnostics bundle when it exists.
 ///
 /// Inputs: the zip writer, state path, and zip options.
+///
 /// Outputs: `Ok(())` after writing the entry when present.
-/// Ties to: diagnostic bundle generation.
+///
 /// Side effects: Reads the state file and writes it into the zip archive.
-/// Why: include state for support without failing when missing.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: diagnostic bundle generation.
+///
+/// Why this exists: include state for support without failing when missing.
 fn maybe_add_state<W: Write + Seek>(
     zip: &mut ZipWriter<W>,
     state_path: &std::path::Path,
     opts: FileOptions,
 ) -> Result<(), ErrorEnvelope> {
     if state_path.exists() {
-        let data = std::fs::read_to_string(state_path).map_err(|e| {
+        let data = run_blocking_io("gui::support::maybe_add_state read state file", || {
+            std::fs::read_to_string(state_path).with_context(|| {
+                format!("support::maybe_add_state failed reading {:?}", state_path)
+            })
+        })
+        .map_err(|e| {
             ErrorEnvelope::new(
                 "STATE_READ",
                 format!(
-                    "support::maybe_add_state failed to read state file {:?}: {}",
-                    state_path, e
+                    "support::maybe_add_state failed to read state file {}: {}",
+                    redact_path(state_path),
+                    e
                 ),
             )
         })?;
-        write_zip_entry(zip, "state.json", &data, opts)?;
+        write_zip_entry(zip, "state.json", &redact_text(&data), opts)?;
     }
     Ok(())
 }

@@ -7,13 +7,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Purpose: Copies data from source to destination with an optional throughput cap.
+/// Summary: Copies data from source to destination with an optional throughput cap.
 ///
 /// Inputs: the source path, destination path, throttle limit, and buffer size.
+///
 /// Outputs: `Ok(())` when the destination flushes successfully.
-/// Ties to: `BackupExecutor::write_temp_copy` during backup staging.
+///
 /// Side effects: Reads and writes filesystem data and may sleep for throttling.
-/// Why: provide predictable IO behavior while keeping memory usage bounded.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `BackupExecutor::write_temp_copy` during backup staging.
+///
+/// Why this exists: provide predictable IO behavior while keeping memory usage bounded.
 pub(super) fn copy_with_throttle(
     src: &Path,
     dst: &Path,

@@ -1,17 +1,25 @@
 use crate::commands::error::ErrorEnvelope;
-use backup_core::load_config;
+use crate::commands::io_policy::run_blocking_io;
+use anyhow::Context;
+use backup_core::load_validated_config;
 use fs2::free_space;
 use serde::Serialize;
 use std::fs;
 
 #[derive(Serialize, Clone, Debug)]
-/// Purpose: Access check payload for watched paths and destination.
+/// Summary: Access check payload for watched paths and destination.
 ///
 /// Inputs: derived from filesystem probes.
+///
 /// Outputs: a structured access report.
-/// Ties to: GUI access diagnostics.
+///
 /// Side effects: None.
-/// Why: surface permission and existence issues to the user.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI access diagnostics.
+///
+/// Why this exists: surface permission and existence issues to the user.
 pub struct AccessProbe {
     pub destination_writable: bool,
     pub destination_message: String,
@@ -21,15 +29,21 @@ pub struct AccessProbe {
 }
 
 #[tauri::command]
-/// Purpose: Tests filesystem access for watched paths and destination.
+/// Summary: Tests filesystem access for watched paths and destination.
 ///
 /// Inputs: none.
+///
 /// Outputs: an `AccessProbe` or an error envelope.
-/// Ties to: GUI diagnostics and support workflows.
+///
 /// Side effects: Reads config and filesystem metadata for watched paths.
-/// Why: detect permissions and missing paths quickly.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI diagnostics and support workflows.
+///
+/// Why this exists: detect permissions and missing paths quickly.
 pub fn test_access_cmd() -> Result<AccessProbe, ErrorEnvelope> {
-    let cfg = load_config().map_err(|e| {
+    let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!("access::test_access_cmd failed to load config: {}", e),
@@ -47,13 +61,19 @@ pub fn test_access_cmd() -> Result<AccessProbe, ErrorEnvelope> {
     })
 }
 
-/// Purpose: Classifies watched paths by existence and readability.
+/// Summary: Classifies watched paths by existence and readability.
 ///
 /// Inputs: the loaded config.
+///
 /// Outputs: three lists: ok, missing, and unwritable paths.
-/// Ties to: access probing for GUI diagnostics.
+///
 /// Side effects: Reads filesystem metadata for watched paths.
-/// Why: provide precise feedback on watched path issues.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: access probing for GUI diagnostics.
+///
+/// Why this exists: provide precise feedback on watched path issues.
 fn classify_watched(cfg: &backup_core::Config) -> (Vec<String>, Vec<String>, Vec<String>) {
     let mut watched_ok = Vec::new();
     let mut watched_missing = Vec::new();
@@ -63,7 +83,14 @@ fn classify_watched(cfg: &backup_core::Config) -> (Vec<String>, Vec<String>, Vec
             watched_missing.push(w.path.display().to_string());
             continue;
         }
-        if let Err(e) = fs::metadata(&w.path) {
+        if let Err(e) = run_blocking_io("gui::access::classify_watched metadata", || {
+            fs::metadata(&w.path).with_context(|| {
+                format!(
+                    "access::classify_watched failed reading metadata for {:?}",
+                    w.path
+                )
+            })
+        }) {
             watched_unwritable.push(format!("{} (metadata failed: {})", w.path.display(), e));
             continue;
         }
@@ -72,20 +99,29 @@ fn classify_watched(cfg: &backup_core::Config) -> (Vec<String>, Vec<String>, Vec
     (watched_ok, watched_missing, watched_unwritable)
 }
 
-/// Purpose: Probes the destination path for writability and free space.
+/// Summary: Probes the destination path for writability and free space.
 ///
 /// Inputs: the destination path.
+///
 /// Outputs: a tuple of (is_writable, message).
-/// Ties to: access probing for GUI diagnostics.
+///
 /// Side effects: Creates destination directories and reads free space metadata.
-/// Why: surface destination issues with actionable messaging.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: access probing for GUI diagnostics.
+///
+/// Why this exists: surface destination issues with actionable messaging.
 fn probe_destination(dest: &std::path::Path) -> (bool, String) {
     let dest_msg = if dest.as_os_str().is_empty() {
         "No backup destination set".to_string()
     } else if dest.exists() && dest.is_file() {
         format!("{:?} is a file; choose a folder", dest)
     } else {
-        match fs::create_dir_all(dest) {
+        match run_blocking_io("gui::access::probe_destination create destination", || {
+            fs::create_dir_all(dest)
+                .with_context(|| format!("access::probe_destination failed to create {:?}", dest))
+        }) {
             Ok(_) => match free_space(dest) {
                 Ok(free) => format!("Writable. Free space: {} bytes", free),
                 Err(e) => format!("Writable, but failed to read free space: {}", e),

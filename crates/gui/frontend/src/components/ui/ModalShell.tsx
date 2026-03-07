@@ -27,10 +27,15 @@ const FOCUSABLE_SELECTOR = [
  * Summary: Collect focusable elements inside the modal, preserving tab order.
  *
  * Inputs: Root modal element.
+ *
  * Outputs: Array of visible focusable HTMLElements.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `ModalShell` focus trap and initial-focus behavior.
+ *
  * Why this exists: Keep keyboard navigation bounded to the active modal dialog.
  */
 function focusableElements(root: HTMLElement): HTMLElement[] {
@@ -45,10 +50,15 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
  * Summary: Render a reusable accessible modal shell with overlay and keyboard dismissal.
  *
  * Inputs: Open state, title, close handler, optional busy flag, optional description, and body/footer content.
+ *
  * Outputs: Modal element tree when open.
+ *
  * Side effects: Registers and removes Escape-key listeners while the dialog is open.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by minimal restore and hardening dialogs.
+ *
  * Why this exists: Centralize dialog semantics and interaction behavior across screens.
  */
 export function ModalShell({
@@ -93,12 +103,44 @@ export function ModalShell({
       dialog.focus();
     }
 
+    /**
+     * Summary: handleKeyDown orchestrates this method's core behavior.
+     *
+     * Inputs: Method parameters and required receiver state.
+     *
+     * Outputs: Return value and observable result for callers.
+     *
+     * Side effects: None beyond this method's explicit operations.
+     *
+     * Error handling: Propagates contextual errors to the caller when operations fail.
+     *
+     * Ties to other methods: Invoked by and composes with adjacent module methods.
+     *
+     * Why this exists: Keeps this behavior isolated, testable, and reusable.
+     */
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       if (busyRef.current) return;
       onCloseRef.current();
     };
+
+    /**
+     * Summary: handleTabTrap orchestrates this method's core behavior.
+     *
+     * Inputs: Method parameters and required receiver state.
+     *
+     * Outputs: Return value and observable result for callers.
+     *
+     * Side effects: None beyond this method's explicit operations.
+     *
+     * Error handling: Propagates contextual errors to the caller when operations fail.
+     *
+     * Ties to other methods: Invoked by and composes with adjacent module methods.
+     *
+     * Why this exists: Keeps this behavior isolated, testable, and reusable.
+     */
 
     const handleTabTrap = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return;

@@ -3,13 +3,19 @@ use crate::hashing;
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// Purpose: Computes a SHA-256 hash for a file using explicit hashing tuning.
+/// Summary: Computes a SHA-256 hash for a file using explicit hashing tuning.
 ///
 /// Inputs: the filesystem path and hashing tuning values.
+///
 /// Outputs: a hex encoded hash string.
-/// Ties to: change detection and verification workflows.
+///
 /// Side effects: Reads file contents and system time for timeout enforcement.
-/// Why: provide a stable content fingerprint with bounded IO.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: change detection and verification workflows.
+///
+/// Why this exists: provide a stable content fingerprint with bounded IO.
 pub fn hash_file_with_tuning(path: &Path, tuning: &HashingTuning) -> Result<String> {
     hashing::sha256_file_hex_with_tuning(path, tuning).with_context(|| {
         format!(
@@ -19,13 +25,19 @@ pub fn hash_file_with_tuning(path: &Path, tuning: &HashingTuning) -> Result<Stri
     })
 }
 
-/// Purpose: Computes a SHA-256 hash for a file using default hashing tuning.
+/// Summary: Computes a SHA-256 hash for a file using default hashing tuning.
 ///
 /// Inputs: the filesystem path to the file.
+///
 /// Outputs: a hex encoded hash string.
-/// Ties to: hashing call sites without explicit tuning context.
+///
 /// Side effects: Reads file contents and system time for timeout enforcement.
-/// Why: provide a safe default hashing behavior when tuning is unavailable.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: hashing call sites without explicit tuning context.
+///
+/// Why this exists: provide a safe default hashing behavior when tuning is unavailable.
 pub fn hash_file(path: &Path) -> Result<String> {
     hash_file_with_tuning(path, &HashingTuning::default())
 }

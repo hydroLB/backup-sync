@@ -35,7 +35,9 @@ pub struct WatchedPath {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub backup_root: PathBuf,
+    #[serde(default = "crate::config::model::defaults::default_interval_seconds")]
     pub interval_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_max_backups_per_file")]
     pub max_backups_per_file: usize,
     #[serde(default = "crate::config::model::defaults::default_skip_hidden")]
     pub skip_hidden: bool,

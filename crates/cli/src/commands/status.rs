@@ -1,17 +1,23 @@
 use anyhow::{Context, Result};
 use backup_core::{
-    load_config, platform::paths, state::index::BackupIndex, state::store::StateStore,
+    load_validated_config, platform::paths, state::index::BackupIndex, state::store::StateStore,
 };
 
-/// Purpose: Prints a snapshot of the current state and config summary.
+/// Summary: Prints a snapshot of the current state and config summary.
 ///
 /// Inputs: none.
+///
 /// Outputs: `Ok(())` after printing summary lines.
-/// Ties to: CLI status command output.
+///
 /// Side effects: Reads config/state from disk and writes to stdout.
-/// Why: provide a quick operational snapshot for users.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI status command output.
+///
+/// Why this exists: provide a quick operational snapshot for users.
 pub fn status() -> Result<()> {
-    let cfg = load_config().context("cli::status failed to load config")?;
+    let cfg = load_validated_config().context("cli::status failed to load config")?;
     let state_path =
         paths::state_file_path().context("cli::status failed to resolve state path")?;
     let (state, _) =

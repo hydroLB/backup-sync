@@ -1,10 +1,16 @@
-/// Purpose: Holds validation thresholds for config guardrails.
+/// Summary: Holds validation thresholds for config guardrails.
 ///
 /// Inputs: set by defaults or tests.
+///
 /// Outputs: a collection of numeric thresholds.
-/// Ties to: config validation and policy enforcement.
+///
 /// Side effects: None.
-/// Why: centralize limits to make tuning and audits straightforward.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: config validation and policy enforcement.
+///
+/// Why this exists: centralize limits to make tuning and audits straightforward.
 #[derive(Debug, Clone)]
 pub struct ValidationLimits {
     pub min_interval_seconds: u64,
@@ -26,15 +32,30 @@ pub struct ValidationLimits {
     pub max_hash_buffer_bytes: usize,
     pub max_hash_timeout_seconds: u64,
     pub max_ipc_timeout_seconds: u64,
+    pub max_ipc_request_max_bytes: usize,
+    pub max_ipc_response_max_bytes: usize,
+    pub max_ipc_read_chunk_bytes: usize,
+    pub max_daemon_shutdown_join_timeout_seconds: u64,
     pub max_scan_timeout_seconds: u64,
     pub max_service_command_timeout_seconds: u64,
     pub max_service_command_retry_delay_ms: u64,
     pub max_service_command_poll_interval_ms: u64,
     pub max_source_snapshot_timeout_seconds: u64,
     pub max_tray_tooltip_refresh_seconds: u64,
+    pub max_tray_full_check_min_interval_seconds: u64,
+    pub max_tray_full_check_timeout_seconds: u64,
+    pub max_tray_low_space_warning_bytes: u64,
     pub max_scan_capacity_multiplier: usize,
     pub max_log_tail_lines: usize,
+    pub max_log_tail_read_chunk_bytes: usize,
+    pub max_log_tail_max_bytes: u64,
     pub max_simulation_sample_limit: usize,
+    pub max_hardening_snapshot_probe_timeout_seconds: u64,
+    pub max_gui_close_final_backup_debounce_ms: u64,
+    pub max_gui_close_final_backup_reset_delay_seconds: u64,
+    pub max_gui_quit_final_backup_timeout_seconds: u64,
+    pub max_gui_daemon_stop_timeout_seconds: u64,
+    pub max_gui_quit_force_exit_timeout_seconds: u64,
     pub max_replication_max_manifest_deletes_per_cycle: usize,
     pub max_blob_encryption_chunk_bytes: usize,
     pub max_blob_compression_chunk_bytes: usize,
@@ -44,16 +65,23 @@ pub struct ValidationLimits {
     pub max_scrub_sample_versions_per_source: usize,
     pub max_ignore_patterns: usize,
     pub max_watched: usize,
+    pub max_blocking_io_backoff_poll_interval_ms: u64,
 }
 
 impl Default for ValidationLimits {
-    /// Purpose: Builds the default validation thresholds for config guardrails.
+    /// Summary: Builds the default validation thresholds for config guardrails.
     ///
     /// Inputs: none.
+    ///
     /// Outputs: a populated `ValidationLimits` instance.
-    /// Ties to: config validation and guardrail enforcement.
+    ///
     /// Side effects: None.
-    /// Why: centralize limits so tuning is consistent and discoverable.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: config validation and guardrail enforcement.
+    ///
+    /// Why this exists: centralize limits so tuning is consistent and discoverable.
     fn default() -> Self {
         Self {
             min_interval_seconds: 5,
@@ -75,15 +103,30 @@ impl Default for ValidationLimits {
             max_hash_buffer_bytes: 8 * 1024 * 1024,
             max_hash_timeout_seconds: 3600,
             max_ipc_timeout_seconds: 60,
+            max_ipc_request_max_bytes: 16 * 1024 * 1024,
+            max_ipc_response_max_bytes: 64 * 1024 * 1024,
+            max_ipc_read_chunk_bytes: 1024 * 1024,
+            max_daemon_shutdown_join_timeout_seconds: 3600,
             max_scan_timeout_seconds: 3600,
             max_service_command_timeout_seconds: 300,
             max_service_command_retry_delay_ms: 60_000,
             max_service_command_poll_interval_ms: 5000,
             max_source_snapshot_timeout_seconds: 300,
             max_tray_tooltip_refresh_seconds: 3600,
+            max_tray_full_check_min_interval_seconds: 3600,
+            max_tray_full_check_timeout_seconds: 300,
+            max_tray_low_space_warning_bytes: 1024 * 1024 * 1024 * 1024,
             max_scan_capacity_multiplier: 128,
             max_log_tail_lines: 5000,
+            max_log_tail_read_chunk_bytes: 1024 * 1024,
+            max_log_tail_max_bytes: 16 * 1024 * 1024,
             max_simulation_sample_limit: 1000,
+            max_hardening_snapshot_probe_timeout_seconds: 300,
+            max_gui_close_final_backup_debounce_ms: 10_000,
+            max_gui_close_final_backup_reset_delay_seconds: 120,
+            max_gui_quit_final_backup_timeout_seconds: 300,
+            max_gui_daemon_stop_timeout_seconds: 300,
+            max_gui_quit_force_exit_timeout_seconds: 3600,
             max_replication_max_manifest_deletes_per_cycle: 1_000_000,
             max_blob_encryption_chunk_bytes: 8 * 1024 * 1024,
             max_blob_compression_chunk_bytes: 8 * 1024 * 1024,
@@ -93,6 +136,7 @@ impl Default for ValidationLimits {
             max_scrub_sample_versions_per_source: 1000,
             max_ignore_patterns: 200,
             max_watched: 500,
+            max_blocking_io_backoff_poll_interval_ms: 5000,
         }
     }
 }

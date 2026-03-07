@@ -1,39 +1,35 @@
 use crate::commands::error::ErrorEnvelope;
 use crate::commands::status::get_status;
-use backup_core::{load_config, validate};
+use backup_core::load_validated_config;
+use tracing::warn;
 
-mod common;
+pub(crate) mod common;
 mod platform;
 
 pub use common::ServiceStatus;
 
-/// Purpose: Installs the platform service for start on login.
+/// Summary: Installs the platform service for start on login.
 ///
 /// Inputs: an optional correlation id and session auth state.
+///
 /// Outputs: a status message or an error envelope.
-/// Ties to: GUI service installation actions.
+///
 /// Side effects: Writes service manifests and runs platform enable commands.
-/// Why: enable background execution without manual terminal steps.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI service installation actions.
+///
+/// Why this exists: enable background execution without manual terminal steps.
 #[tauri::command]
-pub async fn install_service_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
-    let _ = correlation_id;
-
+pub async fn install_service_cmd(_correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
     // Installing a service that immediately crash-loops due to missing/invalid config is noisy
     // and makes it harder to diagnose first-run issues.
-    let cfg = load_config().map_err(|e| {
+    load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_INVALID",
             format!(
                 "service::install_service_cmd failed to load config; complete setup first: {}",
-                e
-            ),
-        )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_INVALID",
-            format!(
-                "service::install_service_cmd config validation failed; fix config first: {}",
                 e
             ),
         )
@@ -69,16 +65,31 @@ pub async fn install_service_cmd(correlation_id: Option<String>) -> Result<Strin
     Ok(message)
 }
 
-/// Purpose: Checks the service status and daemon reachability.
+/// Summary: Checks the service status and daemon reachability.
 ///
 /// Inputs: none.
+///
 /// Outputs: a `ServiceStatus` payload or an error envelope.
-/// Ties to: GUI status panels.
+///
 /// Side effects: Performs IPC to the daemon and reads service metadata.
-/// Why: surface service health and potential fixes in the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI status panels.
+///
+/// Why this exists: surface service health and potential fixes in the UI.
 #[tauri::command]
 pub async fn check_service_cmd() -> Result<ServiceStatus, ErrorEnvelope> {
-    let status = get_status().await.ok();
+    let status = match get_status().await {
+        Ok(status) => Some(status),
+        Err(error) => {
+            warn!(
+                "service::check_service_cmd failed to fetch daemon status; continuing with unreachable state: {}",
+                error.message
+            );
+            None
+        }
+    };
     let reachable = status.is_some();
     let uptime = status.as_ref().and_then(|s| s.uptime_secs);
     let last_ipc = if reachable {
@@ -97,16 +108,21 @@ pub async fn check_service_cmd() -> Result<ServiceStatus, ErrorEnvelope> {
     status
 }
 
-/// Purpose: Restarts the daemon using platform specific tools.
+/// Summary: Restarts the daemon using platform specific tools.
 ///
 /// Inputs: an optional correlation id and session auth state.
+///
 /// Outputs: a status message or an error envelope.
-/// Ties to: GUI restart actions.
+///
 /// Side effects: Runs platform restart commands for the daemon.
-/// Why: allow users to recover the daemon without leaving the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI restart actions.
+///
+/// Why this exists: allow users to recover the daemon without leaving the UI.
 #[tauri::command]
-pub fn restart_daemon_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
-    let _ = correlation_id;
+pub fn restart_daemon_cmd(_correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
     #[cfg(target_os = "macos")]
     let result = platform::macos::restart_daemon();
     #[cfg(target_os = "linux")]

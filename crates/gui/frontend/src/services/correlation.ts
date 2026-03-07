@@ -1,11 +1,17 @@
 /**
- * Purpose: Generate a correlation id for client side tracing.
+ * Summary: Generate a correlation id for client side tracing.
  *
  * Inputs: `prefix` as a string identifier for the call site.
+ *
  * Outputs: A correlation id string.
- * Ties to: Service calls that pass correlation ids to the backend.
+ *
  * Side effects: Reads system time and consumes crypto randomness.
- * Why: Allows log aggregation across UI and backend actions.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Service calls that pass correlation ids to the backend.
+ *
+ * Why this exists: Allows log aggregation across UI and backend actions.
  */
 export function correlationId(prefix: string): string {
   try {
@@ -18,13 +24,19 @@ export function correlationId(prefix: string): string {
 }
 
 /**
- * Purpose: Generate a hex string using cryptographically secure randomness.
+ * Summary: Generate a hex string using cryptographically secure randomness.
  *
  * Inputs: `bytes` as the number of random bytes to generate.
+ *
  * Outputs: A hex encoded string.
- * Ties to: `correlationId` for entropy generation.
+ *
  * Side effects: Consumes entropy from Web Crypto.
- * Why: Avoids predictable correlation ids in logs.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `correlationId` for entropy generation.
+ *
+ * Why this exists: Avoids predictable correlation ids in logs.
  */
 function randomHex(bytes: number): string {
   try {

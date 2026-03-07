@@ -4,13 +4,19 @@ import { AccessProbe, DestinationCheck, HardeningReport, ServiceStatusDto } from
 import { UI_TUNING } from '../config/uiTuning';
 
 /**
- * Purpose: Apply jitter to a base delay value.
+ * Summary: Apply jitter to a base delay value.
  *
  * Inputs: Base delay in milliseconds and jitter percentage.
+ *
  * Outputs: A jittered delay in milliseconds.
- * Ties to: Service retry backoff in this module.
+ *
  * Side effects: Uses `Math.random` for jitter.
- * Why: Reduce coordinated retries across clients.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Service retry backoff in this module.
+ *
+ * Why this exists: Reduce coordinated retries across clients.
  */
 function applyJitter(delayMs: number, jitterPct: number): number {
   try {
@@ -25,13 +31,19 @@ function applyJitter(delayMs: number, jitterPct: number): number {
 }
 
 /**
- * Purpose: Run an async function with a fixed retry backoff.
+ * Summary: Run an async function with a fixed retry backoff.
  *
  * Inputs: `label` for error context, `fn` as the async operation.
+ *
  * Outputs: The resolved value or a thrown error with context.
- * Ties to: Service actions that may race IPC startup.
+ *
  * Side effects: Delays execution via timers between retries.
- * Why: Reduces transient failures during service actions.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Service actions that may race IPC startup.
+ *
+ * Why this exists: Reduces transient failures during service actions.
  */
 async function withBackoff<T>(label: string, fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
@@ -50,13 +62,19 @@ async function withBackoff<T>(label: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Purpose: Install the background service via the backend.
+ * Summary: Install the background service via the backend.
  *
  * Inputs: None.
+ *
  * Outputs: A backend status message.
- * Ties to: Start on login UI actions.
+ *
  * Side effects: Invokes IPC calls that install or update service state.
- * Why: Enables daemon autostart from the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Start on login UI actions.
+ *
+ * Why this exists: Enables daemon autostart from the UI.
  */
 export async function installService(): Promise<string> {
   try {
@@ -67,13 +85,19 @@ export async function installService(): Promise<string> {
 }
 
 /**
- * Purpose: Restart the daemon via the backend.
+ * Summary: Restart the daemon via the backend.
  *
  * Inputs: None.
+ *
  * Outputs: A backend status message.
- * Ties to: Restart UI actions.
+ *
  * Side effects: Invokes IPC calls that restart the daemon service.
- * Why: Allows users to recover a stuck daemon.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Restart UI actions.
+ *
+ * Why this exists: Allows users to recover a stuck daemon.
  */
 export async function restartDaemon(): Promise<string> {
   try {
@@ -84,13 +108,19 @@ export async function restartDaemon(): Promise<string> {
 }
 
 /**
- * Purpose: Check for updates using the backend update feed.
+ * Summary: Check for updates using the backend update feed.
  *
  * Inputs: None.
+ *
  * Outputs: A status message string.
- * Ties to: Update UI actions and release notifications.
+ *
  * Side effects: Invokes IPC calls that access update metadata.
- * Why: Reports update availability without leaving the app.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Update UI actions and release notifications.
+ *
+ * Why this exists: Reports update availability without leaving the app.
  */
 export async function checkUpdates(): Promise<string> {
   try {
@@ -101,13 +131,19 @@ export async function checkUpdates(): Promise<string> {
 }
 
 /**
- * Purpose: Validate a destination path via the backend.
+ * Summary: Validate a destination path via the backend.
  *
  * Inputs: `path` as the destination path string.
+ *
  * Outputs: A `DestinationCheck` payload.
- * Ties to: Destination picker validation.
+ *
  * Side effects: Invokes IPC calls that probe filesystem access.
- * Why: Surfaces validation results to the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Destination picker validation.
+ *
+ * Why this exists: Surfaces validation results to the UI.
  */
 export async function checkDestination(path: string): Promise<DestinationCheck> {
   try {
@@ -118,13 +154,19 @@ export async function checkDestination(path: string): Promise<DestinationCheck> 
 }
 
 /**
- * Purpose: Test access permissions for watched paths and destinations.
+ * Summary: Test access permissions for watched paths and destinations.
  *
  * Inputs: None.
+ *
  * Outputs: An access probe payload.
- * Ties to: Diagnostics and settings screens.
+ *
  * Side effects: Invokes IPC calls that probe filesystem permissions.
- * Why: Surfaces permission issues in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Diagnostics and settings screens.
+ *
+ * Why this exists: Surfaces permission issues in the UI.
  */
 export async function testAccess(): Promise<AccessProbe> {
   try {
@@ -135,13 +177,19 @@ export async function testAccess(): Promise<AccessProbe> {
 }
 
 /**
- * Purpose: Run first-run hardening checks to validate prerequisites for scheduling.
+ * Summary: Run first-run hardening checks to validate prerequisites for scheduling.
  *
  * Inputs: Flags controlling snapshot probing.
+ *
  * Outputs: A `HardeningReport` payload.
- * Ties to: Onboarding and minimal UI gating.
+ *
  * Side effects: Invokes IPC calls that may create and remove a tiny probe file under the destination store.
- * Why: Avoid enabling background writes before filesystem access is known-good.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Onboarding and minimal UI gating.
+ *
+ * Why this exists: Avoid enabling background writes before filesystem access is known-good.
  */
 export async function hardeningCheck(opts?: {
   check_snapshots?: boolean;
@@ -166,13 +214,19 @@ export async function hardeningCheck(opts?: {
 }
 
 /**
- * Purpose: Generate a doctor report via the backend.
+ * Summary: Generate a doctor report via the backend.
  *
  * Inputs: None.
+ *
  * Outputs: The report path string.
- * Ties to: Diagnostics actions.
+ *
  * Side effects: Invokes IPC calls that write diagnostic reports.
- * Why: Allows users to export diagnostics quickly.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Diagnostics actions.
+ *
+ * Why this exists: Allows users to export diagnostics quickly.
  */
 export async function doctorReport(): Promise<string> {
   try {
@@ -185,13 +239,19 @@ export async function doctorReport(): Promise<string> {
 }
 
 /**
- * Purpose: Check the background service status via the backend.
+ * Summary: Check the background service status via the backend.
  *
  * Inputs: None.
+ *
  * Outputs: A `ServiceStatusDto` payload.
- * Ties to: Service status UI widgets.
+ *
  * Side effects: Invokes IPC calls to query service status.
- * Why: Displays service installation and reachability.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Service status UI widgets.
+ *
+ * Why this exists: Displays service installation and reachability.
  */
 export async function checkService(): Promise<ServiceStatusDto> {
   try {
@@ -202,13 +262,19 @@ export async function checkService(): Promise<ServiceStatusDto> {
 }
 
 /**
- * Purpose: Export a diagnostic bundle via the backend.
+ * Summary: Export a diagnostic bundle via the backend.
  *
  * Inputs: None.
+ *
  * Outputs: The bundle path string.
- * Ties to: Diagnostics export actions.
+ *
  * Side effects: Invokes IPC calls that write diagnostic bundles.
- * Why: Allows users to share a full support bundle.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Diagnostics export actions.
+ *
+ * Why this exists: Allows users to share a full support bundle.
  */
 export async function exportDiagnosticBundle(): Promise<string> {
   try {

@@ -3,7 +3,7 @@ version = 1
 name = "Backup_Sync"
 
 [setup]
-script = ""
+script = "./start"
 
 [[actions]]
 name = "Run"

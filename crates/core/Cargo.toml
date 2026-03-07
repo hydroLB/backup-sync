@@ -2,10 +2,10 @@
 name = "backup_core"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [features]
 bench = ["dep:criterion"]
-legacy-engine = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -14,7 +14,7 @@ toml = "0.8"
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "chrono"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "chrono", "json"] }
 tracing-appender = "0.2"
 dirs = "5"
 notify = "6"

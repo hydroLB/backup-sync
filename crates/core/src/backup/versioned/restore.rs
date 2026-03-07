@@ -64,6 +64,19 @@ struct PlannedFile {
     mtime_nanos: u32,
 }
 
+/// Summary: list_versions orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn list_versions(cfg: &Config) -> Result<Vec<(PathBuf, Vec<VersionInfo>)>> {
     let destinations_by_id: HashMap<&str, &Destination> = cfg
         .destinations
@@ -108,12 +121,30 @@ pub fn list_versions(cfg: &Config) -> Result<Vec<(PathBuf, Vec<VersionInfo>)>> {
  * Summary: Load a versioned manifest for a watched directory and compute restore plan inputs.
  *
  * Inputs: Store roots plus a restore request.
+ *
  * Outputs: Parsed manifest object.
+ *
  * Side effects: Reads the manifest JSON from the destination store.
+ *
  * Error handling: Returns contextual errors for missing watched paths, destinations, and parse failures.
+ *
  * Ties to other methods: Called by `restore_version` before preflight and restore execution.
+ *
  * Why this exists: Keep `restore_version` readable while centralizing store path calculations.
  */
+/// Summary: load_manifest_for_request orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn load_manifest_for_request(cfg: &Config, req: &RestoreRequest) -> Result<(Manifest, PathBuf)> {
     let watched = cfg
         .watched
@@ -170,12 +201,30 @@ fn load_manifest_for_request(cfg: &Config, req: &RestoreRequest) -> Result<(Mani
  * Summary: Preflight a restore by verifying blob availability and destination free space.
  *
  * Inputs: Manifest to restore, blob store root, free-space check directory, and config.
+ *
  * Outputs: `(planned_files, total_bytes)` for subsequent restore execution.
+ *
  * Side effects: Reads filesystem metadata for blobs and free space.
+ *
  * Error handling: Returns a detailed error listing missing blobs or insufficient space.
+ *
  * Ties to other methods: Called by `restore_version` before any filesystem mutations.
+ *
  * Why this exists: Prevent partial restores and ensure predictable failures before touching the target.
  */
+/// Summary: preflight_restore orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn preflight_restore(
     cfg: &Config,
     manifest: &Manifest,
@@ -226,12 +275,30 @@ fn preflight_restore(
  * Summary: Enforce restore free-space guardrails before writing.
  *
  * Inputs: Config for thresholds, target directory for free-space probing, and required bytes.
+ *
  * Outputs: `Ok(())` when sufficient space is available.
+ *
  * Side effects: Reads filesystem free-space statistics.
+ *
  * Error handling: Returns a clear error that includes required bytes and configured thresholds.
+ *
  * Ties to other methods: Used by `preflight_restore` to ensure restores cannot fill disks unexpectedly.
+ *
  * Why this exists: Restores can write large amounts of data; failing mid-way due to disk full is unsafe.
  */
+/// Summary: ensure_restore_free_space orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn ensure_restore_free_space(cfg: &Config, dir: &Path, required_bytes: u64) -> Result<()> {
     let free = free_space(dir).with_context(|| {
         format!(
@@ -265,12 +332,30 @@ fn ensure_restore_free_space(cfg: &Config, dir: &Path, required_bytes: u64) -> R
  * Summary: Restore a manifest into a staging directory tree.
  *
  * Inputs: Stage root, manifest directory entries, and planned files with blob pointers.
+ *
  * Outputs: Restore counters for directories created and files written.
+ *
  * Side effects: Creates directories, writes files from blobs, and sets mtimes.
+ *
  * Error handling: Returns contextual errors for directory creation, blob reads, and atomic writes.
+ *
  * Ties to other methods: Called by transactional restore flows before swapping into place.
+ *
  * Why this exists: Building a complete restore tree first enables atomic swap and prevents partial restores.
  */
+/// Summary: build_restore_tree orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_restore_tree(
     stage_root: &Path,
     manifest: &Manifest,
@@ -324,12 +409,30 @@ fn build_restore_tree(
  * Summary: Count files in a target directory that are not present in the manifest.
  *
  * Inputs: Target root and manifest describing the desired version contents.
+ *
  * Outputs: Count of extraneous files relative to the manifest.
+ *
  * Side effects: Walks the target directory tree and reads filesystem metadata.
+ *
  * Error handling: Returns contextual errors for directory walks.
+ *
  * Ties to other methods: Used by `restore_version` to populate `files_removed` without mutating the target.
+ *
  * Why this exists: Transactional restore swaps whole trees; this preserves useful reporting without risky deletes.
  */
+/// Summary: count_extraneous_files orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn count_extraneous_files(root: &Path, manifest: &Manifest) -> Result<usize> {
     let expected_files: HashSet<&str> = manifest
         .entries
@@ -362,12 +465,30 @@ fn count_extraneous_files(root: &Path, manifest: &Manifest) -> Result<usize> {
  * Summary: Transactionally swap a staged directory tree into the target location.
  *
  * Inputs: The staged directory path, the final target path, and a token for backup naming.
+ *
  * Outputs: The path of any backup directory created (so callers can delete it after success).
+ *
  * Side effects: Renames directories to perform an atomic swap where supported by the OS/filesystem.
+ *
  * Error handling: Attempts rollback if the final rename fails after moving the original aside.
+ *
  * Ties to other methods: Called by `restore_version` for both in-place and restore-to-dir flows.
+ *
  * Why this exists: Renaming a fully-built tree into place is the closest thing to transactional restore.
  */
+/// Summary: swap_staged_tree_into_place orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn swap_staged_tree_into_place(
     stage_root: &Path,
     target_root: &Path,
@@ -391,7 +512,14 @@ fn swap_staged_tree_into_place(
     if let Err(e) = fs::rename(stage_root, target_root) {
         // Best-effort rollback if we already moved the original aside.
         if backup_root.exists() && !target_root.exists() {
-            let _ = fs::rename(&backup_root, target_root);
+            if let Err(rollback_error) = fs::rename(&backup_root, target_root) {
+                tracing::warn!(
+                    backup_root = %backup_root.display(),
+                    target_root = %target_root.display(),
+                    error = %rollback_error,
+                    "versioned::swap_staged_tree_into_place failed rollback rename after staging move failure"
+                );
+            }
         }
         return Err(anyhow::anyhow!(
             "versioned::swap_staged_tree_into_place failed to move staged restore {:?} into {:?}: {}",
@@ -412,12 +540,30 @@ fn swap_staged_tree_into_place(
  * Summary: Generate a token suitable for unique staging and backup directory names.
  *
  * Inputs: none.
+ *
  * Outputs: A token string.
+ *
  * Side effects: Reads time and process id.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by transactional restore flows to avoid collisions.
+ *
  * Why this exists: Restore operations must not collide across concurrent runs.
  */
+/// Summary: restore_token orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn restore_token() -> String {
     format!(
         "{}-{}",
@@ -426,6 +572,19 @@ fn restore_token() -> String {
     )
 }
 
+/// Summary: list_version_files orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn list_version_files(
     cfg: &Config,
     source_path: &Path,
@@ -488,6 +647,19 @@ pub fn list_version_files(
     Ok(ListVersionFilesResult { total_files, files })
 }
 
+/// Summary: restore_files orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn restore_files(cfg: &Config, req: &RestoreFilesRequest) -> Result<RestoreResult> {
     /*
      * Summary: Restore a specific set of files from a version without swapping whole directory trees.
@@ -607,6 +779,19 @@ pub fn restore_files(cfg: &Config, req: &RestoreFilesRequest) -> Result<RestoreR
     Ok(result)
 }
 
+/// Summary: restore_version orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResult> {
     /*
      * Summary: Restore a watched directory to a specific version with preflight + transactional swap.
@@ -679,7 +864,13 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
     ) {
         Ok(r) => r,
         Err(e) => {
-            let _ = fs::remove_dir_all(&stage_root);
+            if let Err(cleanup_error) = fs::remove_dir_all(&stage_root) {
+                tracing::warn!(
+                    stage_root = %stage_root.display(),
+                    error = %cleanup_error,
+                    "versioned::restore_version failed cleaning staging directory after build failure"
+                );
+            }
             return Err(e);
         }
     };
@@ -705,6 +896,19 @@ pub fn restore_version(cfg: &Config, req: &RestoreRequest) -> Result<RestoreResu
     Ok(result)
 }
 
+/// Summary: write_file_atomic_from_blob orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn write_file_atomic_from_blob(
     blob_path: &Path,
     out_path: &Path,
@@ -732,9 +936,22 @@ fn write_file_atomic_from_blob(
                 blob_path
             )
         })?;
-    temp.flush().ok();
+    temp.flush().with_context(|| {
+        format!(
+            "versioned::write_file_atomic_from_blob failed to flush temp file for {:?}",
+            out_path
+        )
+    })?;
 
-    let _ = fs::remove_file(out_path);
+    if let Err(error) = fs::remove_file(out_path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                path = %out_path.display(),
+                error = %error,
+                "versioned::write_file_atomic_from_blob failed removing existing output before persist"
+            );
+        }
+    }
     temp.persist(out_path).map_err(|e| {
         anyhow::anyhow!(
             "versioned::write_file_atomic_from_blob failed to persist {:?}: {}",
@@ -745,6 +962,19 @@ fn write_file_atomic_from_blob(
     Ok(())
 }
 
+/// Summary: restore_mtime orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn restore_mtime(path: &Path, mtime_unix: i64, mtime_nanos: u32) -> Result<()> {
     if mtime_unix <= 0 {
         return Ok(());

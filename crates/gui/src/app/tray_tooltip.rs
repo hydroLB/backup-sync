@@ -7,13 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::async_runtime;
+use tracing::warn;
 
 static FULL_CHECK_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static HEALTH_CACHE: OnceLock<Mutex<TrayHealthCache>> = OnceLock::new();
 static HEALTH_CACHE_INIT: OnceLock<()> = OnceLock::new();
-
-const FULL_CHECK_MIN_INTERVAL: Duration = Duration::from_secs(20);
-const FULL_CHECK_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Debug)]
 struct TrayHealthSnapshot {
@@ -29,6 +27,19 @@ struct TrayHealthCache {
 }
 
 impl Default for TrayHealthCache {
+    /// Summary: default orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn default() -> Self {
         Self {
             last_full_check: None,
@@ -49,6 +60,19 @@ enum TraySeverity {
 }
 
 impl TraySeverity {
+    /// Summary: label orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn label(self) -> &'static str {
         match self {
             TraySeverity::Normal => "Normal",
@@ -59,6 +83,19 @@ impl TraySeverity {
 }
 
 impl TraySeverity {
+    /// Summary: max orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn max(self, other: TraySeverity) -> TraySeverity {
         use TraySeverity::*;
         match (self, other) {
@@ -69,6 +106,19 @@ impl TraySeverity {
     }
 }
 
+/// Summary: format_last_sync_label orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn format_last_sync_label(last_run_ts: Option<i64>) -> String {
     match last_run_ts {
         None => "Last sync: Never".to_string(),
@@ -84,15 +134,24 @@ fn format_last_sync_label(last_run_ts: Option<i64>) -> String {
     }
 }
 
-/// Purpose: Return cached health snapshot, refreshing it in the background when stale.
+/// Summary: Return cached health snapshot, refreshing it in the background when stale.
 ///
 /// Inputs: none.
+///
 /// Outputs: Most recent snapshot.
+///
 /// Side effects: May spawn a blocking refresh task.
+///
 /// Error handling: Refresh failures are stored as error strings; stale values may be used.
+///
 /// Ties to other methods: Used by `update_tray_tooltip` for tray severity calculation.
+///
 /// Why this exists: Keep tray updates responsive even when filesystem checks are slow.
 async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
+    let runtime = super::tuning::resolve_runtime_tuning();
+    let full_check_min_interval =
+        Duration::from_secs(runtime.tray_full_check_min_interval_seconds.max(1));
+    let full_check_timeout = Duration::from_secs(runtime.tray_full_check_timeout_seconds.max(1));
     let cache = HEALTH_CACHE.get_or_init(|| Mutex::new(TrayHealthCache::default()));
     HEALTH_CACHE_INIT.get_or_init(|| ());
 
@@ -104,7 +163,7 @@ async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
         let is_first = guard.last_full_check.is_none();
         let stale = guard
             .last_full_check
-            .map(|t| t.elapsed() >= FULL_CHECK_MIN_INTERVAL)
+            .map(|t| t.elapsed() >= full_check_min_interval)
             .unwrap_or(true);
         (stale, is_first, guard.last_snapshot.clone())
     };
@@ -112,21 +171,33 @@ async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
     if is_first {
         // Full check on startup: do one refresh eagerly so the tray reflects reality immediately,
         // but keep it off the async executor thread and bounded by a timeout.
-        let refreshed = tokio::time::timeout(FULL_CHECK_TIMEOUT, async {
-            tokio::task::spawn_blocking(run_full_health_check)
-                .await
-                .ok()
-                .unwrap_or_else(|| TrayHealthSnapshot {
-                    startup_hardening_error: Some("Safety checks: task failed".to_string()),
-                    access_probe: None,
-                    destination_issues: Vec::new(),
-                })
+        let refreshed = tokio::time::timeout(full_check_timeout, async {
+            match tokio::task::spawn_blocking(run_full_health_check).await {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        "app::tray_tooltip::read_or_refresh_health_snapshot startup health task failed"
+                    );
+                    TrayHealthSnapshot {
+                        startup_hardening_error: Some("Safety checks: task failed".to_string()),
+                        access_probe: None,
+                        destination_issues: Vec::new(),
+                    }
+                }
+            }
         })
         .await
-        .unwrap_or_else(|_| TrayHealthSnapshot {
-            startup_hardening_error: Some("Safety checks: timed out".to_string()),
-            access_probe: None,
-            destination_issues: Vec::new(),
+        .unwrap_or_else(|error| {
+            warn!(
+                error = %error,
+                "app::tray_tooltip::read_or_refresh_health_snapshot startup health task timed out"
+            );
+            TrayHealthSnapshot {
+                startup_hardening_error: Some("Safety checks: timed out".to_string()),
+                access_probe: None,
+                destination_issues: Vec::new(),
+            }
         });
 
         let mut guard = match cache.lock() {
@@ -140,21 +211,33 @@ async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
 
     if should_refresh && !FULL_CHECK_IN_FLIGHT.swap(true, Ordering::Relaxed) {
         async_runtime::spawn(async move {
-            let refreshed = tokio::time::timeout(FULL_CHECK_TIMEOUT, async {
-                tokio::task::spawn_blocking(run_full_health_check)
-                    .await
-                    .ok()
-                    .unwrap_or_else(|| TrayHealthSnapshot {
-                        startup_hardening_error: Some("Safety checks: task failed".to_string()),
-                        access_probe: None,
-                        destination_issues: Vec::new(),
-                    })
+            let refreshed = tokio::time::timeout(full_check_timeout, async {
+                match tokio::task::spawn_blocking(run_full_health_check).await {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        warn!(
+                            error = %error,
+                            "app::tray_tooltip::read_or_refresh_health_snapshot refresh health task failed"
+                        );
+                        TrayHealthSnapshot {
+                            startup_hardening_error: Some("Safety checks: task failed".to_string()),
+                            access_probe: None,
+                            destination_issues: Vec::new(),
+                        }
+                    }
+                }
             })
             .await
-            .unwrap_or_else(|_| TrayHealthSnapshot {
-                startup_hardening_error: Some("Safety checks: timed out".to_string()),
-                access_probe: None,
-                destination_issues: Vec::new(),
+            .unwrap_or_else(|error| {
+                warn!(
+                    error = %error,
+                    "app::tray_tooltip::read_or_refresh_health_snapshot refresh health task timed out"
+                );
+                TrayHealthSnapshot {
+                    startup_hardening_error: Some("Safety checks: timed out".to_string()),
+                    access_probe: None,
+                    destination_issues: Vec::new(),
+                }
             });
 
             let cache = HEALTH_CACHE.get_or_init(|| Mutex::new(TrayHealthCache::default()));
@@ -171,55 +254,84 @@ async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
     snapshot
 }
 
-/// Purpose: Perform a full health check (hardening, access, destination writability).
+/// Summary: Perform a full health check (hardening, access, destination writability).
 ///
 /// Inputs: none.
+///
 /// Outputs: A snapshot of checks used by tray severity.
+///
 /// Side effects: Reads config and probes filesystem paths.
+///
 /// Error handling: Converts failures into user-facing strings.
+///
 /// Ties to other methods: Called by `read_or_refresh_health_snapshot` in a blocking task.
+///
 /// Why this exists: Keep tray status aligned with current disk and path health.
 fn run_full_health_check() -> TrayHealthSnapshot {
-    let startup_hardening_error = match hardening::hardening_check_cmd(Some(hardening::HardeningCheckRequest {
-        check_snapshots: true,
-        require_snapshots: false,
-    })) {
-        Ok(report) => {
-            if report.ok {
-                None
-            } else {
-                Some(format!("Safety checks: {}", report.message))
+    let startup_hardening_error =
+        match hardening::hardening_check_cmd(Some(hardening::HardeningCheckRequest {
+            check_snapshots: true,
+            require_snapshots: false,
+        })) {
+            Ok(report) => {
+                if report.ok {
+                    None
+                } else {
+                    Some(format!("Safety checks: {}", report.message))
+                }
             }
+            Err(err) => Some(format!("Safety checks: {}", err.message)),
+        };
+
+    let access_probe = match access::test_access_cmd() {
+        Ok(probe) => Some(probe),
+        Err(error) => {
+            warn!(
+                error = %error.message,
+                "app::tray_tooltip::run_full_health_check access probe failed"
+            );
+            None
         }
-        Err(err) => Some(format!("Safety checks: {}", err.message)),
     };
 
-    let access_probe = access::test_access_cmd().ok();
-
-    let destination_issues = backup_core::load_config()
-        .ok()
-        .map(|cfg| {
-            cfg.destinations
-                .iter()
-                .filter_map(|d| {
-                    let check =
-                        destination::check_destination_cmd(d.path.display().to_string()).ok()?;
-                    if check.writable {
-                        None
-                    } else {
-                        let name = d
-                            .label
-                            .as_deref()
-                            .map(|label| label.trim())
-                            .filter(|label| !label.is_empty())
-                            .map(|label| label.to_string())
-                            .unwrap_or_else(|| d.path.display().to_string());
-                        Some(format!("{name}: {}", check.message))
+    let destination_issues = match backup_core::load_validated_config() {
+        Ok(cfg) => cfg
+            .destinations
+            .iter()
+            .filter_map(|d| {
+                let check = match destination::check_destination_cmd(d.path.display().to_string()) {
+                    Ok(check) => check,
+                    Err(error) => {
+                        warn!(
+                            destination = %d.path.display(),
+                            error = %error.message,
+                            "app::tray_tooltip::run_full_health_check destination check failed"
+                        );
+                        return Some(format!("{}: {}", d.path.display(), error.message));
                     }
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+                };
+                if check.writable {
+                    None
+                } else {
+                    let name = d
+                        .label
+                        .as_deref()
+                        .map(|label| label.trim())
+                        .filter(|label| !label.is_empty())
+                        .map(|label| label.to_string())
+                        .unwrap_or_else(|| d.path.display().to_string());
+                    Some(format!("{name}: {}", check.message))
+                }
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            warn!(
+                error = %error,
+                "app::tray_tooltip::run_full_health_check failed to load config"
+            );
+            Vec::new()
+        }
+    };
 
     TrayHealthSnapshot {
         startup_hardening_error,
@@ -228,14 +340,22 @@ fn run_full_health_check() -> TrayHealthSnapshot {
     }
 }
 
-/// Purpose: Refreshes the system tray tooltip using the latest daemon status.
+/// Summary: Refreshes the system tray tooltip using the latest daemon status.
 ///
 /// Inputs: the Tauri app handle.
+///
 /// Outputs: `()` after attempting to set the tooltip.
-/// Ties to: tray refresh loops and IPC status calls.
+///
 /// Side effects: Performs IPC calls and updates the tray tooltip.
-/// Why: keep tray feedback aligned with daemon health.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: tray refresh loops and IPC status calls.
+///
+/// Why this exists: keep tray feedback aligned with daemon health.
 pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
+    let runtime = super::tuning::resolve_runtime_tuning();
+    let low_space_warning_bytes = runtime.tray_low_space_warning_bytes.max(1);
     let health = read_or_refresh_health_snapshot().await;
 
     match get_status().await {
@@ -260,7 +380,7 @@ pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
                 severity = TraySeverity::Error;
             }
             if let Some(free) = status.free_bytes {
-                if free < 2 * 1024 * 1024 * 1024 {
+                if free < low_space_warning_bytes {
                     severity = severity.max(TraySeverity::Warning);
                 }
             }
@@ -276,7 +396,7 @@ pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
             if let Some(free) = status.free_bytes {
                 let gb = (free as f64) / (1024.0 * 1024.0 * 1024.0);
                 parts.push(format!("{:.1} GB free", gb));
-                if free < 2 * 1024 * 1024 * 1024 {
+                if free < low_space_warning_bytes {
                     parts.push("LOW SPACE".into());
                 }
             }
@@ -302,27 +422,64 @@ pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
                 ));
             }
             let label = format!("Backup Sync • {}", parts.join(" • "));
-            let _ = handle.tray_handle().set_tooltip(&label);
-
-            let _ = handle
+            if let Err(error) = handle.tray_handle().set_tooltip(&label) {
+                warn!(
+                    error = %error,
+                    "app::tray_tooltip::update_tray_tooltip failed setting tray tooltip"
+                );
+            }
+            if let Err(error) = handle
                 .tray_handle()
                 .get_item(tray::STATUS_LINE)
-                .set_title(format!("Status: {}", severity.label()));
-            let _ = handle
+                .set_title(format!("Status: {}", severity.label()))
+            {
+                warn!(
+                    error = %error,
+                    "app::tray_tooltip::update_tray_tooltip failed setting status tray item"
+                );
+            }
+            if let Err(error) = handle
                 .tray_handle()
                 .get_item(tray::LAST_SYNC_LINE)
-                .set_title(format_last_sync_label(status.last_run_ts));
+                .set_title(format_last_sync_label(status.last_run_ts))
+            {
+                warn!(
+                    error = %error,
+                    "app::tray_tooltip::update_tray_tooltip failed setting last-sync tray item"
+                );
+            }
         }
-        Err(_) => {
-            let _ = handle.tray_handle().set_tooltip("Backup Sync • Offline");
-            let _ = handle
+        Err(error) => {
+            warn!(
+                error = %error.message,
+                "app::tray_tooltip::update_tray_tooltip failed getting daemon status"
+            );
+            if let Err(set_error) = handle.tray_handle().set_tooltip("Backup Sync • Offline") {
+                warn!(
+                    error = %set_error,
+                    "app::tray_tooltip::update_tray_tooltip failed setting offline tray tooltip"
+                );
+            }
+            if let Err(set_error) = handle
                 .tray_handle()
                 .get_item(tray::STATUS_LINE)
-                .set_title("Status: Error (Offline)");
-            let _ = handle
+                .set_title("Status: Error (Offline)")
+            {
+                warn!(
+                    error = %set_error,
+                    "app::tray_tooltip::update_tray_tooltip failed setting offline status tray item"
+                );
+            }
+            if let Err(set_error) = handle
                 .tray_handle()
                 .get_item(tray::LAST_SYNC_LINE)
-                .set_title("Last sync: —");
+                .set_title("Last sync: —")
+            {
+                warn!(
+                    error = %set_error,
+                    "app::tray_tooltip::update_tray_tooltip failed setting offline last-sync tray item"
+                );
+            }
         }
     }
 }

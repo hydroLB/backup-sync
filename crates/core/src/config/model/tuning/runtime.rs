@@ -18,6 +18,16 @@ pub struct RuntimeTuning {
     pub watcher_debounce_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_ipc_timeout_seconds")]
     pub ipc_timeout_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_ipc_request_max_bytes")]
+    pub ipc_request_max_bytes: usize,
+    #[serde(default = "crate::config::model::defaults::default_ipc_response_max_bytes")]
+    pub ipc_response_max_bytes: usize,
+    #[serde(default = "crate::config::model::defaults::default_ipc_read_chunk_bytes")]
+    pub ipc_read_chunk_bytes: usize,
+    #[serde(
+        default = "crate::config::model::defaults::default_daemon_shutdown_join_timeout_seconds"
+    )]
+    pub daemon_shutdown_join_timeout_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_service_command_timeout_seconds")]
     pub service_command_timeout_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_service_command_retry_delay_ms")]
@@ -30,10 +40,44 @@ pub struct RuntimeTuning {
     pub source_snapshot_timeout_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_tray_tooltip_refresh_seconds")]
     pub tray_tooltip_refresh_seconds: u64,
+    #[serde(
+        default = "crate::config::model::defaults::default_tray_full_check_min_interval_seconds"
+    )]
+    pub tray_full_check_min_interval_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_tray_full_check_timeout_seconds")]
+    pub tray_full_check_timeout_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_tray_low_space_warning_bytes")]
+    pub tray_low_space_warning_bytes: u64,
     #[serde(default = "crate::config::model::defaults::default_log_tail_lines")]
     pub log_tail_lines: usize,
+    #[serde(default = "crate::config::model::defaults::default_log_tail_read_chunk_bytes")]
+    pub log_tail_read_chunk_bytes: usize,
+    #[serde(default = "crate::config::model::defaults::default_log_tail_max_bytes")]
+    pub log_tail_max_bytes: u64,
     #[serde(default = "crate::config::model::defaults::default_simulation_sample_limit")]
     pub simulation_sample_limit: usize,
+    #[serde(
+        default = "crate::config::model::defaults::default_hardening_snapshot_probe_timeout_seconds"
+    )]
+    pub hardening_snapshot_probe_timeout_seconds: u64,
+    #[serde(
+        default = "crate::config::model::defaults::default_gui_close_final_backup_debounce_ms"
+    )]
+    pub gui_close_final_backup_debounce_ms: u64,
+    #[serde(
+        default = "crate::config::model::defaults::default_gui_close_final_backup_reset_delay_seconds"
+    )]
+    pub gui_close_final_backup_reset_delay_seconds: u64,
+    #[serde(
+        default = "crate::config::model::defaults::default_gui_quit_final_backup_timeout_seconds"
+    )]
+    pub gui_quit_final_backup_timeout_seconds: u64,
+    #[serde(default = "crate::config::model::defaults::default_gui_daemon_stop_timeout_seconds")]
+    pub gui_daemon_stop_timeout_seconds: u64,
+    #[serde(
+        default = "crate::config::model::defaults::default_gui_quit_force_exit_timeout_seconds"
+    )]
+    pub gui_quit_force_exit_timeout_seconds: u64,
     #[serde(default = "crate::config::model::defaults::default_replication_enabled")]
     pub replication_enabled: bool,
     #[serde(default = "crate::config::model::defaults::default_replication_mirror_manifests")]
@@ -51,13 +95,19 @@ pub struct RuntimeTuning {
 }
 
 impl Default for RuntimeTuning {
-    /// Purpose: Builds a baseline runtime tuning profile for daemon scheduling.
+    /// Summary: Builds a baseline runtime tuning profile for daemon scheduling.
     ///
     /// Inputs: the default functions in `config::model::defaults`.
+    ///
     /// Outputs: a fully populated runtime tuning profile.
-    /// Ties to: daemon cycle pruning, verification, and watcher debounce.
+    ///
     /// Side effects: None.
-    /// Why: centralize runtime knobs so defaults stay aligned across the codebase.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: daemon cycle pruning, verification, and watcher debounce.
+    ///
+    /// Why this exists: centralize runtime knobs so defaults stay aligned across the codebase.
     fn default() -> Self {
         Self {
             prune_interval_cycles: crate::config::model::defaults::default_prune_interval_cycles(),
@@ -73,6 +123,12 @@ impl Default for RuntimeTuning {
             watcher_debounce_seconds:
                 crate::config::model::defaults::default_watcher_debounce_seconds(),
             ipc_timeout_seconds: crate::config::model::defaults::default_ipc_timeout_seconds(),
+            ipc_request_max_bytes: crate::config::model::defaults::default_ipc_request_max_bytes(),
+            ipc_response_max_bytes: crate::config::model::defaults::default_ipc_response_max_bytes(
+            ),
+            ipc_read_chunk_bytes: crate::config::model::defaults::default_ipc_read_chunk_bytes(),
+            daemon_shutdown_join_timeout_seconds:
+                crate::config::model::defaults::default_daemon_shutdown_join_timeout_seconds(),
             service_command_timeout_seconds:
                 crate::config::model::defaults::default_service_command_timeout_seconds(),
             service_command_retry_delay_ms:
@@ -85,9 +141,30 @@ impl Default for RuntimeTuning {
                 crate::config::model::defaults::default_source_snapshot_timeout_seconds(),
             tray_tooltip_refresh_seconds:
                 crate::config::model::defaults::default_tray_tooltip_refresh_seconds(),
+            tray_full_check_min_interval_seconds:
+                crate::config::model::defaults::default_tray_full_check_min_interval_seconds(),
+            tray_full_check_timeout_seconds:
+                crate::config::model::defaults::default_tray_full_check_timeout_seconds(),
+            tray_low_space_warning_bytes:
+                crate::config::model::defaults::default_tray_low_space_warning_bytes(),
             log_tail_lines: crate::config::model::defaults::default_log_tail_lines(),
+            log_tail_read_chunk_bytes:
+                crate::config::model::defaults::default_log_tail_read_chunk_bytes(),
+            log_tail_max_bytes: crate::config::model::defaults::default_log_tail_max_bytes(),
             simulation_sample_limit:
                 crate::config::model::defaults::default_simulation_sample_limit(),
+            hardening_snapshot_probe_timeout_seconds:
+                crate::config::model::defaults::default_hardening_snapshot_probe_timeout_seconds(),
+            gui_close_final_backup_debounce_ms:
+                crate::config::model::defaults::default_gui_close_final_backup_debounce_ms(),
+            gui_close_final_backup_reset_delay_seconds:
+                crate::config::model::defaults::default_gui_close_final_backup_reset_delay_seconds(),
+            gui_quit_final_backup_timeout_seconds:
+                crate::config::model::defaults::default_gui_quit_final_backup_timeout_seconds(),
+            gui_daemon_stop_timeout_seconds:
+                crate::config::model::defaults::default_gui_daemon_stop_timeout_seconds(),
+            gui_quit_force_exit_timeout_seconds:
+                crate::config::model::defaults::default_gui_quit_force_exit_timeout_seconds(),
             replication_enabled: crate::config::model::defaults::default_replication_enabled(),
             replication_mirror_manifests:
                 crate::config::model::defaults::default_replication_mirror_manifests(),

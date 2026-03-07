@@ -1,11 +1,17 @@
 /**
- * Purpose: Centralize UI tuning knobs and defaults used across the frontend.
+ * Summary: Centralize UI tuning knobs and defaults used across the frontend.
  *
  * Inputs: None.
+ *
  * Outputs: Exported constants for UI behaviors.
- * Ties to: Status polling, toast timing, and storage keys in settings.
+ *
  * Side effects: None.
- * Why: Make UI behavior adjustments simple and consistent.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Status polling, toast timing, and storage keys in settings.
+ *
+ * Why this exists: Make UI behavior adjustments simple and consistent.
  */
 export const UI_TUNING = {
   planTooLargeCode: 'PLAN_TOO_LARGE',
@@ -16,11 +22,9 @@ export const UI_TUNING = {
   resumeOnSpaceStorageKey: 'resume_on_space',
   onboardingDoneStorageKey: 'onboarding_done',
   hardeningDoneStorageKey: 'hardening_done',
+  colorModeStorageKey: 'color_mode_preference',
   runNow: {
     maxLogLines: 30,
-    logPreviewMaxHeightPx: 200,
-    logPreviewPaddingPx: 10,
-    logPreviewRadiusPx: 10,
   },
   actionLogLimit: 30,
   activityFeedLimit: 5,

@@ -1,20 +1,31 @@
 use crate::commands::correlation;
 use crate::commands::error::ErrorEnvelope;
 use backup_core::{
-    backup::versioned, load_config, platform::paths, state::store::StateStore, validate,
+    backup::versioned,
+    load_validated_config,
+    logging::{redact_path, redact_text},
+    platform::paths,
+    state::store::StateStore,
 };
 use fs2::free_space;
 use serde::Serialize;
+use tracing::{error, info, warn};
 
-/// Purpose: Loads config and validates it with consistent error envelopes.
+/// Summary: Loads config and validates it with consistent error envelopes.
 ///
 /// Inputs: the correlation id string.
+///
 /// Outputs: a validated config or an error envelope.
-/// Ties to: run and simulate commands.
+///
 /// Side effects: Reads config from disk and may write defaults during load.
-/// Why: centralize config loading and validation error handling.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: run and simulate commands.
+///
+/// Why this exists: centralize config loading and validation error handling.
 fn load_and_validate_config(cid: &str) -> Result<backup_core::Config, ErrorEnvelope> {
-    let cfg = load_config().map_err(|e| {
+    load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
             format!(
@@ -22,26 +33,21 @@ fn load_and_validate_config(cid: &str) -> Result<backup_core::Config, ErrorEnvel
                 cid, e
             ),
         )
-    })?;
-    validate(&cfg).map_err(|e| {
-        ErrorEnvelope::new(
-            "CONFIG_INVALID",
-            format!(
-                "[cid={}] load_and_validate_config config validation failed: {}",
-                cid, e
-            ),
-        )
-    })?;
-    Ok(cfg)
+    })
 }
 
-/// Purpose: Loads the persisted daemon state store for GUI actions.
+/// Summary: Loads the persisted daemon state store for GUI actions.
 ///
 /// Inputs: the config and correlation id string.
+///
 /// Outputs: a tuple of state store and loaded state.
+///
 /// Side effects: Reads state from disk.
+///
 /// Error handling: Wraps IO failures with a correlation-id tagged envelope.
+///
 /// Ties to other methods: Used by `run_now_cmd` for state persistence.
+///
 /// Why this exists: centralize state loading and ensure safe-mode stays in sync with config.
 fn load_state_store(
     cfg: &backup_core::Config,
@@ -67,16 +73,22 @@ fn load_state_store(
 }
 
 #[tauri::command]
-/// Purpose: Runs a backup immediately from the GUI.
+/// Summary: Runs a backup immediately from the GUI.
 ///
 /// Inputs: an optional correlation id.
+///
 /// Outputs: `Ok(())` when the backup completes or an error envelope.
-/// Ties to: GUI run now actions and state persistence.
+///
 /// Side effects: Reads config/state, performs backup IO, and writes state updates.
-/// Why: provide an on demand run path for the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI run now actions and state persistence.
+///
+/// Why this exists: provide an on demand run path for the UI.
 pub async fn run_now_cmd(correlation_id: Option<String>) -> Result<(), ErrorEnvelope> {
     let cid = correlation::cid("run", correlation_id);
-    eprintln!("[cid={}] run_now start", cid);
+    info!(cid = %cid, action = "run_now_start", "gui backup run requested");
     let cfg = load_and_validate_config(&cid)?;
     if cfg.safe_mode {
         return Err(ErrorEnvelope::new(
@@ -93,8 +105,11 @@ pub async fn run_now_cmd(correlation_id: Option<String>) -> Result<(), ErrorEnve
                 return Err(ErrorEnvelope::new(
                     "FREE_SPACE_LOW",
                     format!(
-                        "[cid={}] run_now_cmd free space {} below configured minimum {} at {:?}",
-                        cid, free, min_free, cfg.backup_root
+                        "[cid={}] run_now_cmd free space {} below configured minimum {} at {}",
+                        cid,
+                        free,
+                        min_free,
+                        redact_path(&cfg.backup_root)
                     ),
                 ));
             }
@@ -137,13 +152,25 @@ pub async fn run_now_cmd(correlation_id: Option<String>) -> Result<(), ErrorEnve
                 } else {
                     Some(rep.message.clone())
                 };
-                eprintln!("[cid={}] replication {}", cid, rep.message);
+                info!(
+                    cid = %cid,
+                    action = "replication_complete",
+                    message = %rep.message,
+                    pairs_ok = rep.pairs_ok,
+                    pairs_failed = rep.pairs_failed,
+                    "gui replication completed"
+                );
             }
             Err(e) => {
                 state.replication_last_run_ts = Some(chrono::Utc::now().timestamp());
                 state.replication_last_status = Some("failed".to_string());
                 state.replication_last_error = Some(format!("{e:#}"));
-                eprintln!("[cid={}] replication failed: {e:#}", cid);
+                error!(
+                    cid = %cid,
+                    action = "replication_failed",
+                    error = %redact_text(&format!("{e:#}")),
+                    "gui replication failed"
+                );
             }
         }
     }
@@ -157,9 +184,11 @@ pub async fn run_now_cmd(correlation_id: Option<String>) -> Result<(), ErrorEnve
             format!("[cid={}] run_now_cmd failed to persist state: {}", cid, e),
         )
     })?;
-    eprintln!(
-        "[cid={}] run_now complete versions_created={}",
-        cid, result.versions_created
+    info!(
+        cid = %cid,
+        action = "run_now_complete",
+        versions_created = result.versions_created,
+        "gui backup run completed"
     );
     Ok(())
 }
@@ -173,18 +202,24 @@ pub struct SimulationResult {
 }
 
 #[tauri::command]
-/// Purpose: Runs a simulation that reports what would be backed up without writing.
+/// Summary: Runs a simulation that reports what would be backed up without writing.
 ///
 /// Inputs: an optional correlation id string.
+///
 /// Outputs: a `SimulationResult` or error envelope.
-/// Ties to: GUI simulate actions.
+///
 /// Side effects: Reads config/state and scans filesystem metadata.
-/// Why: allow users to inspect changes before running a backup.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI simulate actions.
+///
+/// Why this exists: allow users to inspect changes before running a backup.
 pub async fn run_simulate_cmd(
     correlation_id: Option<String>,
 ) -> Result<SimulationResult, ErrorEnvelope> {
     let cid = correlation::cid("sim", correlation_id);
-    eprintln!("[cid={}] simulate start", cid);
+    info!(cid = %cid, action = "simulate_start", "gui simulation requested");
     let cfg = load_and_validate_config(&cid)?;
     let sim = versioned::simulate_backup_cycle(&cfg).map_err(|e| {
         ErrorEnvelope::new(
@@ -207,8 +242,21 @@ pub async fn run_simulate_cmd(
             " read_failures={} snapshot_errors={}",
             sim.read_failures, sim.snapshot_errors
         ));
+        warn!(
+            cid = %cid,
+            action = "simulate_quality_warnings",
+            read_failures = sim.read_failures,
+            snapshot_errors = sim.snapshot_errors,
+            "gui simulation completed with scan warnings"
+        );
     }
-    eprintln!("[cid={}] simulate complete {}", cid, message);
+    info!(
+        cid = %cid,
+        action = "simulate_complete",
+        items = sim.items,
+        bytes = sim.bytes_to_write,
+        "gui simulation completed"
+    );
     Ok(SimulationResult {
         items: sim.items,
         bytes: sim.bytes_to_write,

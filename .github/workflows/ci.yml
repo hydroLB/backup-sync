@@ -6,46 +6,378 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm-cache
+
 jobs:
-  quality:
+  format:
+    name: ci-format
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-format-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-format-
+
+      - name: Install frontend dependencies
+        run: make frontend-install
+
+      - name: Rust format check
+        run: make fmt-check
+
+      - name: Frontend format check
+        run: make frontend-format-check
+
+  lint:
+    name: ci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-lint-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-lint-
+
+      - name: Install frontend dependencies
+        run: make frontend-install
+
+      - name: Rust lint
+        run: make clippy
+
+      - name: Frontend lint
+        run: make frontend-lint
+
+      - name: Layer boundary check
+        run: make boundaries-check
+
+      - name: Operability policy check
+        run: make operability-check
+
+      - name: Hygiene check
+        run: make hygiene-check
+
+  typecheck:
+    name: ci-typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-typecheck-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-typecheck-
+
+      - name: Rust typecheck
+        run: cargo check --workspace --all-targets
+
+      - name: Install frontend dependencies
+        run: make frontend-install
+
+      - name: Frontend typecheck
+        run: make frontend-typecheck
+
+  tests:
+    name: ci-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
         with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-tests-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-tests-
+
+      - name: Install frontend dependencies
+        run: make frontend-install
+
+      - name: Run backend and frontend tests
+        run: |
+          mkdir -p .reports/tests
+          set -o pipefail
+          make test 2>&1 | tee .reports/tests/backend-tests.log
+          make frontend-test 2>&1 | tee .reports/tests/frontend-tests.log
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .reports/tests/backend-tests.log
+            .reports/tests/frontend-tests.log
+
+  coverage:
+    name: ci-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
           components: llvm-tools-preview
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 18
-          cache: npm
-          cache-dependency-path: crates/gui/frontend/package-lock.json
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-coverage-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-coverage-
 
       - name: Install frontend dependencies
-        run: npm ci
-        working-directory: crates/gui/frontend
+        run: make frontend-install
 
-      - name: Run quality gates
-        run: make ci
+      - name: Run coverage gates
+        run: |
+          mkdir -p .reports/coverage
+          set -o pipefail
+          make coverage 2>&1 | tee .reports/coverage/coverage.log
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .reports/coverage/coverage.log
+            crates/gui/frontend/coverage
+
+  build:
+    name: ci-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-build-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      - name: Build workspace and frontend bundle
+        run: make build
 
   security:
+    name: ci-security
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         with:
           fail: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Cache cargo + npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .npm-cache
+            crates/gui/frontend/node_modules
+          key: ${{ runner.os }}-security-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-security-
+
+      - name: Install frontend dependencies
+        run: make frontend-install
+
+      - name: Lockfile hygiene check
+        run: make lockfile-check
+
+      - name: Cargo deny policy check
+        run: make deny
+
+      - name: Dependency audit
+        run: make audit
+
+  ci-canonical:
+    name: ci-canonical-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - format
+      - lint
+      - typecheck
+      - tests
+      - coverage
+      - build
+      - security
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate canonical command contract
+        run: |
+          mkdir -p .reports/ci
+          make -n ci > .reports/ci/ci-contract.txt
+          grep -E "fmt-check|clippy|boundaries-check|operability-check|frontend-lint|frontend-format-check|frontend-typecheck|hygiene-check|lockfile-check|perf-check|coverage|security-check|deny|audit|secrets" .reports/ci/ci-contract.txt
+
+      - name: Upload CI contract artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: .reports/ci/ci-contract.txt

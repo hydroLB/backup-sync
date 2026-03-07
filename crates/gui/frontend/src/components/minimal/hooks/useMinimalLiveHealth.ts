@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { UI_TUNING } from '../../../config/uiTuning';
-import { tauriAvailable } from '../../../services/ipc';
 import { checkDestination, testAccess } from '../../../services/system';
-import { Config } from '../../settings/types';
+import { Config } from '../../../domain/config';
 
 type EventKind = 'ok' | 'error' | 'info';
 
@@ -21,10 +20,15 @@ type LiveHealthState = {
  * Summary: Build a stable key for destination and watched issue comparisons.
  *
  * Inputs: List of issue strings.
+ *
  * Outputs: Deterministic key string for transition detection.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `useMinimalLiveHealth` event transition logic.
+ *
  * Why this exists: Avoid repeatedly firing toasts when issue sets are unchanged.
  */
 function issueKey(issues: string[]): string {
@@ -35,10 +39,15 @@ function issueKey(issues: string[]): string {
  * Summary: Build a concise destination warning string for inline UI display.
  *
  * Inputs: Destination issue list.
+ *
  * Outputs: User-facing warning string or null.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `useMinimalLiveHealth`.
+ *
  * Why this exists: Keep destination health issues visible without flooding the interface.
  */
 function destinationWarningFromIssues(issues: string[]): string | null {
@@ -53,10 +62,15 @@ function destinationWarningFromIssues(issues: string[]): string | null {
  * Summary: Build a concise watched path warning string for inline UI display.
  *
  * Inputs: Missing and inaccessible watched path lists.
+ *
  * Outputs: User-facing warning string or null.
+ *
  * Side effects: None.
+ *
  * Error handling: None.
+ *
  * Ties to other methods: Used by `useMinimalLiveHealth`.
+ *
  * Why this exists: Keep watched source health actionable and compact.
  */
 function watchedWarningFromIssues(missing: string[], inaccessible: string[]): string | null {
@@ -76,17 +90,18 @@ function watchedWarningFromIssues(missing: string[], inaccessible: string[]): st
  * Summary: Poll destination and watched-path accessibility for minimal mode.
  *
  * Inputs: Config and event callback.
+ *
  * Outputs: Inline warning strings for destination and watched path health.
+ *
  * Side effects: Calls IPC probes on a timer and emits transition toasts when health changes.
+ *
  * Error handling: Tolerates transient probe failures and emits actionable probe errors.
+ *
  * Ties to other methods: Consumed by `MinimalMain` to render live health warnings.
+ *
  * Why this exists: Surface filesystem regressions quickly without requiring manual checks.
  */
-export function useMinimalLiveHealth({
-  cfg,
-  onEvent,
-  suspend = false,
-}: Params): LiveHealthState {
+export function useMinimalLiveHealth({ cfg, onEvent, suspend = false }: Params): LiveHealthState {
   const [destinationIssues, setDestinationIssues] = useState<string[]>([]);
   const [watchedMissing, setWatchedMissing] = useState<string[]>([]);
   const [watchedInaccessible, setWatchedInaccessible] = useState<string[]>([]);
@@ -103,7 +118,6 @@ export function useMinimalLiveHealth({
       prevWatchedKeyRef.current = '';
       return;
     }
-    if (!tauriAvailable()) return;
     let cancelled = false;
 
     const refresh = async () => {
@@ -138,11 +152,20 @@ export function useMinimalLiveHealth({
 
         if (prevDestinationKeyRef.current !== nextDestinationKey) {
           if (prevDestinationKeyRef.current.length === 0 && nextDestinationIssues.length > 0) {
-            onEvent(destinationWarningFromIssues(nextDestinationIssues) ?? 'Destination issue detected.', 'error');
-          } else if (prevDestinationKeyRef.current.length > 0 && nextDestinationIssues.length === 0) {
+            onEvent(
+              destinationWarningFromIssues(nextDestinationIssues) ?? 'Destination issue detected.',
+              'error',
+            );
+          } else if (
+            prevDestinationKeyRef.current.length > 0 &&
+            nextDestinationIssues.length === 0
+          ) {
             onEvent('All destinations are reachable again.', 'ok');
           } else if (nextDestinationIssues.length > 0) {
-            onEvent(destinationWarningFromIssues(nextDestinationIssues) ?? 'Destination issue updated.', 'error');
+            onEvent(
+              destinationWarningFromIssues(nextDestinationIssues) ?? 'Destination issue updated.',
+              'error',
+            );
           }
           prevDestinationKeyRef.current = nextDestinationKey;
         }

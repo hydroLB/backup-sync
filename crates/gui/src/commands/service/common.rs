@@ -1,6 +1,7 @@
 use crate::commands::error::ErrorEnvelope;
 use backup_core::config::model::RuntimeTuning;
-use backup_core::load_config;
+use backup_core::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
+use backup_core::load_validated_config;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -9,15 +10,21 @@ use tracing::warn;
 
 const DAEMON_EXEC_ENV: &str = "BACKUP_SYNC_DAEMON_EXEC";
 
-/// Purpose: Loads runtime tuning for service command execution.
+/// Summary: Loads runtime tuning for service command execution.
 ///
 /// Inputs: none.
+///
 /// Outputs: runtime tuning from config or defaults.
-/// Ties to: service command timeouts and retries.
+///
 /// Side effects: Reads config from disk and logs warnings on fallback.
-/// Why: keep service command behavior configurable without hardcoded constants.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service command timeouts and retries.
+///
+/// Why this exists: keep service command behavior configurable without hardcoded constants.
 fn resolve_runtime_tuning() -> RuntimeTuning {
-    match load_config() {
+    match load_validated_config() {
         Ok(cfg) => cfg.runtime,
         Err(e) => {
             warn!(
@@ -29,13 +36,45 @@ fn resolve_runtime_tuning() -> RuntimeTuning {
     }
 }
 
-/// Purpose: Resolve the daemon executable path for service installation.
+/// Summary: Loads blocking I/O policy for service file operations.
+///
+/// Inputs: none.
+///
+/// Outputs: I/O policy from config or bootstrap defaults.
+///
+/// Side effects: Reads config from disk and logs warnings on fallback.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service manifest writes.
+///
+/// Why this exists: keep timeout and retry behavior for local file writes centralized and configurable.
+fn resolve_io_policy() -> BlockingIoPolicy {
+    match load_validated_config() {
+        Ok(cfg) => BlockingIoPolicy::from_config(&cfg),
+        Err(e) => {
+            warn!(
+                "service::resolve_io_policy failed to load config; using defaults: {}",
+                e
+            );
+            BlockingIoPolicy::bootstrap_defaults()
+        }
+    }
+}
+
+/// Summary: Resolve the daemon executable path for service installation.
 ///
 /// Inputs: the current executable location and optional override environment variable.
+///
 /// Outputs: the canonical daemon executable path.
-/// Ties to: `load_exec_and_log` and service manifest generation.
+///
 /// Side effects: Reads environment variables and filesystem metadata.
-/// Why: Services must execute the daemon binary, not the GUI or CLI wrapper.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `load_exec_and_log` and service manifest generation.
+///
+/// Why this exists: Services must execute the daemon binary, not the GUI or CLI wrapper.
 fn resolve_daemon_exec() -> Result<PathBuf, ErrorEnvelope> {
     if let Ok(v) = std::env::var(DAEMON_EXEC_ENV) {
         let trimmed = v.trim();
@@ -111,26 +150,47 @@ fn resolve_daemon_exec() -> Result<PathBuf, ErrorEnvelope> {
     ))
 }
 
-/// Purpose: Loads the current executable path and optional log path.
+/// Summary: Loads the current executable path and optional log path.
 ///
 /// Inputs: the current process environment and platform log path resolver.
+///
 /// Outputs: the resolved executable path and optional log path.
-/// Ties to: service installation workflows.
+///
 /// Side effects: Reads environment and filesystem metadata for executable resolution.
-/// Why: ensure service manifests reference the correct binary.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation workflows.
+///
+/// Why this exists: ensure service manifests reference the correct binary.
 pub fn load_exec_and_log() -> Result<(PathBuf, Option<PathBuf>), ErrorEnvelope> {
     let exec = resolve_daemon_exec()?;
-    let log_path = backup_core::platform::paths::log_file_path().ok();
+    let log_path = match backup_core::platform::paths::log_file_path() {
+        Ok(path) => Some(path),
+        Err(error) => {
+            warn!(
+                "service::load_exec_and_log failed to resolve log path; continuing without explicit log path: {}",
+                error
+            );
+            None
+        }
+    };
     Ok((exec, log_path))
 }
 
-/// Purpose: Runs a command and returns its output on success.
+/// Summary: Runs a command and returns its output on success.
 ///
 /// Inputs: the command, arguments, error code, and context string.
+///
 /// Outputs: the command output on success.
-/// Ties to: service enable and restart operations.
+///
 /// Side effects: Spawns system commands, waits for completion, and may sleep while polling.
-/// Why: centralize command execution and error mapping.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service enable and restart operations.
+///
+/// Why this exists: centralize command execution and error mapping.
 pub fn run_command(
     cmd: &str,
     args: &[&str],
@@ -175,7 +235,12 @@ pub fn run_command(
             }
             Ok(None) => {
                 if start.elapsed() > timeout {
-                    let _ = child.kill();
+                    if let Err(error) = child.kill() {
+                        warn!(
+                            "service::run_command failed to kill timed-out child process for {}: {}",
+                            context, error
+                        );
+                    }
                     return Err(ErrorEnvelope::new(
                         code,
                         format!(
@@ -197,13 +262,19 @@ pub fn run_command(
     }
 }
 
-/// Purpose: Runs a command with a single retry on failure.
+/// Summary: Runs a command with a single retry on failure.
 ///
 /// Inputs: the command, arguments, error code, and context string.
+///
 /// Outputs: `Ok(())` when the command succeeds.
-/// Ties to: service enable workflows that sometimes race system daemons.
+///
 /// Side effects: Spawns commands and sleeps between retry attempts.
-/// Why: improve reliability when system tools need a brief delay.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service enable workflows that sometimes race system daemons.
+///
+/// Why this exists: improve reliability when system tools need a brief delay.
 pub fn run_command_with_retry(
     cmd: &str,
     args: &[&str],
@@ -219,15 +290,35 @@ pub fn run_command_with_retry(
     })
 }
 
-/// Purpose: Writes text content to a destination file.
+/// Summary: Writes text content to a destination file.
 ///
 /// Inputs: the destination path, content, and error context string.
+///
 /// Outputs: `Ok(())` when the file is written.
-/// Ties to: service manifest generation.
+///
 /// Side effects: Writes manifest files to disk.
-/// Why: keep manifest writing consistent across platforms.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service manifest generation.
+///
+/// Why this exists: keep manifest writing consistent across platforms.
 pub fn write_text_file(dest: &Path, content: &str, context: &str) -> Result<(), ErrorEnvelope> {
-    std::fs::write(dest, content).map_err(|e| {
+    let io_policy = resolve_io_policy();
+    run_with_policy(
+        "service::write_text_file write manifest",
+        &io_policy,
+        CancellationFlag::none(),
+        || {
+            std::fs::write(dest, content).map_err(|e| {
+                anyhow::anyhow!(e).context(format!(
+                    "service::write_text_file {} failed to write {:?}",
+                    context, dest
+                ))
+            })
+        },
+    )
+    .map_err(|e| {
         ErrorEnvelope::new(
             "SERVICE_WRITE",
             format!("service::write_text_file {} failed: {}", context, e),
@@ -235,13 +326,19 @@ pub fn write_text_file(dest: &Path, content: &str, context: &str) -> Result<(), 
     })
 }
 
-/// Purpose: Service status payload returned to the GUI.
+/// Summary: Service status payload returned to the GUI.
 ///
 /// Inputs: derived from system checks and daemon IPC reachability.
+///
 /// Outputs: a serializable status structure.
-/// Ties to: service status queries in the UI.
+///
 /// Side effects: None.
-/// Why: provide a consistent status schema for the frontend.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service status queries in the UI.
+///
+/// Why this exists: provide a consistent status schema for the frontend.
 #[derive(Serialize)]
 pub struct ServiceStatus {
     pub installed: bool,

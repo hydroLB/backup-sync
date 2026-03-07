@@ -2,8 +2,10 @@
 name = "tauri-plugin-single-instance"
 version = "0.0.0"
 edition = "2021"
+license = "MIT"
 publish = false
 
 [dependencies]
 fs2 = "0.4"
 tauri = { version = "1", features = ["path-all"] }
+tracing = "0.1"

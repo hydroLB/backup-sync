@@ -3,13 +3,19 @@ import { UI_TUNING } from '../config/uiTuning';
 const MAX_IGNORE_PATTERNS = UI_TUNING.configLimits.maxIgnorePatterns;
 
 /**
- * Purpose: Validate ignore patterns for syntax and size limits before saving settings.
+ * Summary: Validate ignore patterns for syntax and size limits before saving settings.
  *
  * Inputs: `patterns` as user supplied glob-like strings.
+ *
  * Outputs: `null` when valid, or a message describing the first validation failure.
- * Ties to: Settings forms that persist ignore rules and backend ignore filtering.
+ *
  * Side effects: None.
- * Why: Protects the backup planner from invalid patterns and excessive configuration.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Settings forms that persist ignore rules and backend ignore filtering.
+ *
+ * Why this exists: Protects the backup planner from invalid patterns and excessive configuration.
  */
 export function validateIgnorePatterns(patterns: string[]): string | null {
   try {
@@ -22,8 +28,9 @@ export function validateIgnorePatterns(patterns: string[]): string | null {
       }
       try {
         new RegExp(pat.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
-      } catch {
-        return `[validateIgnorePatterns] Invalid ignore pattern: ${pat}`;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return `[validateIgnorePatterns] Invalid ignore pattern: ${pat} (${reason})`;
       }
     }
     return null;

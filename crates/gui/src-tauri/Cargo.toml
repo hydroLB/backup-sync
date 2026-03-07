@@ -2,10 +2,13 @@
 name = "gui-app"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 publish = false
 
 [dependencies]
 gui = { path = "..", features = ["single-instance"] }
+backup_core = { path = "../../core" }
+tracing = "0.1"
 
 [[bin]]
 name = "gui-app"

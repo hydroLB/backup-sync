@@ -1,17 +1,18 @@
-/// Purpose: Legacy file-copy backup engine modules (feature-gated).
+/// Summary: Original file-copy backup engine modules retained alongside the versioned engine.
 ///
-/// Inputs: Enabled via the `legacy-engine` cargo feature.
-/// Outputs: Exposes the original scan-plan-execute pipeline when enabled.
+/// Inputs: Module consumers in core and tests.
+///
+/// Outputs: Exposes the original scan-plan-execute pipeline.
+///
 /// Side effects: None.
+///
 /// Error handling: Delegated to module implementations.
+///
 /// Ties to other methods: Separate from the versioned engine (`backup::versioned`).
-/// Why this exists: Keep historical engine code available for reference without confusing the default, versioned workflow.
-#[cfg(feature = "legacy-engine")]
+///
+/// Why this exists: Preserve reusable planning and execution components while the versioned engine remains the production path.
 pub mod execution;
-#[cfg(feature = "legacy-engine")]
 pub mod naming;
-#[cfg(feature = "legacy-engine")]
 pub mod planning;
-#[cfg(feature = "legacy-engine")]
 pub mod retention;
 pub mod versioned;

@@ -1,15 +1,21 @@
-// Safe IPC wrapper for browser mode and native desktop mode.
+// Safe IPC wrapper for the desktop Tauri runtime.
 
 import { UI_TUNING } from '../config/uiTuning';
 
 /**
- * Purpose: Provide a typed error shape for IPC failures.
+ * Summary: Provide a typed error shape for IPC failures.
  *
  * Inputs: Message, optional backend error code, and optional original payload.
+ *
  * Outputs: An Error instance with a stable `code` field.
- * Ties to: `safeInvoke` and UI error handling that inspects `code`.
+ *
  * Side effects: Captures a stack trace at construction time.
- * Why: Preserve backend error codes and avoid `[object Object]` failures in the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `safeInvoke` and UI error handling that inspects `code`.
+ *
+ * Why this exists: Preserve backend error codes and avoid `[object Object]` failures in the UI.
  */
 export class IpcError extends Error {
   public readonly code?: string;
@@ -30,26 +36,38 @@ export class IpcError extends Error {
 type UnknownRecord = Record<string, unknown>;
 
 /**
- * Purpose: Narrow an unknown value to a record type.
+ * Summary: Narrow an unknown value to a record type.
  *
  * Inputs: Unknown value.
+ *
  * Outputs: `true` when the value is a non-null object.
- * Ties to: IPC error normalization.
+ *
  * Side effects: None.
- * Why: Avoid unsafe casts when reading error payload fields.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: IPC error normalization.
+ *
+ * Why this exists: Avoid unsafe casts when reading error payload fields.
  */
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null;
 }
 
 /**
- * Purpose: Normalize an unknown IPC failure into a message and optional code.
+ * Summary: Normalize an unknown IPC failure into a message and optional code.
  *
  * Inputs: Unknown error payload.
+ *
  * Outputs: Normalized message and optional error code.
- * Ties to: `withTimeout` and `safeInvoke` error mapping.
+ *
  * Side effects: None.
- * Why: Tauri command errors can arrive as plain objects, not `Error` instances.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `withTimeout` and `safeInvoke` error mapping.
+ *
+ * Why this exists: Tauri command errors can arrive as plain objects, not `Error` instances.
  */
 function normalizeFailure(error: unknown): { message: string; code?: string } {
   if (error instanceof IpcError) {
@@ -76,8 +94,12 @@ function normalizeFailure(error: unknown): { message: string; code?: string } {
       const out: { message: string; code?: string } = { message: JSON.stringify(error) };
       if (code !== undefined) out.code = code;
       return out;
-    } catch {
-      const out: { message: string; code?: string } = { message: String(error) };
+    } catch (stringifyError) {
+      const reason =
+        stringifyError instanceof Error ? stringifyError.message : String(stringifyError);
+      const out: { message: string; code?: string } = {
+        message: `${String(error)} (JSON stringify failed: ${reason})`,
+      };
       if (code !== undefined) out.code = code;
       return out;
     }
@@ -86,13 +108,19 @@ function normalizeFailure(error: unknown): { message: string; code?: string } {
 }
 
 /**
- * Purpose: Wrap an unknown error with additional context while preserving error codes.
+ * Summary: Wrap an unknown error with additional context while preserving error codes.
  *
  * Inputs: Context label and an unknown error payload.
+ *
  * Outputs: An `IpcError` carrying a normalized message and optional `code`.
- * Ties to: Service layer error wrapping across the frontend.
+ *
  * Side effects: None.
- * Why: Keep error handling consistent and actionable without losing backend error metadata.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: Service layer error wrapping across the frontend.
+ *
+ * Why this exists: Keep error handling consistent and actionable without losing backend error metadata.
  */
 export function wrapError(context: string, error: unknown): IpcError {
   const norm = normalizeFailure(error);
@@ -100,13 +128,19 @@ export function wrapError(context: string, error: unknown): IpcError {
 }
 
 /**
- * Purpose: Enforce a timeout for a promise-based operation.
+ * Summary: Enforce a timeout for a promise-based operation.
  *
  * Inputs: Promise to execute, timeout duration, and error label.
+ *
  * Outputs: Resolves with the promise result or rejects on timeout.
- * Ties to: IPC invocations and UI responsiveness.
+ *
  * Side effects: Schedules and clears timer callbacks.
- * Why: Prevent hung IPC calls from stalling the UI.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: IPC invocations and UI responsiveness.
+ *
+ * Why this exists: Prevent hung IPC calls from stalling the UI.
  */
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   if (timeoutMs <= 0) {
@@ -130,13 +164,19 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
 }
 
 /**
- * Purpose: Determine if the Tauri IPC bridge is available.
+ * Summary: Determine if the Tauri IPC bridge is available.
  *
  * Inputs: Reads from the global `window` object.
+ *
  * Outputs: `true` when the IPC bridge is present.
- * Ties to: `tauriAvailable` and `safeInvoke` guards in the service layer.
+ *
  * Side effects: Reads global `window` state.
- * Why: Allows services to short circuit in browser mode.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `tauriAvailable` and `safeInvoke` guards in the service layer.
+ *
+ * Why this exists: Some startup paths need to delay work until the native bridge is ready.
  */
 function hasTauri(): boolean {
   try {
@@ -152,26 +192,38 @@ function hasTauri(): boolean {
 }
 
 /**
- * Purpose: Expose IPC availability to calling code.
+ * Summary: Expose IPC availability to calling code.
  *
  * Inputs: None.
+ *
  * Outputs: `true` when the IPC bridge can be used.
- * Ties to: UI decisions that depend on native capabilities.
+ *
  * Side effects: Reads global `window` state.
- * Why: Allows the UI to show or hide native only actions safely.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: UI decisions that depend on native capabilities.
+ *
+ * Why this exists: Allows the UI to show or hide native only actions safely.
  */
 export function tauriAvailable(): boolean {
   return hasTauri();
 }
 
 /**
- * Purpose: Invoke a Tauri command with guardrails for browser mode.
+ * Summary: Invoke a Tauri command with timeout and error guardrails.
  *
  * Inputs: `cmd` as the command name, `args` as an optional argument map.
+ *
  * Outputs: A typed response from the backend IPC layer.
- * Ties to: All backend IPC calls in the services layer.
+ *
  * Side effects: Invokes IPC calls and loads the Tauri API module.
- * Why: Provides a single IPC entry point with consistent error context.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: All backend IPC calls in the services layer.
+ *
+ * Why this exists: Provides a single IPC entry point with consistent error context.
  */
 export async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!hasTauri()) {
@@ -183,13 +235,18 @@ export async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>)
 }
 
 /**
- * Purpose: Invoke a Tauri command with a per-call timeout override.
+ * Summary: Invoke a Tauri command with a per-call timeout override.
  *
  * Inputs: `cmd` command name, `args` optional argument map, and `timeoutMs` override.
+ *
  * Outputs: A typed response from the backend IPC layer.
+ *
  * Side effects: Invokes IPC calls and loads the Tauri API module.
+ *
  * Error handling: Throws an `IpcError` on timeout or IPC failure, preserving backend codes when possible.
+ *
  * Ties to other methods: Used by long-running health checks like hardening probes.
+ *
  * Why this exists: Some checks can legitimately take longer than the global IPC timeout without hanging the UI.
  */
 export async function safeInvokeWithTimeout<T>(
@@ -201,7 +258,8 @@ export async function safeInvokeWithTimeout<T>(
     throw new IpcError('Tauri IPC unavailable; run the desktop app build', 'TAURI_UNAVAILABLE');
   }
   const { invoke } = await loadTauriInvoke();
-  const effectiveTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : UI_TUNING.system.ipcTimeoutMs;
+  const effectiveTimeout =
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : UI_TUNING.system.ipcTimeoutMs;
   return await withTimeout(invoke<T>(cmd, args), effectiveTimeout, `IPC ${cmd}`);
 }
 
@@ -209,13 +267,18 @@ type TauriModule = typeof import('@tauri-apps/api/tauri');
 let tauriModulePromise: Promise<TauriModule> | null = null;
 
 /**
- * Purpose: Load the Tauri invoke module with caching.
+ * Summary: Load the Tauri invoke module with caching.
  *
  * Inputs: None.
+ *
  * Outputs: The Tauri API module.
+ *
  * Side effects: Dynamically imports the Tauri module on first use.
+ *
  * Error handling: Throws a contextualized error when the module fails to load.
+ *
  * Ties to other methods: Used by `safeInvoke` and `prewarmNativeApis`.
+ *
  * Why this exists: Avoid repeated dynamic imports on hot IPC paths.
  */
 export async function loadTauriInvoke(): Promise<TauriModule> {

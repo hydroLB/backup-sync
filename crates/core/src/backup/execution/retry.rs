@@ -1,13 +1,19 @@
 use anyhow::{Context, Result};
 use std::time::Duration;
 
-/// Purpose: Retries an operation with a fixed backoff schedule.
+/// Summary: Retries an operation with a fixed backoff schedule.
 ///
 /// Inputs: a label for error context, the retry delays, and the operation closure.
+///
 /// Outputs: the successful result or a detailed error after retries.
-/// Ties to: hashing and copy operations for transient IO errors.
+///
 /// Side effects: Sleeps between retry attempts.
-/// Why: improve resilience against temporary filesystem or hashing failures.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: hashing and copy operations for transient IO errors.
+///
+/// Why this exists: improve resilience against temporary filesystem or hashing failures.
 pub(super) fn retry_with_backoff<T, F>(label: &str, delays: &[Duration], mut op: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,

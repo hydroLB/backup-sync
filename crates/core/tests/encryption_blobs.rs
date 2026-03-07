@@ -12,12 +12,26 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
+/// Summary: build_cfg orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_cfg(source: &Path, dest: &Path, key_path: &Path, key_id: &str) -> Config {
-    let mut encryption = EncryptionConfig::default();
-    encryption.enabled = true;
-    encryption.key_path = Some(key_path.to_path_buf());
-    encryption.key_id = Some(key_id.to_string());
-    encryption.blob_chunk_bytes = 1024;
+    let encryption = EncryptionConfig {
+        enabled: true,
+        key_path: Some(key_path.to_path_buf()),
+        key_id: Some(key_id.to_string()),
+        blob_chunk_bytes: 1024,
+    };
 
     Config {
         backup_root: dest.to_path_buf(),
@@ -52,6 +66,19 @@ fn build_cfg(source: &Path, dest: &Path, key_path: &Path, key_id: &str) -> Confi
     }
 }
 
+/// Summary: locate_one_blob orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn locate_one_blob(dest: &Path) -> PathBuf {
     let store_root = dest.join(".backup_sync").join("v1");
     let sources_root = store_root.join("sources");
@@ -98,6 +125,19 @@ fn locate_one_blob(dest: &Path) -> PathBuf {
     panic!("encryption_blobs::locate_one_blob no file entry found");
 }
 
+/// Summary: encrypted_blobs_restore_and_scrub orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn encrypted_blobs_restore_and_scrub() {
     let tmp = tempdir().expect("encryption_blobs::encrypted_blobs_restore_and_scrub tempdir");
@@ -158,6 +198,19 @@ fn encrypted_blobs_restore_and_scrub() {
     assert_eq!(scrub.manifests_bad, 0);
 }
 
+/// Summary: encryption_key_id_mismatch_fails_backup orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn encryption_key_id_mismatch_fails_backup() {
     let tmp = tempdir().expect("encryption_blobs::encryption_key_id_mismatch_fails_backup tempdir");

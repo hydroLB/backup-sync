@@ -1,13 +1,19 @@
 import { validateIgnorePatterns } from '../validation';
 
 /**
- * Purpose: Verify empty ignore patterns are accepted.
+ * Summary: Verify empty ignore patterns are accepted.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts null validation response.
- * Ties to: `validateIgnorePatterns` empty handling.
+ *
  * Side effects: None.
- * Why: Allow operators to skip ignore patterns.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `validateIgnorePatterns` empty handling.
+ *
+ * Why this exists: Allow operators to skip ignore patterns.
  */
 function assertEmptyPatternsAllowed(): void {
   try {
@@ -19,13 +25,19 @@ function assertEmptyPatternsAllowed(): void {
 }
 
 /**
- * Purpose: Verify excessive ignore patterns are rejected.
+ * Summary: Verify excessive ignore patterns are rejected.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts validation error text.
- * Ties to: `validateIgnorePatterns` limit enforcement.
+ *
  * Side effects: None.
- * Why: Keep ignore pattern counts within safe limits.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `validateIgnorePatterns` limit enforcement.
+ *
+ * Why this exists: Keep ignore pattern counts within safe limits.
  */
 function assertRejectsTooManyPatterns(): void {
   try {
@@ -38,13 +50,19 @@ function assertRejectsTooManyPatterns(): void {
 }
 
 /**
- * Purpose: Verify invalid patterns are rejected.
+ * Summary: Verify invalid patterns are rejected.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts validation error text.
- * Ties to: `validateIgnorePatterns` syntax validation.
+ *
  * Side effects: None.
- * Why: Block malformed ignore patterns early.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `validateIgnorePatterns` syntax validation.
+ *
+ * Why this exists: Block malformed ignore patterns early.
  */
 function assertRejectsInvalidPatterns(): void {
   try {
@@ -56,13 +74,19 @@ function assertRejectsInvalidPatterns(): void {
 }
 
 /**
- * Purpose: Verify valid glob patterns pass validation.
+ * Summary: Verify valid glob patterns pass validation.
  *
  * Inputs: None.
+ *
  * Outputs: Asserts null validation response.
- * Ties to: `validateIgnorePatterns` happy path.
+ *
  * Side effects: None.
- * Why: Keep common glob patterns working as expected.
+ *
+ * Error handling: Propagates contextual errors to the caller when operations fail.
+ *
+ * Ties to other methods: `validateIgnorePatterns` happy path.
+ *
+ * Why this exists: Keep common glob patterns working as expected.
  */
 function assertAcceptsValidGlobs(): void {
   try {

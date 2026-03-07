@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { usePickers } from '../settings/hooks/usePickers';
-import {
-  hardeningFingerprint,
-  writeHardeningDone,
-} from '../../utils/hardening';
+import { hardeningFingerprint, writeHardeningDone } from '../../utils/hardening';
 import { hardeningCheck } from '../../services/system';
 import { RestoreModal } from './RestoreModal';
 import { useMinimalActions } from './hooks/useMinimalActions';
@@ -13,12 +9,14 @@ import { useMinimalLog } from './hooks/useMinimalLog';
 import { SavePulseScope, useMinimalFeedback } from './hooks/useMinimalFeedback';
 import { useMinimalStatus } from './hooks/useMinimalStatus';
 import { useMinimalLiveHealth } from './hooks/useMinimalLiveHealth';
+import { useMinimalPickers } from './hooks/useMinimalPickers';
 import { removeKeptExtraVersion } from '../../services/safety';
 import { MinimalHeader } from './sections/MinimalHeader';
 import { DestinationCard } from './sections/DestinationCard';
 import { FoldersCard } from './sections/FoldersCard';
 import { LogCard } from './sections/LogCard';
 import { RestoreCard } from './sections/RestoreCard';
+import { SetupNotice } from './sections/SetupNotice';
 import { ToastMessage } from '../ui/ToastMessage';
 import { InlineAlert } from '../ui/InlineAlert';
 import { Button } from '../ui/Button';
@@ -30,10 +28,15 @@ type EventKind = 'ok' | 'error' | 'info';
  * Summary: Render the spec-minimal main screen for the backup app.
  *
  * Inputs: `onEvent` callback for user-visible event messages.
+ *
  * Outputs: React element tree for the minimal main screen.
+ *
  * Side effects: Invokes IPC-backed config, status, and log operations through focused hooks.
+ *
  * Error handling: Emits actionable messages via toast and event callback.
+ *
  * Ties to other methods: Composes minimal hooks, section components, and modal flows.
+ *
  * Why this exists: Keep the primary UX compact while preserving operational controls.
  */
 export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKind) => void }) {
@@ -67,14 +70,14 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
       if (kind === 'ok') {
         if (/\brunning\b/i.test(msg)) {
           scope = 'global';
-        } else if (/^saved\.$/i.test(msg)) {
-          scope = pendingSaveScopeRef.current;
         } else if (/\brestore(d|)\b/i.test(msg)) {
           scope = 'restore';
+        } else if (pendingSaveScopeRef.current !== 'none') {
+          scope = pendingSaveScopeRef.current;
         }
       }
       baseEmitEvent(msg, kind, scope);
-      if (kind !== 'ok' || /^saved\.$/i.test(msg) || /\brunning\b/i.test(msg) || /\bpaused\b/i.test(msg)) {
+      if (kind !== 'ok' || scope !== 'none' || /\bpaused\b/i.test(msg)) {
         pendingSaveScopeRef.current = 'none';
       }
     },
@@ -93,7 +96,8 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     },
     [],
   );
-  const pickers = usePickers((msg) => emitEvent(msg, 'info'), {
+  const pickers = useMinimalPickers({
+    onEvent: (msg) => emitEvent(msg, 'info'),
     onPickerBusyChange: (next) => setPickerBusy(next),
   });
 
@@ -152,6 +156,16 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
       })),
     [primary?.id, watchedItems],
   );
+  const destinationReady = (primary?.path ?? '').trim().length > 0;
+  const configuredDestinationCount = useMemo(
+    () => destinations.filter((destination) => destination.path.trim().length > 0).length,
+    [destinations],
+  );
+  const setupStep = useMemo(() => {
+    if (!destinationReady) return 'destination' as const;
+    if (folderItems.length === 0) return 'folders' as const;
+    return 'ready' as const;
+  }, [destinationReady, folderItems.length]);
 
   useEffect(() => {
     if (!cfg) return;
@@ -205,10 +219,15 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
    * Summary: Change running state while enforcing hardening preconditions.
    *
    * Inputs: Desired running state.
+   *
    * Outputs: None.
+   *
    * Side effects: May block enablement while background hardening runs and toggles backend safe mode.
+   *
    * Error handling: Delegated to running hook and event callback.
+   *
    * Ties to other methods: Used by `MinimalHeader` running toggle and background hardening checks.
+   *
    * Why this exists: Keep precondition gating in one place while preserving optimistic UI behavior.
    */
   const setRunning = useCallback(
@@ -343,6 +362,23 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           </InlineAlert>
         )}
 
+      <SetupNotice
+        step={setupStep}
+        destinationCount={configuredDestinationCount}
+        watchedCount={folderItems.length}
+        busy={busy || pickerBusy}
+        onChooseDestination={() => {
+          void runWithSaveScope('destination', async () => {
+            await chooseDestination();
+          });
+        }}
+        onAddPath={() => {
+          void runWithSaveScope('folders', async () => {
+            await addFolder();
+          });
+        }}
+      />
+
       <div className="grid minimal-grid">
         <DestinationCard
           destinations={destinations}
@@ -370,6 +406,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           busy={busy}
           items={folderItems}
           destinations={destinations}
+          destinationReady={destinationReady}
           defaultKeep={cfg.max_backups_per_file}
           watchedWarning={watchedHealthWarning}
           onAddFolder={() => {
@@ -400,7 +437,6 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           watchedCount={watchedDirs.length}
           onOpenRestore={() => setRestoreOpen(true)}
         />
-
       </div>
 
       <LogCard

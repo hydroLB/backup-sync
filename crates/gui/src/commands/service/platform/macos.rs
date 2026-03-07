@@ -2,18 +2,28 @@ use crate::commands::error::ErrorEnvelope;
 use crate::commands::service::common::{
     run_command, run_command_with_retry, write_text_file, ServiceStatus,
 };
-use daemon::integration::launchd;
+use backup_core::service::launchd;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
+use tracing::warn;
 
 const LAUNCHD_LABEL: &str = "com.backup_sync.daemon";
 
-/// Purpose: Resolve the launchctl target identifier for the current user session.
+/// Summary: Resolve the launchctl target identifier for the current user session.
 ///
 /// Inputs: none.
+///
 /// Outputs: a `launchctl` domain-qualified service identifier.
-/// Ties to: `restart_daemon` and best-effort daemon kickstarts after install.
+///
 /// Side effects: Executes `id -u` to determine the numeric UID.
-/// Why: `launchctl kickstart` requires an explicit domain on modern macOS.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `restart_daemon` and best-effort daemon kickstarts after install.
+///
+/// Why this exists: `launchctl kickstart` requires an explicit domain on modern macOS.
 fn launchctl_target() -> Result<String, ErrorEnvelope> {
     let out = run_command("id", &["-u"], "SERVICE_UID", "id -u")?;
     let uid = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -26,13 +36,19 @@ fn launchctl_target() -> Result<String, ErrorEnvelope> {
     Ok(format!("gui/{}/{}", uid, LAUNCHD_LABEL))
 }
 
-/// Purpose: Writes the launchd plist to disk.
+/// Summary: Writes the launchd plist to disk.
 ///
 /// Inputs: the executable path and optional log path.
+///
 /// Outputs: the destination plist path.
-/// Ties to: service installation on macOS.
+///
 /// Side effects: Writes the launchd plist file to disk.
-/// Why: install the daemon to start on login.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation on macOS.
+///
+/// Why this exists: install the daemon to start on login.
 pub fn write_plist(exec: &Path, log_path: Option<&Path>) -> Result<PathBuf, ErrorEnvelope> {
     let dest = launchd::default_plist_path().map_err(|e| {
         ErrorEnvelope::new(
@@ -56,13 +72,19 @@ pub fn write_plist(exec: &Path, log_path: Option<&Path>) -> Result<PathBuf, Erro
     Ok(dest)
 }
 
-/// Purpose: Enables the launchd service using launchctl.
+/// Summary: Enables the launchd service using launchctl.
 ///
 /// Inputs: the plist path.
+///
 /// Outputs: `Ok(())` when launchctl load succeeds.
-/// Ties to: service installation on macOS.
+///
 /// Side effects: Runs launchctl to load the plist.
-/// Why: register the daemon with launchd for startup.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service installation on macOS.
+///
+/// Why this exists: register the daemon with launchd for startup.
 pub fn enable_launchd(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
     let dest_str = dest.to_str().ok_or_else(|| {
         ErrorEnvelope::new(
@@ -82,23 +104,34 @@ pub fn enable_launchd(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
 
     // Best-effort kickstart, but do not fail the install if it is not supported.
     if let Ok(target) = launchctl_target() {
-        let _ = run_command(
+        if let Err(error) = run_command(
             "launchctl",
             &["kickstart", "-k", &target],
             "SERVICE_ENABLE",
             "launchctl kickstart",
-        );
+        ) {
+            warn!(
+                "service::macos::enable_launchd launchctl kickstart failed (non-fatal): {}",
+                error.message
+            );
+        }
     }
     Ok(())
 }
 
-/// Purpose: Builds the service status payload for macOS.
+/// Summary: Builds the service status payload for macOS.
 ///
 /// Inputs: daemon reachability and runtime metadata.
+///
 /// Outputs: a populated `ServiceStatus`.
-/// Ties to: GUI status reporting.
+///
 /// Side effects: Reads filesystem metadata to check plist presence.
-/// Why: surface service health and fixes in the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI status reporting.
+///
+/// Why this exists: surface service health and fixes in the UI.
 pub fn status_macos(
     reachable: bool,
     uptime_secs: Option<i64>,
@@ -142,20 +175,327 @@ pub fn status_macos(
     })
 }
 
-/// Purpose: Restarts the daemon using launchctl.
+/// Summary: Restarts the daemon using launchctl.
 ///
 /// Inputs: none.
+///
 /// Outputs: a success message string.
-/// Ties to: GUI restart actions on macOS.
+///
 /// Side effects: Runs launchctl to restart the daemon.
-/// Why: allow users to recover a stuck daemon.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI restart actions on macOS.
+///
+/// Why this exists: allow users to recover a stuck daemon.
 pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
-    let target = launchctl_target().unwrap_or_else(|_| LAUNCHD_LABEL.to_string());
-    run_command(
+    let target = match launchctl_target() {
+        Ok(target) => target,
+        Err(error) => {
+            warn!(
+                "service::macos::restart_daemon falling back to default launchd label due to target resolution failure: {}",
+                error.message
+            );
+            LAUNCHD_LABEL.to_string()
+        }
+    };
+    match run_command(
         "launchctl",
         &["kickstart", "-k", &target],
         "RESTART_FAILED",
         "launchctl kickstart",
-    )?;
-    Ok(format!("Daemon restarted via launchctl ({target})."))
+    ) {
+        Ok(_) => Ok(format!("Daemon restarted via launchctl ({target}).")),
+        Err(error) => {
+            warn!(
+                "service::macos::restart_daemon launchctl restart failed; falling back to direct daemon restart: {}",
+                error.message
+            );
+            restart_daemon_direct()
+        }
+    }
+}
+
+/// Summary: Stops matching daemon processes and spawns a fresh daemon directly.
+///
+/// Inputs: None.
+///
+/// Outputs: A success message describing the direct restart path.
+///
+/// Side effects: Terminates matching daemon processes, spawns a detached daemon process, and sets process environment variables.
+///
+/// Error handling: Returns contextual errors when process discovery, termination, or spawn steps fail.
+///
+/// Ties to other methods: Fallback path from `restart_daemon`.
+///
+/// Why this exists: Development launches and non-launchd sessions still need a reliable daemon refresh path after config changes.
+fn restart_daemon_direct() -> Result<String, ErrorEnvelope> {
+    let (exec, log_path) = crate::commands::service::common::load_exec_and_log()?;
+    terminate_matching_daemons(&exec)?;
+    spawn_daemon_process(&exec, log_path.as_deref())?;
+    Ok(format!("Daemon restarted directly via {:?}.", exec))
+}
+
+/// Summary: Terminates running daemon processes that match the resolved executable path.
+///
+/// Inputs: Canonical daemon executable path.
+///
+/// Outputs: `Ok(())` after termination attempts complete.
+///
+/// Side effects: Executes `pgrep` and `kill`, and sleeps briefly to let the old daemon exit cleanly.
+///
+/// Error handling: Returns contextual errors when process enumeration or signaling fails unexpectedly.
+///
+/// Ties to other methods: Used by `restart_daemon_direct`.
+///
+/// Why this exists: Prevent duplicate daemons from racing for the same IPC socket or state files.
+fn terminate_matching_daemons(exec: &Path) -> Result<(), ErrorEnvelope> {
+    let exec_str = exec.to_str().ok_or_else(|| {
+        ErrorEnvelope::new(
+            "RESTART_FAILED",
+            format!(
+                "service::macos::terminate_matching_daemons invalid executable path encoding: {:?}",
+                exec
+            ),
+        )
+    })?;
+    let output = Command::new("pgrep")
+        .args(["-f", exec_str])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| {
+            ErrorEnvelope::new(
+                "RESTART_FAILED",
+                format!(
+                    "service::macos::terminate_matching_daemons failed to run pgrep for {:?}: {}",
+                    exec, error
+                ),
+            )
+        })?;
+    if !output.status.success() {
+        return Ok(());
+    }
+    let pids: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    for pid in &pids {
+        let status = Command::new("kill")
+            .args(["-TERM", pid.as_str()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .status()
+            .map_err(|error| {
+                ErrorEnvelope::new(
+                    "RESTART_FAILED",
+                    format!(
+                        "service::macos::terminate_matching_daemons failed to signal pid {} for {:?}: {}",
+                        pid, exec, error
+                    ),
+                )
+            })?;
+        if !status.success() {
+            warn!(
+                "service::macos::terminate_matching_daemons failed to terminate pid {} for {:?}",
+                pid, exec
+            );
+        }
+    }
+    wait_for_process_exit(exec, &pids, Duration::from_secs(2))?;
+    Ok(())
+}
+
+/// Summary: Waits for daemon processes to exit, escalating to SIGKILL if they ignore SIGTERM.
+///
+/// Inputs: Executable path for context, process ids, and an overall wait timeout.
+///
+/// Outputs: `Ok(())` when all target processes have exited.
+///
+/// Side effects: Polls process liveness with `kill -0`, may send `SIGKILL`, and sleeps between polls.
+///
+/// Error handling: Returns contextual errors when a process remains alive after escalation or when signal commands fail.
+///
+/// Ties to other methods: Used by `terminate_matching_daemons`.
+///
+/// Why this exists: The dev daemon can keep the IPC socket open briefly; waiting and escalating prevents the replacement daemon from losing the bind race.
+fn wait_for_process_exit(
+    exec: &Path,
+    pids: &[String],
+    timeout: Duration,
+) -> Result<(), ErrorEnvelope> {
+    let start = std::time::Instant::now();
+    loop {
+        let alive = alive_process_ids(pids)?;
+        if alive.is_empty() {
+            return Ok(());
+        }
+        if start.elapsed() >= timeout {
+            for pid in &alive {
+                let status = Command::new("kill")
+                    .args(["-KILL", pid])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .status()
+                    .map_err(|error| {
+                        ErrorEnvelope::new(
+                            "RESTART_FAILED",
+                            format!(
+                                "service::macos::wait_for_process_exit failed to force-kill pid {} for {:?}: {}",
+                                pid, exec, error
+                            ),
+                        )
+                    })?;
+                if !status.success() {
+                    return Err(ErrorEnvelope::new(
+                        "RESTART_FAILED",
+                        format!(
+                            "service::macos::wait_for_process_exit failed to force-kill pid {} for {:?}",
+                            pid, exec
+                        ),
+                    ));
+                }
+            }
+            thread::sleep(Duration::from_millis(200));
+            let stubborn = alive_process_ids(pids)?;
+            if stubborn.is_empty() {
+                return Ok(());
+            }
+            return Err(ErrorEnvelope::new(
+                "RESTART_FAILED",
+                format!(
+                    "service::macos::wait_for_process_exit daemon pids still alive after escalation for {:?}: {}",
+                    exec,
+                    stubborn.join(", ")
+                ),
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Summary: Returns the subset of process ids that are still alive.
+///
+/// Inputs: Candidate daemon process ids.
+///
+/// Outputs: Vector containing the ids that still respond to `kill -0`.
+///
+/// Side effects: Executes lightweight liveness probes against each process id.
+///
+/// Error handling: Propagates contextual errors from `process_is_alive`.
+///
+/// Ties to other methods: Used by `wait_for_process_exit`.
+///
+/// Why this exists: Keep the restart wait loop readable and avoid duplicating liveness probe collection logic.
+fn alive_process_ids(pids: &[String]) -> Result<Vec<String>, ErrorEnvelope> {
+    let mut alive = Vec::new();
+    for pid in pids {
+        if process_is_alive(pid)?.is_some() {
+            alive.push(pid.clone());
+        }
+    }
+    Ok(alive)
+}
+
+/// Summary: Checks whether a process id is still alive without sending a terminating signal.
+///
+/// Inputs: Process id string.
+///
+/// Outputs: `Ok(Some(pid))` when the process is alive, `Ok(None)` when it has exited.
+///
+/// Side effects: Executes `ps` and `kill -0` as liveness probes.
+///
+/// Error handling: Returns contextual errors when the probe command itself fails unexpectedly.
+///
+/// Ties to other methods: Used by `wait_for_process_exit`.
+///
+/// Why this exists: Direct daemon restarts need a portable way to confirm the old process released the IPC socket before spawning the replacement.
+fn process_is_alive(pid: &str) -> Result<Option<&str>, ErrorEnvelope> {
+    let stat_output = Command::new("ps")
+        .args(["-p", pid, "-o", "stat="])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|error| {
+            ErrorEnvelope::new(
+                "RESTART_FAILED",
+                format!(
+                    "service::macos::process_is_alive failed to inspect pid {} state: {}",
+                    pid, error
+                ),
+            )
+        })?;
+    if stat_output.status.success() {
+        let stat = String::from_utf8_lossy(&stat_output.stdout)
+            .trim()
+            .to_string();
+        if stat.starts_with('Z') {
+            return Ok(None);
+        }
+    }
+    let status = Command::new("kill")
+        .args(["-0", pid])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| {
+            ErrorEnvelope::new(
+                "RESTART_FAILED",
+                format!(
+                    "service::macos::process_is_alive failed to probe pid {}: {}",
+                    pid, error
+                ),
+            )
+        })?;
+    if status.success() {
+        Ok(Some(pid))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Summary: Spawns the daemon process with explicit config and log environment variables.
+///
+/// Inputs: Canonical daemon executable path and optional log file path.
+///
+/// Outputs: `Ok(())` after the daemon is launched successfully.
+///
+/// Side effects: Starts a detached daemon process with stdio redirected away from the GUI process.
+///
+/// Error handling: Returns contextual errors when config resolution or process spawn fails.
+///
+/// Ties to other methods: Used by `restart_daemon_direct`.
+///
+/// Why this exists: Config saves must take effect immediately even when the daemon was started manually during development.
+fn spawn_daemon_process(exec: &Path, log_path: Option<&Path>) -> Result<(), ErrorEnvelope> {
+    let config_path = backup_core::platform::paths::config_file_path().map_err(|error| {
+        ErrorEnvelope::new(
+            "RESTART_FAILED",
+            format!(
+                "service::macos::spawn_daemon_process failed to resolve config path: {}",
+                error
+            ),
+        )
+    })?;
+    let mut command = Command::new(exec);
+    command
+        .env("BACKUP_SYNC_CONFIG", &config_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(path) = log_path {
+        command.env("BACKUP_SYNC_LOG", path);
+    }
+    command.spawn().map_err(|error| {
+        ErrorEnvelope::new(
+            "RESTART_FAILED",
+            format!(
+                "service::macos::spawn_daemon_process failed to start daemon {:?}: {}",
+                exec, error
+            ),
+        )
+    })?;
+    Ok(())
 }

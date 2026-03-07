@@ -1,28 +1,112 @@
-# OS
+# OS artifacts
 .DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# Rust
+# Editor/IDE artifacts
+.vscode/
+.idea/
+*.iml
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+*.bak
+*.tmp
+
+# Rust build artifacts
 /target/
 **/target/
 .cargo-home/
+**/*.profraw
+**/*.profdata
 
-# Node
+# Node and frontend build artifacts
 /node_modules/
 **/node_modules/
 .npm-cache/
+**/.npm-cache/
+.pnpm-store/
+.yarn/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+.svelte-kit/
+.vite/
+**/.vite/
+*.tsbuildinfo
+coverage/
+**/coverage/
 crates/gui/frontend/dist/
 crates/gui/frontend/.eslintcache
-crates/gui/frontend/.vite/
 
-# Logs
+# Python cache artifacts (local tooling)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Logs and traces
 *.log
+*.trace
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Env files
+# Environment files and secrets
 .env
 .env.*
+!.env.example
+!.env.template
+.envrc
+.direnv/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.kdbx
+*.jks
+*.keystore
+secrets/
+secrets.*
+*.secret
+*.credentials
+*.token
+**/id_rsa
+**/id_rsa.pub
+**/id_ed25519
+**/id_ed25519.pub
 
-# Coverage
-coverage/
+# Runtime state and local databases
+backup_sync/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.pid
 
-# Tauri
+# Tauri build artifacts
 crates/gui/src-tauri/target/
+crates/gui/src-tauri/gen/
+
+# Security scan outputs
+gitleaks-report*.json
+gitleaks-report*.sarif
+.reports/

@@ -1,21 +1,31 @@
 use anyhow::{anyhow, bail, Context, Result};
 #[cfg(target_os = "macos")]
-use daemon::integration::launchd;
+use backup_core::service::launchd;
 #[cfg(target_os = "linux")]
-use daemon::integration::systemd;
+use backup_core::service::systemd;
 #[cfg(target_os = "windows")]
-use daemon::integration::windows_service;
+use backup_core::service::windows_service;
+use backup_core::{load_validated_config, logging::cid, RuntimeTuning};
 use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+use tracing::warn;
 
 const DAEMON_EXEC_ENV: &str = "BACKUP_SYNC_DAEMON_EXEC";
 
-/// Purpose: Resolve the daemon executable path for service installation.
+/// Summary: Resolve the daemon executable path for service installation.
 ///
 /// Inputs: Optional override environment variable and current executable location.
+///
 /// Outputs: A canonicalized daemon executable path.
-/// Ties to: `install_service` manifest generation for launchd/systemd/schtasks.
+///
 /// Side effects: Reads environment variables and filesystem metadata.
-/// Why: The service must execute the daemon binary, not the CLI wrapper.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `install_service` manifest generation for launchd/systemd/schtasks.
+///
+/// Why this exists: The service must execute the daemon binary, not the CLI wrapper.
 fn resolve_daemon_exec() -> Result<PathBuf> {
     if let Ok(v) = std::env::var(DAEMON_EXEC_ENV) {
         let trimmed = v.trim();
@@ -66,13 +76,171 @@ fn resolve_daemon_exec() -> Result<PathBuf> {
     );
 }
 
-/// Purpose: Installs or prints the background service definition for the platform.
+/// Summary: Loads runtime tuning used for service command execution.
+///
+/// Inputs: none.
+///
+/// Outputs: Runtime tuning from config or defaults.
+///
+/// Side effects: Reads config and emits a warning when falling back to defaults.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `run_service_command`.
+///
+/// Why this exists: service command timeout and retry behavior should come from central config.
+fn resolve_runtime_tuning() -> RuntimeTuning {
+    match load_validated_config() {
+        Ok(cfg) => cfg.runtime,
+        Err(error) => {
+            let correlation_id = cid("cli-service");
+            warn!(
+                cid = %correlation_id,
+                action = "runtime_tuning_fallback",
+                error = %error,
+                "cli::resolve_runtime_tuning failed to load config; using defaults"
+            );
+            RuntimeTuning::default()
+        }
+    }
+}
+
+/// Summary: Runs a service command with timeout and one retry.
+///
+/// Inputs: command program, args, and context label.
+///
+/// Outputs: `Ok(())` when the command exits successfully.
+///
+/// Side effects: Spawns subprocesses, polls process state, and sleeps between retry attempts.
+///
+/// Error handling: Returns contextual errors for spawn, timeout, and non-zero exit status.
+///
+/// Ties to other methods: service install enable paths across launchd, systemd, and schtasks.
+///
+/// Why this exists: keep subprocess IO bounded and resilient without ad-hoc per-call behavior.
+fn run_service_command(cmd: &str, args: &[&str], context: &str) -> Result<()> {
+    let runtime = resolve_runtime_tuning();
+    let timeout = Duration::from_secs(runtime.service_command_timeout_seconds.max(1));
+    let poll_interval = Duration::from_millis(runtime.service_command_poll_interval_ms.max(1));
+    let retry_delay = Duration::from_millis(runtime.service_command_retry_delay_ms.max(1));
+
+    let mut last_error: Option<anyhow::Error> = None;
+    for attempt in 1..=2 {
+        match run_service_command_once(cmd, args, context, timeout, poll_interval) {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                last_error = Some(anyhow!(
+                    "cli::run_service_command {} exited non-zero (attempt={} status={} stderr={})",
+                    context,
+                    attempt,
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Err(error) => {
+                last_error = Some(error.context(format!(
+                    "cli::run_service_command {} failed on attempt {}",
+                    context, attempt
+                )));
+            }
+        }
+        if attempt == 1 {
+            std::thread::sleep(retry_delay);
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        anyhow!(
+            "cli::run_service_command {} failed with unknown error",
+            context
+        )
+    }))
+}
+
+/// Summary: Runs one service command attempt with timeout and cooperative polling.
+///
+/// Inputs: command program, args, context label, timeout, and poll interval.
+///
+/// Outputs: Collected process output on completion.
+///
+/// Side effects: Spawns and manages a child process; kills the process when timed out.
+///
+/// Error handling: Returns contextual errors for spawn, poll, wait, and timeout failures.
+///
+/// Ties to other methods: `run_service_command`.
+///
+/// Why this exists: provide explicit timeout handling for each subprocess attempt.
+fn run_service_command_once(
+    cmd: &str,
+    args: &[&str],
+    context: &str,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<Output> {
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("cli::run_service_command_once failed to spawn {}", context))?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                return child.wait_with_output().with_context(|| {
+                    format!(
+                        "cli::run_service_command_once failed waiting for {}",
+                        context
+                    )
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(anyhow!(
+                    "cli::run_service_command_once failed polling {}: {}",
+                    context,
+                    error
+                ));
+            }
+        }
+        if start.elapsed() > timeout {
+            if let Err(error) = child.kill() {
+                warn!(
+                    error = %error,
+                    "cli::run_service_command_once failed to kill timed-out process for {}",
+                    context
+                );
+            }
+            if let Err(error) = child.wait() {
+                warn!(
+                    error = %error,
+                    "cli::run_service_command_once failed waiting after timeout for {}",
+                    context
+                );
+            }
+            bail!(
+                "cli::run_service_command_once {} timed out after {} seconds",
+                context,
+                timeout.as_secs()
+            );
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Summary: Installs or prints the background service definition for the platform.
 ///
 /// Inputs: service options including user scope, output path, and enable flags.
+///
 /// Outputs: `Ok(())` after writing or printing the manifest.
-/// Ties to: CLI service management for launchd, systemd, or schtasks.
+///
 /// Side effects: Writes service manifests and runs system service commands.
-/// Why: make daemon start on login with a single CLI command.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI service management for launchd, systemd, or schtasks.
+///
+/// Why this exists: make daemon start on login with a single CLI command.
 pub fn install_service(
     user: bool,
     output: Option<PathBuf>,
@@ -82,10 +250,29 @@ pub fn install_service(
     dry_run: bool,
 ) -> Result<()> {
     #[cfg(not(target_os = "linux"))]
-    let _ = user;
+    if user {
+        let correlation_id = cid("cli-service");
+        warn!(
+            cid = %correlation_id,
+            action = "user_flag_ignored",
+            "cli::install_service `--user` is only applied on Linux; flag ignored on this platform"
+        );
+    }
     let exec = resolve_daemon_exec()
         .context("cli::install_service failed to resolve daemon executable")?;
-    let default_log = backup_core::platform::paths::log_file_path().ok();
+    let default_log = match backup_core::platform::paths::log_file_path() {
+        Ok(path) => Some(path),
+        Err(error) => {
+            let correlation_id = cid("cli-service");
+            warn!(
+                cid = %correlation_id,
+                action = "default_log_path_unavailable",
+                error = %error,
+                "cli::install_service failed to resolve default log path; continuing without explicit log path"
+            );
+            None
+        }
+    };
     let log_path = log_path.or(default_log);
     if dry_run && print {
         println!("--dry-run and --print set: printing only, no writes/enables");
@@ -114,33 +301,17 @@ pub fn install_service(
                         dest
                     )
                 })?;
-                let status = std::process::Command::new("launchctl")
-                    .args(["load", dest_str])
-                    .status()
-                    .context("cli::install_service failed to run launchctl load")?;
-                if !status.success() {
-                    bail!("cli::install_service launchctl load failed with {}", status);
-                }
-                let status = std::process::Command::new("launchctl")
-                    .args(["enable", "system/com.backup_sync.daemon"])
-                    .status()
-                    .context("cli::install_service failed to run launchctl enable")?;
-                if !status.success() {
-                    bail!(
-                        "cli::install_service launchctl enable failed with {}",
-                        status
-                    );
-                }
-                let status = std::process::Command::new("launchctl")
-                    .args(["start", "com.backup_sync.daemon"])
-                    .status()
-                    .context("cli::install_service failed to run launchctl start")?;
-                if !status.success() {
-                    bail!(
-                        "cli::install_service launchctl start failed with {}",
-                        status
-                    );
-                }
+                run_service_command("launchctl", &["load", dest_str], "launchctl load")?;
+                run_service_command(
+                    "launchctl",
+                    &["enable", "system/com.backup_sync.daemon"],
+                    "launchctl enable",
+                )?;
+                run_service_command(
+                    "launchctl",
+                    &["start", "com.backup_sync.daemon"],
+                    "launchctl start",
+                )?;
             } else {
                 println!("Load/start with: launchctl load {:?} && launchctl enable com.backup_sync.daemon && launchctl start com.backup_sync.daemon", dest);
             }
@@ -165,42 +336,32 @@ pub fn install_service(
             if user {
                 println!("User systemd unit written to {:?}.", dest);
                 if enable {
-                    let status = std::process::Command::new("systemctl")
-                        .args(["--user", "daemon-reload"])
-                        .status()
-                        .context(
-                            "cli::install_service failed to run systemctl --user daemon-reload",
-                        )?;
-                    if !status.success() {
-                        bail!("cli::install_service systemctl --user daemon-reload failed");
-                    }
-                    let status = std::process::Command::new("systemctl")
-                        .args(["--user", "enable", "--now", "backup-sync.service"])
-                        .status()
-                        .context("cli::install_service failed to run systemctl --user enable")?;
-                    if !status.success() {
-                        bail!("cli::install_service systemctl --user enable failed");
-                    }
+                    run_service_command(
+                        "systemctl",
+                        &["--user", "daemon-reload"],
+                        "systemctl --user daemon-reload",
+                    )?;
+                    run_service_command(
+                        "systemctl",
+                        &["--user", "enable", "--now", "backup-sync.service"],
+                        "systemctl --user enable --now backup-sync.service",
+                    )?;
                 } else {
                     println!("Enable with: systemctl --user daemon-reload && systemctl --user enable --now backup-sync.service");
                 }
             } else {
                 println!("System systemd unit written to {:?}.", dest);
                 if enable {
-                    let status = std::process::Command::new("systemctl")
-                        .args(["daemon-reload"])
-                        .status()
-                        .context("cli::install_service failed to run systemctl daemon-reload")?;
-                    if !status.success() {
-                        bail!("cli::install_service systemctl daemon-reload failed");
-                    }
-                    let status = std::process::Command::new("systemctl")
-                        .args(["enable", "--now", "backup-sync.service"])
-                        .status()
-                        .context("cli::install_service failed to run systemctl enable")?;
-                    if !status.success() {
-                        bail!("cli::install_service systemctl enable failed");
-                    }
+                    run_service_command(
+                        "systemctl",
+                        &["daemon-reload"],
+                        "systemctl daemon-reload",
+                    )?;
+                    run_service_command(
+                        "systemctl",
+                        &["enable", "--now", "backup-sync.service"],
+                        "systemctl enable --now backup-sync.service",
+                    )?;
                 } else {
                     println!("Enable with: sudo systemctl daemon-reload && sudo systemctl enable --now backup-sync.service");
                 }
@@ -225,20 +386,12 @@ pub fn install_service(
         } else if !dry_run {
             println!("Scheduled task XML written to {:?}.", dest);
             if enable {
-                let status = std::process::Command::new("schtasks")
-                    .args([
-                        "/Create",
-                        "/TN",
-                        "BackupSync",
-                        "/XML",
-                        &dest.display().to_string(),
-                        "/F",
-                    ])
-                    .status()
-                    .context("cli::install_service failed to run schtasks /Create")?;
-                if !status.success() {
-                    bail!("cli::install_service schtasks /Create failed");
-                }
+                let xml_path = dest.display().to_string();
+                run_service_command(
+                    "schtasks",
+                    &["/Create", "/TN", "BackupSync", "/XML", &xml_path, "/F"],
+                    "schtasks /Create",
+                )?;
             } else {
                 println!(
                     "Register with: schtasks /Create /TN \"BackupSync\" /XML \"{}\" /F",

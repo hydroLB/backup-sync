@@ -1,20 +1,25 @@
 use anyhow::{Context, Result};
 use backup_core::{
-    backup::versioned, load_config, platform::paths, state::store::StateStore, validate,
+    backup::versioned, load_validated_config, platform::paths, state::store::StateStore,
 };
 use fs2::free_space;
 use std::path::Path;
 
-/// Purpose: Executes a one off backup run with optional dry run mode.
+/// Summary: Executes a one off backup run with optional dry run mode.
 ///
 /// Inputs: a dry run flag.
+///
 /// Outputs: `Ok(())` when the operation completes.
-/// Ties to: CLI command handling and backup execution.
+///
 /// Side effects: Reads config/state, scans files, and writes backups when not dry run.
-/// Why: allow manual execution of backup cycles from the CLI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI command handling and backup execution.
+///
+/// Why this exists: allow manual execution of backup cycles from the CLI.
 pub async fn run_once(dry_run: bool) -> Result<()> {
-    let cfg = load_config().context("cli::run_once failed to load config")?;
-    validate(&cfg).context("cli::run_once config validation failed")?;
+    let cfg = load_validated_config().context("cli::run_once failed to load config")?;
 
     if !dry_run && cfg.safe_mode {
         anyhow::bail!(

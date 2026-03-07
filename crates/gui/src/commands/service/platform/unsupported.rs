@@ -1,13 +1,19 @@
 use crate::commands::error::ErrorEnvelope;
 use crate::commands::service::common::ServiceStatus;
 
-/// Purpose: Returns an unsupported error for install requests.
+/// Summary: Returns an unsupported error for install requests.
 ///
 /// Inputs: none.
+///
 /// Outputs: an error envelope indicating unsupported platform.
-/// Ties to: service install commands on unsupported platforms.
+///
 /// Side effects: None.
-/// Why: provide a clear error when service install is unavailable.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: service install commands on unsupported platforms.
+///
+/// Why this exists: provide a clear error when service install is unavailable.
 pub fn install_service() -> Result<String, ErrorEnvelope> {
     Err(ErrorEnvelope::new(
         "SERVICE_UNSUPPORTED",
@@ -15,13 +21,19 @@ pub fn install_service() -> Result<String, ErrorEnvelope> {
     ))
 }
 
-/// Purpose: Returns a status payload for unsupported platforms.
+/// Summary: Returns a status payload for unsupported platforms.
 ///
 /// Inputs: none.
+///
 /// Outputs: a status payload with unsupported message.
-/// Ties to: GUI status checks on unsupported platforms.
+///
 /// Side effects: None.
-/// Why: avoid failures while signaling unsupported behavior.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI status checks on unsupported platforms.
+///
+/// Why this exists: avoid failures while signaling unsupported behavior.
 pub fn status() -> Result<ServiceStatus, ErrorEnvelope> {
     Ok(ServiceStatus {
         installed: false,
@@ -33,13 +45,19 @@ pub fn status() -> Result<ServiceStatus, ErrorEnvelope> {
     })
 }
 
-/// Purpose: Returns an unsupported error for restart requests.
+/// Summary: Returns an unsupported error for restart requests.
 ///
 /// Inputs: none.
+///
 /// Outputs: an error envelope indicating unsupported platform.
-/// Ties to: GUI restart actions on unsupported platforms.
+///
 /// Side effects: None.
-/// Why: provide a clear error when restart is unavailable.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI restart actions on unsupported platforms.
+///
+/// Why this exists: provide a clear error when restart is unavailable.
 pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
     Err(ErrorEnvelope::new(
         "RESTART_UNSUPPORTED",

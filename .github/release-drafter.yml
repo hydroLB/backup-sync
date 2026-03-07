@@ -1,0 +1,62 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+template: |
+  ## What Changed
+
+  $CHANGES
+
+  ## Release Readiness
+
+  - [ ] `make check` passed on the release commit
+  - [ ] `CHANGELOG.md` finalized for this release
+  - [ ] Deprecations, if any, follow `docs/deprecation-policy.md`
+  - [ ] Upgrade notes included for breaking changes
+
+categories:
+  - title: "Breaking Changes"
+    labels:
+      - "breaking"
+  - title: "Features"
+    labels:
+      - "feature"
+      - "enhancement"
+  - title: "Fixes"
+    labels:
+      - "bug"
+      - "fix"
+  - title: "Security"
+    labels:
+      - "security"
+  - title: "Performance"
+    labels:
+      - "perf"
+  - title: "Documentation"
+    labels:
+      - "docs"
+  - title: "Maintenance"
+    labels:
+      - "chore"
+      - "maintenance"
+
+exclude-labels:
+  - "skip-changelog"
+
+version-resolver:
+  major:
+    labels:
+      - "breaking"
+  minor:
+    labels:
+      - "feature"
+      - "enhancement"
+  patch:
+    labels:
+      - "bug"
+      - "fix"
+      - "security"
+      - "perf"
+      - "docs"
+      - "chore"
+      - "maintenance"
+  default: patch

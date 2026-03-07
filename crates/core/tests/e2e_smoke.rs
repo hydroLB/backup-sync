@@ -14,13 +14,19 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
-/// Purpose: Runs a versioned backup + restore cycle as an end-to-end smoke test.
+/// Summary: Runs a versioned backup + restore cycle as an end-to-end smoke test.
 ///
 /// Inputs: A temporary watched directory and destination store.
+///
 /// Outputs: A successful backup, listed version, and a restore that matches original contents.
-/// Ties to: The primary versioned engine workflow used by the daemon, CLI, and GUI.
+///
 /// Side effects: Creates temp directories and writes a small test file.
-/// Why: Ensure the production engine stays healthy across refactors.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: The primary versioned engine workflow used by the daemon, CLI, and GUI.
+///
+/// Why this exists: Ensure the production engine stays healthy across refactors.
 fn e2e_smoke_versioned_backup_and_restore() -> Result<()> {
     let dir = tempdir().context("e2e_smoke::versioned failed to create temp root")?;
     let watched_dir = dir.path().join("watched");

@@ -1,12 +1,18 @@
 use std::path::PathBuf;
 
-/// Purpose: Holds daemon startup arguments sourced from the environment.
+/// Summary: Holds daemon startup arguments sourced from the environment.
 ///
 /// Inputs: environment variables.
+///
 /// Outputs: a structured argument set.
-/// Ties to: daemon initialization for config and log overrides.
+///
 /// Side effects: None.
-/// Why: allow non interactive overrides for service environments.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: daemon initialization for config and log overrides.
+///
+/// Why this exists: allow non interactive overrides for service environments.
 #[derive(Debug, Clone)]
 pub struct DaemonArgs {
     pub config_path: Option<PathBuf>,
@@ -14,13 +20,19 @@ pub struct DaemonArgs {
 }
 
 impl DaemonArgs {
-    /// Purpose: Loads daemon arguments from environment variables.
+    /// Summary: Loads daemon arguments from environment variables.
     ///
     /// Inputs: the current process environment.
+    ///
     /// Outputs: a `DaemonArgs` instance.
-    /// Ties to: daemon startup configuration.
+    ///
     /// Side effects: None.
-    /// Why: allow service managers to override paths without CLI flags.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: daemon startup configuration.
+    ///
+    /// Why this exists: allow service managers to override paths without CLI flags.
     pub fn from_env() -> Self {
         let config_path = std::env::var_os("BACKUP_SYNC_CONFIG").map(PathBuf::from);
         let log_path = std::env::var_os("BACKUP_SYNC_LOG").map(PathBuf::from);

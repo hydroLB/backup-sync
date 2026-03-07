@@ -1,3 +1,4 @@
+use crate::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
 use crate::logging::redact_path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -5,13 +6,19 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-/// Purpose: Records metadata about a snapshot used to produce a consistent view of a source path.
+/// Summary: Records metadata about a snapshot used to produce a consistent view of a source path.
 ///
 /// Inputs: Produced by platform-specific snapshot providers.
+///
 /// Outputs: Serialized into manifests and scan reports.
-/// Ties to: versioned backup scanning and blob writes for crash-consistent commits.
+///
 /// Side effects: None.
-/// Why: make it explicit whether a version was derived from a live filesystem view or a snapshot view.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: versioned backup scanning and blob writes for crash-consistent commits.
+///
+/// Why this exists: make it explicit whether a version was derived from a live filesystem view or a snapshot view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceSnapshotInfo {
     pub provider: String,
@@ -20,13 +27,19 @@ pub struct SourceSnapshotInfo {
     pub created_at_unix: i64,
 }
 
-/// Purpose: Represents a source path view that should be used for scanning and blob reads.
+/// Summary: Represents a source path view that should be used for scanning and blob reads.
 ///
 /// Inputs: Original watched path and runtime snapshot settings.
+///
 /// Outputs: Provides a scan path and optional snapshot metadata plus cleanup guard.
-/// Ties to: versioned store `scan_snapshot` and blob writing.
+///
 /// Side effects: May create and mount snapshots (best-effort).
-/// Why: scanning and reading blobs must use the same consistent view to avoid mismatched manifests.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: versioned store `scan_snapshot` and blob writing.
+///
+/// Why this exists: scanning and reading blobs must use the same consistent view to avoid mismatched manifests.
 #[derive(Debug)]
 pub struct SourcePathView {
     scan_path: PathBuf,
@@ -36,14 +49,53 @@ pub struct SourcePathView {
 }
 
 impl SourcePathView {
+    /// Summary: scan_path orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn scan_path(&self) -> &Path {
         &self.scan_path
     }
 
+    /// Summary: snapshot orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn snapshot(&self) -> Option<&SourceSnapshotInfo> {
         self.snapshot.as_ref()
     }
 
+    /// Summary: snapshot_error orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn snapshot_error(&self) -> Option<&str> {
         self.snapshot_error.as_deref()
     }
@@ -58,17 +110,19 @@ enum SnapshotGuard {
     WindowsVss(WindowsVssSnapshot),
 }
 
-/// Purpose: Prepare a best-effort snapshot-backed view of a watched path.
+/// Summary: Prepare a best-effort snapshot-backed view of a watched path.
 ///
 /// Inputs: The original watched path, a boolean enable flag, and a timeout in seconds for any OS
-/// command invocations.
+///
 /// Outputs: A `SourcePathView` that points either at a snapshot-mounted path or at the original path.
+///
 /// Side effects: May create and mount a snapshot, and will attempt cleanup on drop when supported.
+///
 /// Error handling: Never fails the backup cycle when snapshot operations fail; returns the original
-/// path with an explanatory error string.
+///
 /// Ties to other methods: Intended to wrap both scanning and blob reads in the versioned store.
+///
 /// Why this exists: A changing or glitching source can yield inconsistent manifests unless reads are
-/// taken from a stable snapshot view.
 pub fn prepare_source_view(
     path: &Path,
     enabled: bool,
@@ -93,30 +147,24 @@ pub fn prepare_source_view(
     {
         match try_macos_tmutil_apfs_snapshot_view(&canonical, Duration::from_secs(timeout_seconds))
         {
-            Ok(Some(prepared)) => {
-                return Ok(SourcePathView {
-                    scan_path: prepared.scan_path,
-                    snapshot: Some(prepared.info),
-                    snapshot_error: None,
-                    _guard: Some(SnapshotGuard::MacosMounted(prepared.guard)),
-                });
-            }
-            Ok(None) => {
-                return Ok(SourcePathView {
-                    scan_path: path.to_path_buf(),
-                    snapshot: None,
-                    snapshot_error: Some("snapshot provider unavailable for this path".to_string()),
-                    _guard: None,
-                });
-            }
-            Err(e) => {
-                return Ok(SourcePathView {
-                    scan_path: path.to_path_buf(),
-                    snapshot: None,
-                    snapshot_error: Some(format!("{e:#}")),
-                    _guard: None,
-                });
-            }
+            Ok(Some(prepared)) => Ok(SourcePathView {
+                scan_path: prepared.scan_path,
+                snapshot: Some(prepared.info),
+                snapshot_error: None,
+                _guard: Some(SnapshotGuard::MacosMounted(prepared.guard)),
+            }),
+            Ok(None) => Ok(SourcePathView {
+                scan_path: path.to_path_buf(),
+                snapshot: None,
+                snapshot_error: Some("snapshot provider unavailable for this path".to_string()),
+                _guard: None,
+            }),
+            Err(e) => Ok(SourcePathView {
+                scan_path: path.to_path_buf(),
+                snapshot: None,
+                snapshot_error: Some(format!("{e:#}")),
+                _guard: None,
+            }),
         }
     }
 
@@ -163,38 +211,70 @@ pub fn prepare_source_view(
     }
 }
 
+/// Summary: run_command_with_timeout orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn run_command_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Output> {
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .context("fs::snapshots::run_command_with_timeout failed to spawn command")?;
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .context("fs::snapshots::run_command_with_timeout failed to collect output");
+    let policy = BlockingIoPolicy::single_attempt(timeout);
+    let poll_interval = policy.backoff_poll_interval.max(Duration::from_millis(1));
+    run_with_policy(
+        "fs::snapshots::run_command_with_timeout",
+        &policy,
+        CancellationFlag::none(),
+        || {
+            cmd.stdin(Stdio::null());
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            let mut child = cmd
+                .spawn()
+                .context("fs::snapshots::run_command_with_timeout failed to spawn command")?;
+            let start = Instant::now();
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        return child.wait_with_output().context(
+                            "fs::snapshots::run_command_with_timeout failed to collect output",
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        return Err(anyhow::anyhow!(
+                            "fs::snapshots::run_command_with_timeout failed to poll child: {e}"
+                        ));
+                    }
+                }
+                if start.elapsed() > timeout {
+                    if let Err(error) = child.kill() {
+                        tracing::warn!(
+                            error = %error,
+                            "fs::snapshots::run_command_with_timeout failed to kill timed-out child process"
+                        );
+                    }
+                    if let Err(error) = child.wait() {
+                        tracing::warn!(
+                            error = %error,
+                            "fs::snapshots::run_command_with_timeout failed waiting for timed-out child process"
+                        );
+                    }
+                    anyhow::bail!(
+                        "fs::snapshots::run_command_with_timeout timed out after {}s",
+                        timeout.as_secs().max(1)
+                    );
+                }
+                std::thread::sleep(poll_interval);
             }
-            Ok(None) => {}
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "fs::snapshots::run_command_with_timeout failed to poll child: {e}"
-                ));
-            }
-        }
-        if start.elapsed() > timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!(
-                "fs::snapshots::run_command_with_timeout timed out after {}s",
-                timeout.as_secs().max(1)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+        },
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -206,6 +286,19 @@ struct MacosMountedSnapshot {
 
 #[cfg(target_os = "macos")]
 impl Drop for MacosMountedSnapshot {
+    /// Summary: drop orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn drop(&mut self) {
         let mount = self.mount_dir.path().to_path_buf();
         let timeout = self.timeout;
@@ -230,6 +323,19 @@ struct PreparedSnapshot {
     guard: MacosMountedSnapshot,
 }
 
+/// Summary: parse_df_posix_line orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(any(target_os = "macos", test))]
 fn parse_df_posix_line(line: &str) -> Result<(String, PathBuf)> {
     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -245,6 +351,19 @@ fn parse_df_posix_line(line: &str) -> Result<(String, PathBuf)> {
     Ok((device, PathBuf::from(mountpoint)))
 }
 
+/// Summary: df_mount_info orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_os = "macos")]
 fn df_mount_info(path: &Path, timeout: Duration) -> Result<(String, PathBuf)> {
     let mut cmd = Command::new("df");
@@ -265,6 +384,19 @@ fn df_mount_info(path: &Path, timeout: Duration) -> Result<(String, PathBuf)> {
     parse_df_posix_line(line)
 }
 
+/// Summary: parse_tmutil_listlocalsnapshots_output orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(any(target_os = "macos", test))]
 fn parse_tmutil_listlocalsnapshots_output(stdout: &str) -> Option<String> {
     let mut best: Option<String> = None;
@@ -284,6 +416,19 @@ fn parse_tmutil_listlocalsnapshots_output(stdout: &str) -> Option<String> {
     best
 }
 
+/// Summary: try_macos_tmutil_apfs_snapshot_view orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_os = "macos")]
 fn try_macos_tmutil_apfs_snapshot_view(
     path: &Path,
@@ -377,6 +522,19 @@ struct WindowsVssSnapshot {
 
 #[cfg(target_os = "windows")]
 impl Drop for WindowsVssSnapshot {
+    /// Summary: drop orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn drop(&mut self) {
         let shadow_id = self.shadow_id.clone();
         let timeout = self.timeout;
@@ -409,6 +567,19 @@ struct PreparedWindowsSnapshot {
     guard: WindowsVssSnapshot,
 }
 
+/// Summary: try_windows_vss_snapshot_view orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_os = "windows")]
 fn try_windows_vss_snapshot_view(
     path: &Path,
@@ -468,6 +639,19 @@ fn try_windows_vss_snapshot_view(
     }))
 }
 
+/// Summary: extract_windows_volume_root orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(any(target_os = "windows", test))]
 fn extract_windows_volume_root(path: &str) -> Option<String> {
     if path.len() < 3 {
@@ -481,6 +665,19 @@ fn extract_windows_volume_root(path: &str) -> Option<String> {
     Some(format!("{}:\\", c0.to_ascii_uppercase()))
 }
 
+/// Summary: parse_windows_vss_output orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(any(target_os = "windows", test))]
 fn parse_windows_vss_output(stdout: &str) -> Option<(String, String)> {
     for line in stdout.lines() {
@@ -503,6 +700,19 @@ fn parse_windows_vss_output(stdout: &str) -> Option<(String, String)> {
 mod tests {
     use super::*;
 
+    /// Summary: parses_tmutil_snapshot_name orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[test]
     fn parses_tmutil_snapshot_name() {
         let stdout = r#"
@@ -517,6 +727,19 @@ com.apple.TimeMachine.2026-02-04-131415.local
         );
     }
 
+    /// Summary: parses_df_posix_line_with_spaces orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[test]
     fn parses_df_posix_line_with_spaces() {
         let line = "/dev/disk4s2 1953523712 123 456 12% /Volumes/External Drive";
@@ -525,6 +748,19 @@ com.apple.TimeMachine.2026-02-04-131415.local
         assert_eq!(mount.to_string_lossy(), "/Volumes/External Drive");
     }
 
+    /// Summary: windows_vss_parser_accepts_id_and_device orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[test]
     fn windows_vss_parser_accepts_id_and_device() {
         let stdout = "{ID}|\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy7\r\n";
@@ -532,6 +768,19 @@ com.apple.TimeMachine.2026-02-04-131415.local
         assert!(parsed.is_some());
     }
 
+    /// Summary: windows_volume_root_extractor_parses_drive_letter orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[test]
     fn windows_volume_root_extractor_parses_drive_letter() {
         let vol = extract_windows_volume_root("c:\\Users\\me\\file.txt");

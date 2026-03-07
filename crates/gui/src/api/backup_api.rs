@@ -2,13 +2,19 @@ use anyhow::{anyhow, Context, Result};
 use backup_core::state::store::StateStore;
 use std::path::{Path, PathBuf};
 
-/// Purpose: Loads the current stored state from disk.
+/// Summary: Loads the current stored state from disk.
 ///
 /// Inputs: none.
+///
 /// Outputs: the loaded stored state.
-/// Ties to: GUI backup browsing operations.
+///
 /// Side effects: Reads the state file from disk.
-/// Why: provide a single point for loading state before browsing backups.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI backup browsing operations.
+///
+/// Why this exists: provide a single point for loading state before browsing backups.
 fn load_state() -> Result<backup_core::state::StoredState> {
     let state_path = backup_core::platform::paths::state_file_path()
         .context("gui::api::backup_api::load_state failed to resolve state path")?;
@@ -17,25 +23,37 @@ fn load_state() -> Result<backup_core::state::StoredState> {
     Ok(state)
 }
 
-/// Purpose: Returns the list of tracked source paths from state.
+/// Summary: Returns the list of tracked source paths from state.
 ///
 /// Inputs: none.
+///
 /// Outputs: a list of tracked source path strings.
-/// Ties to: GUI backup browsing and selection UI.
+///
 /// Side effects: Reads the state file from disk.
-/// Why: support UI selection of available backups.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI backup browsing and selection UI.
+///
+/// Why this exists: support UI selection of available backups.
 pub fn list_tracked_paths() -> Result<Vec<String>> {
     let state = load_state()?;
     Ok(state.files.keys().cloned().collect())
 }
 
-/// Purpose: Returns the backup copies recorded for a specific source path.
+/// Summary: Returns the backup copies recorded for a specific source path.
 ///
 /// Inputs: the source path.
+///
 /// Outputs: a list of backup file paths.
-/// Ties to: GUI backup browsing and detail panels.
+///
 /// Side effects: Reads the state file from disk.
-/// Why: allow users to inspect backup history for a specific file.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: GUI backup browsing and detail panels.
+///
+/// Why this exists: allow users to inspect backup history for a specific file.
 pub fn list_backups_for_path(path: &Path) -> Result<Vec<PathBuf>> {
     let state = load_state()?;
     let key = path.to_string_lossy();

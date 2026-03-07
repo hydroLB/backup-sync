@@ -35,10 +35,15 @@ struct PairCounters {
 /// Summary: Replicate versioned store data from configured destinations to their replicas.
 ///
 /// Inputs: loaded config containing destinations with optional `replicate_to` lists.
+///
 /// Outputs: a `ReplicationSummary` for UI and logs.
+///
 /// Side effects: Copies manifests, blobs, and index files into replica destinations.
+///
 /// Error handling: Best-effort per replica; returns `Ok` with failure counts unless a non-recoverable internal error occurs.
+///
 /// Ties to other methods: Intended to run after `run_backup_cycle` in the daemon and CLI for 3-2-1 workflows.
+///
 /// Why this exists: A second destination provides an immediate redundant copy without changing the manifest model.
 pub fn replicate_configured_stores(cfg: &Config) -> Result<ReplicationSummary> {
     let by_id: HashMap<&str, &Destination> = cfg
@@ -107,10 +112,15 @@ pub fn replicate_configured_stores(cfg: &Config) -> Result<ReplicationSummary> {
 /// Summary: Replicate one source destination store into one replica destination store.
 ///
 /// Inputs: config plus a source and destination entry.
+///
 /// Outputs: per-pair replication counters.
+///
 /// Side effects: Reads from the source store and writes missing content into the replica store.
+///
 /// Error handling: Returns contextual errors when the replica is unreachable or when store reads are inconsistent.
+///
 /// Ties to other methods: Called by `replicate_configured_stores`.
+///
 /// Why this exists: Keep pair replication logic isolated for easier testing and observability.
 fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Result<PairCounters> {
     if !dst.path.exists() || !dst.path.is_dir() {
@@ -307,10 +317,15 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
 /// Summary: Delete replica manifest files that are not present in the source index.
 ///
 /// Inputs: config, source index, and replica manifests directory.
+///
 /// Outputs: number of manifest files deleted.
+///
 /// Side effects: Removes manifest files from the replica store.
+///
 /// Error handling: Returns contextual errors on filesystem failures.
+///
 /// Ties to other methods: Used by `replicate_one_pair` when mirror mode is enabled.
+///
 /// Why this exists: Retention pruning on the primary should be reflected in replicas to keep versions aligned.
 fn mirror_manifest_deletions(
     cfg: &Config,
@@ -367,10 +382,15 @@ fn mirror_manifest_deletions(
 /// Summary: Atomically copy a file to the replica store with throttling and time bounds.
 ///
 /// Inputs: config (for buffer sizing and throttling), source path, and destination path.
+///
 /// Outputs: bytes written to the destination.
+///
 /// Side effects: Writes a temp file, fsyncs it, renames it into place, and best-effort syncs the parent directory.
+///
 /// Error handling: Returns contextual errors for IO, timeouts, and rename failures.
+///
 /// Ties to other methods: Used by replication for manifests, indexes, scan reports, and blobs.
+///
 /// Why this exists: Replicas must not observe partial blobs that could break restore verification.
 fn copy_file_atomic(cfg: &Config, src: &Path, dst: &Path) -> Result<u64> {
     let parent = dst
@@ -409,6 +429,19 @@ fn copy_file_atomic(cfg: &Config, src: &Path, dst: &Path) -> Result<u64> {
     Ok(bytes)
 }
 
+/// Summary: copy_stream_with_throttle orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn copy_stream_with_throttle(
     src: &Path,
     out: &mut dyn Write,
@@ -467,13 +500,54 @@ fn copy_stream_with_throttle(
     Ok(total)
 }
 
+/// Summary: sync_dir_best_effort orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_family = "unix")]
 fn sync_dir_best_effort(path: &Path) {
-    if let Ok(dir) = fs::File::open(path) {
-        let _ = dir.sync_all();
+    match fs::File::open(path) {
+        Ok(dir) => {
+            if let Err(error) = dir.sync_all() {
+                tracing::warn!(
+                    path = %redact_path(path),
+                    error = %error,
+                    "versioned::sync_dir_best_effort failed syncing directory"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %redact_path(path),
+                error = %error,
+                "versioned::sync_dir_best_effort failed opening directory"
+            );
+        }
     }
 }
 
+/// Summary: sync_dir_best_effort orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(not(target_family = "unix"))]
 fn sync_dir_best_effort(_path: &Path) {}
 

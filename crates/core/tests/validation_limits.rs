@@ -5,13 +5,19 @@ use backup_core::config::{
 use std::fs;
 use tempfile::tempdir;
 
-/// Purpose: Builds a baseline config for validation tests with a single destination.
+/// Summary: Builds a baseline config for validation tests with a single destination.
 ///
 /// Inputs: the backup root and watched path list.
+///
 /// Outputs: a fully populated `Config` with safe defaults.
-/// Ties to: config validation and plan limit tests.
+///
 /// Side effects: None.
-/// Why: keep test setup consistent across validation scenarios.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: config validation and plan limit tests.
+///
+/// Why this exists: keep test setup consistent across validation scenarios.
 fn base_config(backup_root: std::path::PathBuf, watched: Vec<WatchedPath>) -> Config {
     let watched = watched
         .into_iter()
@@ -50,13 +56,19 @@ fn base_config(backup_root: std::path::PathBuf, watched: Vec<WatchedPath>) -> Co
 }
 
 #[test]
-/// Purpose: Ensures validation allows configs without watched paths.
+/// Summary: Ensures validation allows configs without watched paths.
 ///
 /// Inputs: a temp directory and an empty watched list.
+///
 /// Outputs: a successful validation result.
-/// Ties to: config validation error handling.
+///
 /// Side effects: None.
-/// Why: allow users to set destinations and schedules before selecting folders.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: config validation error handling.
+///
+/// Why this exists: allow users to set destinations and schedules before selecting folders.
 fn validate_allows_empty_watched_list() {
     let dir = tempdir()
         .expect("validation_limits::validate_allows_empty_watched_list failed to create temp dir");
@@ -68,13 +80,19 @@ fn validate_allows_empty_watched_list() {
 }
 
 #[test]
-/// Purpose: Ensures validation rejects backup_root when it points to a file.
+/// Summary: Ensures validation rejects backup_root when it points to a file.
 ///
 /// Inputs: a temp directory and a file path as backup_root.
+///
 /// Outputs: a failed validation result.
-/// Ties to: filesystem sanity checks during validation.
+///
 /// Side effects: None.
-/// Why: avoid writing backups into a regular file.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: filesystem sanity checks during validation.
+///
+/// Why this exists: avoid writing backups into a regular file.
 fn validate_rejects_backup_root_that_is_file() {
     let dir = tempdir().expect(
         "validation_limits::validate_rejects_backup_root_that_is_file failed to create temp dir",
@@ -104,26 +122,37 @@ fn validate_rejects_backup_root_that_is_file() {
 }
 
 #[test]
-/// Purpose: Ensures oversized plans are rejected by planning limits.
+/// Summary: Ensures oversized plans are rejected by planning limits.
 ///
 /// Inputs: a plan with more items than the configured maximum.
+///
 /// Outputs: a failed plan limit check.
-/// Ties to: `enforce_plan_limits` guardrails.
+///
 /// Side effects: None.
-/// Why: keep cycles bounded to avoid runaway IO.
-#[cfg(feature = "legacy-engine")]
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `enforce_plan_limits` guardrails.
+///
+/// Why this exists: keep cycles bounded to avoid runaway IO.
 fn plan_limit_is_enforced() {
-    legacy::plan_limit_is_enforced_impl();
+    execution_planning_cases::plan_limit_is_enforced_impl();
 }
 
 #[test]
-/// Purpose: Ensures validation rejects unwritable destination targets.
+/// Summary: Ensures validation rejects unwritable destination targets.
 ///
 /// Inputs: a destination path that is a file and a valid watched path.
+///
 /// Outputs: a failed validation result.
-/// Ties to: destination checks for writability.
+///
 /// Side effects: None.
-/// Why: prevent writing backups to non-directory paths.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: destination checks for writability.
+///
+/// Why this exists: prevent writing backups to non-directory paths.
 fn unwritable_destination_is_rejected() {
     let dir = tempdir()
         .expect("validation_limits::unwritable_destination_is_rejected failed to create temp dir");
@@ -153,20 +182,24 @@ fn unwritable_destination_is_rejected() {
 }
 
 #[test]
-/// Purpose: Ensures the free space guard blocks execution when below the configured minimum.
+/// Summary: Ensures the free space guard blocks execution when below the configured minimum.
 ///
 /// Inputs: a temp backup plan and an extreme min_free_space_bytes.
+///
 /// Outputs: a result with a recorded error in state.
-/// Ties to: `BackupExecutor::ensure_free_space` guard logic.
+///
 /// Side effects: None.
-/// Why: prevent starting copies when the target has insufficient space.
-#[cfg(feature = "legacy-engine")]
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `BackupExecutor::ensure_free_space` guard logic.
+///
+/// Why this exists: prevent starting copies when the target has insufficient space.
 fn min_free_space_blocks_execution() {
-    legacy::min_free_space_blocks_execution_impl();
+    execution_planning_cases::min_free_space_blocks_execution_impl();
 }
 
-#[cfg(feature = "legacy-engine")]
-mod legacy {
+mod execution_planning_cases {
     use super::*;
     use backup_core::backup::{
         execution::BackupExecutor,
@@ -175,6 +208,19 @@ mod legacy {
     use backup_core::state::models::StoredState;
     use std::time::SystemTime;
 
+    /// Summary: plan_limit_is_enforced_impl orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn plan_limit_is_enforced_impl() {
         let item = PlannedItem {
             src: std::path::PathBuf::from("/tmp/file"),
@@ -195,6 +241,19 @@ mod legacy {
         );
     }
 
+    /// Summary: min_free_space_blocks_execution_impl orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub fn min_free_space_blocks_execution_impl() {
         let backups = tempdir().expect(
             "validation_limits::min_free_space_blocks_execution failed to create backups dir",
@@ -208,12 +267,13 @@ mod legacy {
         let meta = fs::metadata(&src).expect(
             "validation_limits::min_free_space_blocks_execution failed to read source metadata",
         );
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
+        let mtime = match meta.modified() {
+            Ok(modified) => match modified.duration_since(SystemTime::UNIX_EPOCH) {
+                Ok(duration) => duration.as_secs() as i64,
+                Err(_) => 0,
+            },
+            Err(_) => 0,
+        };
 
         let plan = vec![PlannedItem {
             src: src.clone(),
@@ -248,13 +308,19 @@ mod legacy {
 }
 
 #[test]
-/// Purpose: Ensures invalid ignore patterns are rejected by validation.
+/// Summary: Ensures invalid ignore patterns are rejected by validation.
 ///
 /// Inputs: a config with a malformed ignore pattern.
+///
 /// Outputs: a failed validation result.
-/// Ties to: glob parsing checks.
+///
 /// Side effects: None.
-/// Why: avoid silently ignoring invalid patterns.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: glob parsing checks.
+///
+/// Why this exists: avoid silently ignoring invalid patterns.
 fn invalid_ignore_pattern_rejected() {
     let dir = tempdir()
         .expect("validation_limits::invalid_ignore_pattern_rejected failed to create temp dir");

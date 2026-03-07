@@ -1,77 +1,178 @@
-use backup_core::config::model::Destination;
-use daemon::runtime::ipc;
-use tempfile::tempdir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(unix)]
+mod support;
+
+#[cfg(unix)]
+const IPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[cfg(unix)]
 #[tokio::test]
-/// Purpose: Validate that the IPC server returns a status payload over a Unix socket.
+/// Summary: Validates public IPC JSON contracts for status, health, and readiness probes.
 ///
-/// Inputs: None.
-/// Outputs: Asserts that the response includes expected status fields.
-/// Ties to: `daemon::runtime::ipc::spawn_server` and status response serialization.
-/// Side effects: Creates temp directories, binds a Unix socket, and exchanges data over IPC.
-/// Why: Ensure the IPC boundary works end to end for local status queries.
-async fn unix_ipc_status_round_trip() {
-    use tokio::net::UnixStream;
-    let tmp = tempdir().expect("ipc_status::unix_ipc_status_round_trip failed to create temp dir");
-    let backup_root = tmp.path().join("backups");
-    std::fs::create_dir_all(&backup_root)
-        .expect("ipc_status::unix_ipc_status_round_trip failed to create backup root");
-    let (state, _) = backup_core::StateStore::load_or_default(tmp.path().join("ipc_state.json"))
-        .expect("ipc_status::unix_ipc_status_round_trip failed to load state");
-    let shared = std::sync::Arc::new(tokio::sync::Mutex::new(state));
-    let destinations = vec![Destination {
-        id: "default".into(),
-        label: None,
-        path: backup_root.clone(),
-        max_backups_per_file: None,
-        replicate_to: vec![],
-    }];
-    let handle = match ipc::spawn_server(
-        shared.clone(),
-        destinations,
-        std::time::Duration::from_secs(5),
-        10,
+/// Inputs: structured IPC requests sent over the daemon Unix socket.
+///
+/// Outputs: assertions on stable response shape, key fields, and request-id correlation behavior.
+///
+/// Side effects: Creates temp state, binds a local IPC socket, and performs request/response exchanges.
+///
+/// Error handling: Skips on bind conflicts and fails with contextual assertions for contract drift.
+///
+/// Ties to other methods: `daemon::runtime::ipc` request handlers and reply serialization.
+///
+/// Why this exists: protect machine-consumed IPC contract fields from accidental regressions.
+async fn unix_ipc_public_contract_status_health_readiness() {
+    let _ipc_lock = support::ipc_test_lock().await;
+    support::cleanup_socket_file();
+
+    let Some(server) =
+        support::spawn_test_server("unix_ipc_public_contract_status_health_readiness").await
+    else {
+        return;
+    };
+    let path = server.socket_path();
+
+    let status = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"StatusWithContext",
+            "payload":{"request_id":"status-contract-1","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
     )
     .await
-    {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!("skipping IPC test due to bind error: {}", e);
-            return;
-        }
+    .expect("ipc_status::unix_ipc_public_contract_status_health_readiness status request failed");
+    assert_eq!(status["request_id"], "status-contract-1");
+    assert!(status["last_files_backed_up"].as_u64().is_some());
+    assert!(status["destination_paused"].as_bool().is_some());
+    let destinations = status["destinations"].as_array().expect(
+        "ipc_status::unix_ipc_public_contract_status_health_readiness expected destinations array",
+    );
+    assert_eq!(destinations.len(), 1);
+    assert!(destinations[0]["id"].as_str().is_some());
+    assert!(destinations[0]["path"].as_str().is_some());
+    assert!(destinations[0]["reachable"].as_bool().is_some());
+    assert!(destinations[0]["writable"].as_bool().is_some());
+    assert!(destinations[0]["message"].as_str().is_some());
+
+    let health = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"HealthWithContext",
+            "payload":{"request_id":"health-contract-1","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
+    )
+    .await
+    .expect("ipc_status::unix_ipc_public_contract_status_health_readiness health request failed");
+    assert_eq!(health["request_id"], "health-contract-1");
+    assert_eq!(health["healthy"], true);
+    assert_eq!(health["status"], "healthy");
+    assert!(health["checked_at_ts"].as_i64().is_some());
+
+    let readiness = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"ReadinessWithContext",
+            "payload":{"request_id":"readiness-contract-1","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
+    )
+    .await
+    .expect(
+        "ipc_status::unix_ipc_public_contract_status_health_readiness readiness request failed",
+    );
+    assert_eq!(readiness["request_id"], "readiness-contract-1");
+    assert_eq!(readiness["ready"], true);
+    assert_eq!(readiness["status"], "ready");
+
+    server.shutdown(IPC_TIMEOUT).await;
+    support::cleanup_socket_file();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+/// Summary: Verifies public IPC ack and readiness contracts when safe mode is toggled.
+///
+/// Inputs: `SetSafeMode` and `ReadinessWithContext` IPC requests with explicit request ids.
+///
+/// Outputs: assertions that ack payloads and readiness state transitions are stable.
+///
+/// Side effects: Mutates in-memory daemon state through IPC requests.
+///
+/// Error handling: Skips on bind conflicts and fails if ack or readiness contract fields drift.
+///
+/// Ties to other methods: `SetSafeMode` handling and readiness projection in daemon IPC runtime.
+///
+/// Why this exists: ensure automation clients can safely depend on safe-mode state transitions.
+async fn unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition() {
+    let _ipc_lock = support::ipc_test_lock().await;
+    support::cleanup_socket_file();
+
+    let Some(server) = support::spawn_test_server(
+        "unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition",
+    )
+    .await
+    else {
+        return;
     };
-    let path = ipc::socket_path()
-        .expect("ipc_status::unix_ipc_status_round_trip failed to resolve socket path");
-    let req = serde_json::json!({"type":"Status"}).to_string();
-    // Allow the server to bind before connecting.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let res = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        let mut stream = UnixStream::connect(path)
-            .await
-            .expect("ipc_status::unix_ipc_status_round_trip failed to connect");
-        stream
-            .write_all(req.as_bytes())
-            .await
-            .expect("ipc_status::unix_ipc_status_round_trip failed to write request");
-        // Signal EOF so the server finishes reading.
-        stream
-            .shutdown()
-            .await
-            .expect("ipc_status::unix_ipc_status_round_trip failed to shutdown stream");
-        let mut buf = Vec::new();
-        stream
-            .read_to_end(&mut buf)
-            .await
-            .expect("ipc_status::unix_ipc_status_round_trip failed to read response");
-        let val: serde_json::Value = serde_json::from_slice(&buf)
-            .expect("ipc_status::unix_ipc_status_round_trip failed to parse response JSON");
-        assert!(val.get("last_files_backed_up").is_some());
-    })
-    .await;
-    assert!(res.is_ok(), "IPC round trip timed out");
-    handle.abort();
+    let path = server.socket_path();
+
+    let ack_enable = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"SetSafeMode",
+            "payload":{"enabled":true,"request_id":"set-safe-mode-1","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
+    )
+    .await
+    .expect("ipc_status::unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition enable ack request failed");
+    assert_eq!(ack_enable["ok"], true);
+    assert_eq!(ack_enable["request_id"], "set-safe-mode-1");
+
+    let readiness_blocked = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"ReadinessWithContext",
+            "payload":{"request_id":"readiness-after-enable","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
+    )
+    .await
+    .expect("ipc_status::unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition readiness-after-enable request failed");
+    assert_eq!(readiness_blocked["ready"], false);
+    assert_eq!(readiness_blocked["status"], "not_ready");
+    assert_eq!(readiness_blocked["reason"], "safe_mode_enabled");
+    assert_eq!(readiness_blocked["request_id"], "readiness-after-enable");
+
+    let ack_disable = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"SetSafeMode",
+            "payload":{"enabled":false,"request_id":"set-safe-mode-2","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
+    )
+    .await
+    .expect("ipc_status::unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition disable ack request failed");
+    assert_eq!(ack_disable["ok"], true);
+    assert_eq!(ack_disable["request_id"], "set-safe-mode-2");
+
+    let readiness_ready = support::send_json_request(
+        path,
+        &serde_json::json!({
+            "type":"ReadinessWithContext",
+            "payload":{"request_id":"readiness-after-disable","source":"test-suite"}
+        }),
+        IPC_TIMEOUT,
+    )
+    .await
+    .expect("ipc_status::unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition readiness-after-disable request failed");
+    assert_eq!(readiness_ready["ready"], true);
+    assert_eq!(readiness_ready["status"], "ready");
+    assert_eq!(readiness_ready["request_id"], "readiness-after-disable");
+
+    server.shutdown(IPC_TIMEOUT).await;
+    support::cleanup_socket_file();
 }
 
 // Windows named pipe IPC is exercised via compilation; runtime test omitted here.

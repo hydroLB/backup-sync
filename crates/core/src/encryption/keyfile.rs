@@ -1,5 +1,6 @@
 use crate::config::model::Config;
 use crate::hashing;
+use crate::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
 use crate::logging::redact_path;
 use crate::platform::paths;
 use anyhow::{Context, Result};
@@ -17,18 +18,37 @@ pub struct KeyInfo {
 }
 
 impl KeyInfo {
+    /// Summary: key orchestrates this method's core behavior.
+    ///
+    /// Inputs: Method parameters and required receiver state.
+    ///
+    /// Outputs: Return value and observable result for callers.
+    ///
+    /// Side effects: None beyond this method's explicit operations.
+    ///
+    /// Error handling: Propagates contextual errors to the caller when operations fail.
+    ///
+    /// Ties to other methods: Invoked by and composes with adjacent module methods.
+    ///
+    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     pub(crate) fn key(&self) -> [u8; KEY_LEN] {
         self.key
     }
 }
 
-/// Purpose: Resolve the configured encryption key path or fall back to the platform default.
+/// Summary: Resolve the configured encryption key path or fall back to the platform default.
 ///
 /// Inputs: Loaded config.
+///
 /// Outputs: A concrete filesystem path for the key file.
-/// Ties to: key loading, key generation, and encryption validation.
+///
 /// Side effects: None.
-/// Why: keep key material in a predictable OS config location unless explicitly overridden.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: key loading, key generation, and encryption validation.
+///
+/// Why this exists: keep key material in a predictable OS config location unless explicitly overridden.
 pub fn resolve_key_path(cfg: &Config) -> Result<PathBuf> {
     if let Some(p) = cfg.encryption.key_path.clone() {
         return Ok(p);
@@ -37,15 +57,22 @@ pub fn resolve_key_path(cfg: &Config) -> Result<PathBuf> {
         .context("encryption::keyfile::resolve_key_path failed to build default key path")
 }
 
-/// Purpose: Create a new encryption key file on disk.
+/// Summary: Create a new encryption key file on disk.
 ///
 /// Inputs: Destination file path and an overwrite flag.
+///
 /// Outputs: `KeyInfo` with derived `key_id` and key material.
+///
 /// Side effects: Writes the key file to disk with restrictive permissions where supported.
+///
 /// Error handling: Returns contextual errors for IO failures or unexpected filesystem state.
-/// Ties to: CLI key management and config validation.
+///
+/// Ties to other methods: CLI key management and config validation.
+///
 /// Why this exists: At-rest encryption is only recoverable with the same key; key creation must be explicit and auditable.
 pub fn create_key_file(path: &Path, force: bool) -> Result<KeyInfo> {
+    let io_policy = BlockingIoPolicy::bootstrap_defaults();
+    let single_attempt = BlockingIoPolicy::single_attempt(io_policy.timeout);
     if path.exists() && !force {
         anyhow::bail!(
             "encryption::keyfile::create_key_file refusing to overwrite existing key file at {} (pass --force to overwrite)",
@@ -53,12 +80,19 @@ pub fn create_key_file(path: &Path, force: bool) -> Result<KeyInfo> {
         );
     }
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "encryption::keyfile::create_key_file failed to create parent directory {}",
-                redact_path(parent)
-            )
-        })?;
+        run_with_policy(
+            "encryption::keyfile::create_key_file create parent directory",
+            &io_policy,
+            CancellationFlag::none(),
+            || {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "encryption::keyfile::create_key_file failed to create parent directory {}",
+                        redact_path(parent)
+                    )
+                })
+            },
+        )?;
     }
 
     let mut key = [0u8; KEY_LEN];
@@ -72,17 +106,25 @@ pub fn create_key_file(path: &Path, force: bool) -> Result<KeyInfo> {
     )
     .context("encryption::keyfile::create_key_file failed to create temp file")?;
 
-    temp.write_all(KEY_MAGIC)
-        .context("encryption::keyfile::create_key_file failed to write magic")?;
-    temp.write_all(&[KEY_VERSION])
-        .context("encryption::keyfile::create_key_file failed to write version")?;
-    temp.write_all(&key)
-        .context("encryption::keyfile::create_key_file failed to write key bytes")?;
-    temp.flush()
-        .context("encryption::keyfile::create_key_file failed to flush key file")?;
-    temp.as_file()
-        .sync_all()
-        .context("encryption::keyfile::create_key_file failed to fsync key file")?;
+    run_with_policy(
+        "encryption::keyfile::create_key_file write key payload",
+        &single_attempt,
+        CancellationFlag::none(),
+        || {
+            temp.write_all(KEY_MAGIC)
+                .context("encryption::keyfile::create_key_file failed to write magic")?;
+            temp.write_all(&[KEY_VERSION])
+                .context("encryption::keyfile::create_key_file failed to write version")?;
+            temp.write_all(&key)
+                .context("encryption::keyfile::create_key_file failed to write key bytes")?;
+            temp.flush()
+                .context("encryption::keyfile::create_key_file failed to flush key file")?;
+            temp.as_file()
+                .sync_all()
+                .context("encryption::keyfile::create_key_file failed to fsync key file")?;
+            Ok(())
+        },
+    )?;
 
     #[cfg(target_family = "unix")]
     {
@@ -104,21 +146,34 @@ pub fn create_key_file(path: &Path, force: bool) -> Result<KeyInfo> {
     Ok(KeyInfo { key_id, key })
 }
 
-/// Purpose: Load an existing encryption key file from disk.
+/// Summary: Load an existing encryption key file from disk.
 ///
 /// Inputs: Key file path.
+///
 /// Outputs: `KeyInfo` with key bytes and derived key id.
+///
 /// Side effects: Reads a key file from disk.
+///
 /// Error handling: Returns contextual errors for missing files, invalid formats, and IO failures.
-/// Ties to: encryption validation and blob encryption/decryption.
-/// Why: backups are only restorable with the original key; loading must be strict and explicit.
+///
+/// Ties to other methods: encryption validation and blob encryption/decryption.
+///
+/// Why this exists: backups are only restorable with the original key; loading must be strict and explicit.
 pub fn load_key_file(path: &Path) -> Result<KeyInfo> {
-    let raw = fs::read(path).with_context(|| {
-        format!(
-            "encryption::keyfile::load_key_file failed to read {}",
-            redact_path(path)
-        )
-    })?;
+    let io_policy = BlockingIoPolicy::bootstrap_defaults();
+    let raw = run_with_policy(
+        "encryption::keyfile::load_key_file read key",
+        &io_policy,
+        CancellationFlag::none(),
+        || {
+            fs::read(path).with_context(|| {
+                format!(
+                    "encryption::keyfile::load_key_file failed to read {}",
+                    redact_path(path)
+                )
+            })
+        },
+    )?;
     let min_len = KEY_MAGIC.len() + 1 + KEY_LEN;
     if raw.len() < min_len {
         anyhow::bail!(
@@ -152,6 +207,19 @@ pub fn load_key_file(path: &Path) -> Result<KeyInfo> {
     })
 }
 
+/// Summary: key_id orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn key_id(key: &[u8; KEY_LEN]) -> String {
     hashing::sha256_hex(key)
 }

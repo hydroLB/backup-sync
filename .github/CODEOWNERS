@@ -1,0 +1,18 @@
+# Global ownership
+* @liamsamson
+
+# Core engine
+/crates/core/ @liamsamson
+
+# Runtime and service surface
+/crates/daemon/ @liamsamson
+/crates/cli/ @liamsamson
+
+# Desktop and frontend
+/crates/gui/ @liamsamson
+
+# Governance and CI
+/.github/ @liamsamson
+/docs/ @liamsamson
+/Makefile @liamsamson
+/README.md @liamsamson

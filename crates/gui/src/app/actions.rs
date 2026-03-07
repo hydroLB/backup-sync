@@ -1,38 +1,107 @@
 use crate::api::{config_api, status_api};
 use crate::commands;
+use crate::commands::service::common::run_command;
 use crate::tray;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::api::dialog;
 use tauri::async_runtime;
 use tauri::{Manager, SystemTrayEvent, WindowEvent};
+use tracing::warn;
 
-static IS_QUITTING: AtomicBool = AtomicBool::new(false);
-static LAST_CLOSE_BACKUP_AT: AtomicBool = AtomicBool::new(false);
+/// Summary: Stores mutable app-action lifecycle flags used by tray/window handlers.
+///
+/// Inputs: none.
+///
+/// Outputs: atomics tracking quit state and close-trigger backup debounce state.
+///
+/// Side effects: None.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `handle_tray_event`, `handle_window_event`, `confirm_and_quit`.
+///
+/// Why this exists: replace module-level global statics with an injected runtime state object.
+#[derive(Default)]
+pub(crate) struct ActionState {
+    is_quitting: AtomicBool,
+    close_backup_in_flight: AtomicBool,
+}
 
-/// Purpose: Shows and focuses the main window.
+pub(crate) type SharedActionState = Arc<ActionState>;
+
+/// Summary: Builds shared action state for tray/window lifecycle handlers.
+///
+/// Inputs: none.
+///
+/// Outputs: reference-counted action state.
+///
+/// Side effects: None.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: injected into tray and window handler closures in `app::run`.
+///
+/// Why this exists: make lifecycle state explicit and dependency-injected.
+pub(crate) fn new_action_state() -> SharedActionState {
+    Arc::new(ActionState::default())
+}
+
+/// Summary: Shows and focuses the main window.
 ///
 /// Inputs: the Tauri app handle.
+///
 /// Outputs: `()` after attempting to show the window.
-/// Ties to: tray and single instance activation handlers.
+///
 /// Side effects: Shows the main window and sets focus.
-/// Why: provide a consistent way to surface the UI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: tray and single instance activation handlers.
+///
+/// Why this exists: provide a consistent way to surface the UI.
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        if let Err(error) = window.unminimize() {
+            warn!(
+                error = %error,
+                "app::actions::show_main_window failed to unminimize window"
+            );
+        }
+        if let Err(error) = window.show() {
+            warn!(
+                error = %error,
+                "app::actions::show_main_window failed to show window"
+            );
+        }
+        if let Err(error) = window.set_focus() {
+            warn!(
+                error = %error,
+                "app::actions::show_main_window failed to focus window"
+            );
+        }
     }
 }
 
-/// Purpose: Handles tray events by routing to the appropriate actions.
+/// Summary: Handles tray events by routing to the appropriate actions.
 ///
-/// Inputs: the app handle and the system tray event.
+/// Inputs: the app handle, the system tray event, and shared action state.
+///
 /// Outputs: `()` after dispatching the event.
-/// Ties to: tray menu wiring in `app::run`.
+///
 /// Side effects: May show the main window or exit the app.
-/// Why: keep the `tauri::Builder` wiring readable and keep the tray UX minimal.
-pub(crate) fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
-    if IS_QUITTING.load(Ordering::Relaxed) {
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: tray menu wiring in `app::run`.
+///
+/// Why this exists: keep the `tauri::Builder` wiring readable and keep the tray UX minimal.
+pub(crate) fn handle_tray_event(
+    app: &tauri::AppHandle,
+    event: SystemTrayEvent,
+    state: &SharedActionState,
+) {
+    if state.is_quitting.load(Ordering::Relaxed) {
         return;
     }
     match event {
@@ -41,61 +110,104 @@ pub(crate) fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) 
         SystemTrayEvent::DoubleClick { .. } => show_main_window(app),
         SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
             tray::SHOW => show_main_window(app),
-            tray::QUIT => confirm_and_quit(app),
+            tray::QUIT => confirm_and_quit(app, state.clone()),
             _ => {}
         },
         _ => {}
     }
 }
 
-/// Purpose: Handles window events with a consistent close policy.
+/// Summary: Handles window events with a consistent close policy.
 ///
-/// Inputs: the global window event.
+/// Inputs: the global window event and shared action state.
+///
 /// Outputs: `()` after handling the event.
-/// Ties to: lifecycle wiring in `app::run`.
+///
 /// Side effects: Prevents the default close behavior and exits the app cleanly.
-/// Why: avoid macOS-specific close quirks leaving a blank re-opened window.
-pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent) {
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: lifecycle wiring in `app::run`.
+///
+/// Why this exists: avoid macOS-specific close quirks leaving a blank re-opened window.
+pub(crate) fn handle_window_event(event: tauri::GlobalWindowEvent, state: &SharedActionState) {
     if let WindowEvent::CloseRequested { api, .. } = event.event() {
-        if IS_QUITTING.load(Ordering::Relaxed) {
+        let runtime = super::tuning::resolve_runtime_tuning();
+        let close_final_backup_debounce =
+            std::time::Duration::from_millis(runtime.gui_close_final_backup_debounce_ms.max(1));
+        let close_final_backup_reset_delay = std::time::Duration::from_secs(
+            runtime.gui_close_final_backup_reset_delay_seconds.max(1),
+        );
+        if state.is_quitting.load(Ordering::Relaxed) {
             // Allow a real quit to close the window; don't convert it into a hide-to-tray.
             return;
         }
         // Prevent the app from fully quitting on window close. The menu bar icon remains active.
         api.prevent_close();
-        let _ = event.window().hide();
+        if let Err(error) = event.window().hide() {
+            warn!(
+                error = %error,
+                "app::actions::handle_window_event failed to hide main window"
+            );
+        }
 
         // Best-effort "last backup" on window close (hide-to-tray) without blocking the UI thread.
         // Guard to avoid repeated triggers from rapid close/reopen interactions.
-        if !LAST_CLOSE_BACKUP_AT.swap(true, Ordering::Relaxed) {
+        if !state.close_backup_in_flight.swap(true, Ordering::Relaxed) {
+            let close_state = state.clone();
             async_runtime::spawn(async move {
                 // Small debounce window; allow the close/hide to complete.
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                if let Ok(cfg) = config_api::get_config() {
-                    if !cfg.safe_mode {
-                        let _ = commands::backup::run::run_now_cmd(Some("close-final".to_string())).await;
+                tokio::time::sleep(close_final_backup_debounce).await;
+                match config_api::get_config() {
+                    Ok(cfg) => {
+                        if !cfg.safe_mode {
+                            if let Err(error) =
+                                commands::backup::run::run_now_cmd(Some("close-final".to_string()))
+                                    .await
+                            {
+                                warn!(
+                                    error = %error.message,
+                                    "app::actions::handle_window_event close-final backup failed"
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        warn!(
+                            error = %error,
+                            "app::actions::handle_window_event failed loading config for close-final backup"
+                        );
                     }
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                LAST_CLOSE_BACKUP_AT.store(false, Ordering::Relaxed);
+                tokio::time::sleep(close_final_backup_reset_delay).await;
+                close_state
+                    .close_backup_in_flight
+                    .store(false, Ordering::Relaxed);
             });
         }
     }
 }
 
-/// Purpose: Ask for confirmation before quitting because quitting pauses backups.
+/// Summary: Ask for confirmation before quitting because quitting pauses backups.
 ///
-/// Inputs: the Tauri app handle.
+/// Inputs: the Tauri app handle and shared action state.
+///
 /// Outputs: `()` after handling the quit flow.
-/// Ties to: tray Quit action.
+///
 /// Side effects: Shows a confirmation dialog, may pause backups, may stop the daemon service on macOS, and may exit the app.
-/// Why: avoid accidental shutdown of background backups and make the consequence explicit.
-fn confirm_and_quit(app: &tauri::AppHandle) {
-    if IS_QUITTING.load(Ordering::Relaxed) {
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: tray Quit action.
+///
+/// Why this exists: avoid accidental shutdown of background backups and make the consequence explicit.
+fn confirm_and_quit(app: &tauri::AppHandle, state: SharedActionState) {
+    if state.is_quitting.load(Ordering::Relaxed) {
         return;
     }
 
     let handle = app.clone();
+    let confirm_state = state.clone();
     dialog::confirm(
         Option::<&tauri::Window>::None,
         "Quit Backup Sync?",
@@ -104,17 +216,32 @@ fn confirm_and_quit(app: &tauri::AppHandle) {
             if !confirmed {
                 return;
             }
-            if IS_QUITTING.swap(true, Ordering::Relaxed) {
+            if confirm_state.is_quitting.swap(true, Ordering::Relaxed) {
                 return;
             }
 
             // Disable tray quit item immediately to prevent duplicate clicks.
             let tray_handle = handle.tray_handle();
-            let _ = tray_handle.get_item(tray::QUIT).set_enabled(false);
-            let _ = tray_handle.get_item(tray::QUIT).set_title("Quitting…");
+            if let Err(error) = tray_handle.get_item(tray::QUIT).set_enabled(false) {
+                warn!(
+                    error = %error,
+                    "app::actions::confirm_and_quit failed disabling quit tray item"
+                );
+            }
+            if let Err(error) = tray_handle.get_item(tray::QUIT).set_title("Quitting…") {
+                warn!(
+                    error = %error,
+                    "app::actions::confirm_and_quit failed updating quit tray item title"
+                );
+            }
 
             if let Some(window) = handle.get_window("main") {
-                let _ = window.hide();
+                if let Err(error) = window.hide() {
+                    warn!(
+                        error = %error,
+                        "app::actions::confirm_and_quit failed hiding main window"
+                    );
+                }
             }
 
             async_runtime::spawn(async move {
@@ -127,13 +254,17 @@ fn confirm_and_quit(app: &tauri::AppHandle) {
 /// Summary: Run one last backup before quitting with a time bound.
 ///
 /// Inputs: None.
+///
 /// Outputs: `Ok(())` when the final backup completed; otherwise a user-facing failure string.
+///
 /// Side effects: Performs backup IO and persists state updates.
+///
 /// Error handling: Returns a string describing the failure so the caller can prompt the user.
+///
 /// Ties to other methods: Used by `quit_sequence` prior to stopping background work.
+///
 /// Why this exists: Avoid losing recent changes when the user quits from the menu bar.
-async fn run_final_backup_best_effort() -> Result<(), String> {
-    let timeout = std::time::Duration::from_secs(3);
+async fn run_final_backup_best_effort(timeout: std::time::Duration) -> Result<(), String> {
     match tokio::time::timeout(
         timeout,
         commands::backup::run::run_now_cmd(Some("quit-final".to_string())),
@@ -152,80 +283,202 @@ async fn run_final_backup_best_effort() -> Result<(), String> {
 /// Summary: Execute the full quit flow off the tray event thread.
 ///
 /// Inputs: The application handle.
+///
 /// Outputs: None.
+///
 /// Side effects: Pauses the daemon, optionally runs a final backup, stops the background service on macOS, closes windows, and exits.
+///
 /// Error handling: Prompts the user if the final backup fails and resumes scheduling if they cancel quit.
+///
 /// Ties to other methods: Spawned by `confirm_and_quit` after user confirmation.
+///
 /// Why this exists: Keep tray quit responsive and ensure a clean shutdown without re-opening the window.
 async fn quit_sequence(app: tauri::AppHandle) {
+    let runtime = super::tuning::resolve_runtime_tuning();
+    let quit_force_exit_timeout =
+        std::time::Duration::from_secs(runtime.gui_quit_force_exit_timeout_seconds.max(1));
+    let quit_final_backup_timeout =
+        std::time::Duration::from_secs(runtime.gui_quit_final_backup_timeout_seconds.max(1));
+    let daemon_stop_timeout =
+        std::time::Duration::from_secs(runtime.gui_daemon_stop_timeout_seconds.max(1));
     // Hard stop guard: ensure Quit actually terminates even if background tasks keep
     // the process alive. This is only armed after the user confirms quitting.
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(8));
+    std::thread::spawn(move || {
+        std::thread::sleep(quit_force_exit_timeout);
         std::process::exit(0);
     });
 
-    let cfg_safe_mode = config_api::get_config()
-        .map(|cfg| cfg.safe_mode)
-        .unwrap_or(true);
+    let cfg_safe_mode = match config_api::get_config() {
+        Ok(cfg) => cfg.safe_mode,
+        Err(error) => {
+            warn!(
+                error = %error,
+                "app::actions::quit_sequence failed loading config; defaulting safe_mode=true"
+            );
+            true
+        }
+    };
 
     if !cfg_safe_mode {
         // Best-effort only; quitting is an explicit stop and should not hang.
-        let _ = run_final_backup_best_effort().await;
+        if let Err(error) = run_final_backup_best_effort(quit_final_backup_timeout).await {
+            warn!(
+                error = %error,
+                "app::actions::quit_sequence final backup failed"
+            );
+        }
     }
 
     pause_backups_best_effort();
-    stop_background_daemon_best_effort_async().await;
+    stop_background_daemon_best_effort_async(daemon_stop_timeout).await;
 
     if let Some(window) = app.get_window("main") {
-        let _ = window.close();
+        if let Err(error) = window.close() {
+            warn!(
+                error = %error,
+                "app::actions::quit_sequence failed closing main window"
+            );
+        }
     }
     app.exit(0);
 }
 
-/// Purpose: Pause backups before quitting by enabling safe mode in config and daemon.
+/// Summary: Pause backups before quitting by enabling safe mode in config and daemon.
 ///
 /// Inputs: none.
+///
 /// Outputs: `()` after best-effort attempts complete.
-/// Ties to: `confirm_and_quit`.
+///
 /// Side effects: Writes configuration and attempts to update the running daemon over IPC.
-/// Why: quitting should stop background backups immediately and predictably.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `confirm_and_quit`.
+///
+/// Why this exists: quitting should stop background backups immediately and predictably.
 fn pause_backups_best_effort() {
-    if let Ok(mut cfg) = config_api::get_config() {
-        if !cfg.safe_mode {
-            cfg.safe_mode = true;
-            let _ = config_api::save_config(&cfg);
+    let ipc_cid = commands::correlation::cid("pause-backups", None);
+    match config_api::get_config() {
+        Ok(mut cfg) => {
+            if !cfg.safe_mode {
+                cfg.safe_mode = true;
+                if let Err(error) = config_api::save_config(&cfg) {
+                    warn!(
+                        error = %error,
+                        "app::actions::pause_backups_best_effort failed saving safe_mode config"
+                    );
+                }
+            }
+        }
+        Err(error) => {
+            warn!(
+                error = %error,
+                "app::actions::pause_backups_best_effort failed loading config"
+            );
         }
     }
-    async_runtime::spawn(async {
-        let _ = status_api::set_safe_mode(true).await;
+    async_runtime::spawn(async move {
+        if let Err(error) =
+            status_api::set_safe_mode_with_correlation(true, Some(ipc_cid.as_str())).await
+        {
+            warn!(
+                cid = %ipc_cid,
+                error = %error,
+                "app::actions::pause_backups_best_effort failed setting daemon safe mode"
+            );
+        }
     });
 }
 
+/// Summary: Stops the launchd-managed daemon as a best-effort cleanup during quit.
+///
+/// Inputs: timeout budget for launchctl stop/join flow.
+///
+/// Outputs: none.
+///
+/// Side effects: invokes `id` and `launchctl` commands and may stop the background daemon service.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `quit_sequence`.
+///
+/// Why this exists: keep quit semantics explicit and avoid orphaned background daemons.
 #[cfg(target_os = "macos")]
-async fn stop_background_daemon_best_effort_async() {
-    use std::process::Command;
-
+async fn stop_background_daemon_best_effort_async(timeout: std::time::Duration) {
     const LABEL: &str = "com.backup_sync.daemon";
 
     let stop = async_runtime::spawn_blocking(move || {
-        let uid = Command::new("id")
-            .arg("-u")
-            .output()
-            .ok()
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+        let uid_output = match run_command("id", &["-u"], "DAEMON_STOP_UID", "read uid with id -u")
+        {
+            Ok(output) => output,
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "app::actions::stop_background_daemon_best_effort_async failed to read uid with id -u"
+                );
+                return;
+            }
+        };
+        let uid = match String::from_utf8(uid_output.stdout) {
+            Ok(stdout) => stdout.trim().to_string(),
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "app::actions::stop_background_daemon_best_effort_async failed parsing uid output as utf-8"
+                );
+                return;
+            }
+        };
         if uid.is_empty() {
+            warn!("app::actions::stop_background_daemon_best_effort_async resolved empty uid");
             return;
         }
         let target = format!("gui/{}/{}", uid, LABEL);
-        let _ = Command::new("launchctl")
-            .args(["bootout", "-k", &target])
-            .output();
+        match run_command(
+            "launchctl",
+            &["bootout", "-k", &target],
+            "DAEMON_STOP_BOOTOUT",
+            "launchctl bootout",
+        ) {
+            Ok(_) => {}
+            Err(error) => {
+                warn!(
+                    target = %target,
+                    error = %error,
+                    "app::actions::stop_background_daemon_best_effort_async failed to execute launchctl bootout"
+                );
+            }
+        }
     });
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), stop).await;
+    match tokio::time::timeout(timeout, stop).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            warn!(
+                error = %error,
+                "app::actions::stop_background_daemon_best_effort_async join failed"
+            );
+        }
+        Err(error) => {
+            warn!(
+                error = %error,
+                "app::actions::stop_background_daemon_best_effort_async timed out"
+            );
+        }
+    }
 }
 
+/// Summary: Non-macOS no-op for background daemon stop helper.
+///
+/// Inputs: timeout budget (unused outside macOS).
+///
+/// Outputs: none.
+///
+/// Side effects: none.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: `quit_sequence`.
+///
+/// Why this exists: keep cross-platform call sites unified without cfg-splitting callers.
 #[cfg(not(target_os = "macos"))]
-async fn stop_background_daemon_best_effort_async() {}
+async fn stop_background_daemon_best_effort_async(_timeout: std::time::Duration) {}

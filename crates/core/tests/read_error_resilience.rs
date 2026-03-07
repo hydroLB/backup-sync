@@ -7,10 +7,25 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
+/// Summary: build_cfg orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
-    let mut execution = ExecutionTuning::default();
-    execution.retry_delays_ms = vec![];
-    execution.retry_jitter_pct = 0.0;
+    let execution = ExecutionTuning {
+        retry_delays_ms: vec![],
+        retry_jitter_pct: 0.0,
+        ..ExecutionTuning::default()
+    };
     Config {
         backup_root: dest.to_path_buf(),
         interval_seconds: 1800,
@@ -44,6 +59,19 @@ fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
     }
 }
 
+/// Summary: load_index_and_manifests orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn load_index_and_manifests(
     dest: &Path,
 ) -> (VersionIndex, Vec<(String, Manifest)>, std::path::PathBuf) {
@@ -79,6 +107,19 @@ fn load_index_and_manifests(
     (index, manifests, last_scan_report)
 }
 
+/// Summary: versioned_preserves_last_good_on_read_errors orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_family = "unix")]
 #[test]
 fn versioned_preserves_last_good_on_read_errors() {
@@ -178,6 +219,19 @@ fn versioned_preserves_last_good_on_read_errors() {
     );
 }
 
+/// Summary: versioned_preserves_last_good_on_read_errors orchestrates this method's core behavior.
+///
+/// Inputs: Method parameters and required receiver state.
+///
+/// Outputs: Return value and observable result for callers.
+///
+/// Side effects: None beyond this method's explicit operations.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: Invoked by and composes with adjacent module methods.
+///
+/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(not(target_family = "unix"))]
 #[test]
 fn versioned_preserves_last_good_on_read_errors() {

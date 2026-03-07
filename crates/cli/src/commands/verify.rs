@@ -1,16 +1,24 @@
 use anyhow::{Context, Result};
-use backup_core::{backup::versioned, load_config, platform::paths, state::store::StateStore};
+use backup_core::{
+    backup::versioned, load_validated_config, platform::paths, state::store::StateStore,
+};
 use chrono::Utc;
 
-/// Purpose: Verifies backups by rehashing the most recent copies.
+/// Summary: Verifies backups by rehashing the most recent copies.
 ///
 /// Inputs: none.
+///
 /// Outputs: `Ok(())` when verification completes without issues.
-/// Ties to: CLI verification command and state persistence.
+///
 /// Side effects: Reads config/state, hashes backup files, and writes updated state.
-/// Why: provide a manual integrity check from the CLI.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: CLI verification command and state persistence.
+///
+/// Why this exists: provide a manual integrity check from the CLI.
 pub async fn verify_backups() -> Result<()> {
-    let cfg = load_config().context("cli::verify_backups failed to load config")?;
+    let cfg = load_validated_config().context("cli::verify_backups failed to load config")?;
     let state_path =
         paths::state_file_path().context("cli::verify_backups failed to resolve state path")?;
     let (mut state, store) = StateStore::load_or_default(state_path)

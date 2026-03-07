@@ -1,13 +1,19 @@
 use crate::tray;
 use tauri::{CustomMenuItem, SystemTray, SystemTrayMenu, SystemTrayMenuItem};
 
-/// Purpose: Builds the system tray menu used by the GUI.
+/// Summary: Builds the system tray menu used by the GUI.
 ///
 /// Inputs: none.
+///
 /// Outputs: a `SystemTray` with a fully populated menu.
-/// Ties to: tray event routing in `app::actions`.
+///
 /// Side effects: None.
-/// Why: keep tray menu construction separate from `tauri::Builder` wiring.
+///
+/// Error handling: Propagates contextual errors to the caller when operations fail.
+///
+/// Ties to other methods: tray event routing in `app::actions`.
+///
+/// Why this exists: keep tray menu construction separate from `tauri::Builder` wiring.
 pub(crate) fn build_tray() -> SystemTray {
     let tray_menu = SystemTrayMenu::new()
         .add_item(CustomMenuItem::new(tray::SHOW, "Open Backup Sync"))
