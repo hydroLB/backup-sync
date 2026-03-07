@@ -8,6 +8,7 @@ Desktop.ini
 $RECYCLE.BIN/
 
 # Editor/IDE artifacts
+.codex/
 .vscode/
 .idea/
 *.iml
@@ -95,6 +96,7 @@ secrets.*
 
 # Runtime state and local databases
 backup_sync/
+projects/
 *.sqlite
 *.sqlite3
 *.db

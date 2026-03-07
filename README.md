@@ -56,11 +56,15 @@ Details: see [`docs/storage.md`](docs/storage.md) and [`docs/ui.md`](docs/ui.md)
 ## Setup
 1. Install Rust stable, Node 18 or newer, and npm.
 2. Enable git hooks with `make hooks`.
-3. Build everything with `make build`.
-4. Run the desktop app with `make run`.
+3. On macOS, install the optional native desktop bridge helper with `./scripts/install_desktopctl.sh` when you need the desktop tooling in `tools/desktopctl`.
+4. Build everything with `make build`.
+5. Run the desktop app with `make run`.
 
 Quickstart (dev):
 - `./start` (builds prerequisites and launches the desktop app)
+
+Local-only paths:
+- `.env`, `.env.*` except `.env.example`, `.reports/`, `.npm-cache/`, `.vscode/`, `.codex/`, `projects/`, and frontend coverage output are intentionally ignored so local state and secrets do not enter Git.
 
 ## Usage
 
