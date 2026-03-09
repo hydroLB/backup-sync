@@ -3,12 +3,17 @@ updates:
   - package-ecosystem: cargo
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
       day: monday
       time: "06:00"
       timezone: America/New_York
     target-branch: main
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
+    rebase-strategy: disabled
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - rust
@@ -16,12 +21,17 @@ updates:
   - package-ecosystem: npm
     directory: "/crates/gui/frontend"
     schedule:
-      interval: weekly
+      interval: monthly
       day: monday
       time: "06:15"
       timezone: America/New_York
     target-branch: main
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
+    rebase-strategy: disabled
+    groups:
+      frontend-dependencies:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - frontend

@@ -10,6 +10,9 @@ clippy:
 hooks:
 	git config core.hooksPath .githooks
 
+clean-local:
+	./scripts/clean-local-artifacts.sh
+
 frontend-install:
 	cd crates/gui/frontend && npm_config_cache=$(CURDIR)/.npm-cache npm ci
 
@@ -177,4 +180,4 @@ ci: check
 dev:
 	./launch.sh
 
-.PHONY: fmt fmt-check clippy hooks frontend-install frontend-lint frontend-format frontend-format-check frontend-typecheck frontend-test frontend-coverage secrets-working-tree secrets-history secrets lockfile-check deny security-check hygiene-check boundaries-check operability-check test test-unit test-integration test-e2e build run bench perf-record perf-check perf-ipc-load coverage audit release-validate check ci dev
+.PHONY: fmt fmt-check clippy hooks clean-local frontend-install frontend-lint frontend-format frontend-format-check frontend-typecheck frontend-test frontend-coverage secrets-working-tree secrets-history secrets lockfile-check deny security-check hygiene-check boundaries-check operability-check test test-unit test-integration test-e2e build run bench perf-record perf-check perf-ipc-load coverage audit release-validate check ci dev
