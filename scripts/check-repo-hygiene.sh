@@ -31,7 +31,7 @@ for file in "${required_files[@]}"; do
   fi
 done
 
-forbidden_tracked_paths_regex='(^|/)(\.env($|\.)|\.codex/|projects/|\.reports/|node_modules/|target/|coverage/|dist/|backup_sync/|crates/gui/gen/|.*\.(sqlite|sqlite3|db|pem|key|p12|pfx|crt|cer|der))($|/)'
+forbidden_tracked_paths_regex='(^|/)(\.DS_Store|Thumbs\.db|Desktop\.ini|\.env($|\.)|\.codex/|\.idea/|\.vscode/|projects/|\.reports/|\.npm-cache/|node_modules/|target/|coverage/|dist/|backup_sync/|crates/gui/gen/|.*\.(sqlite|sqlite3|db|pem|key|p12|pfx|crt|cer|der))($|/)'
 forbidden_tracked_paths="$(git ls-files | rg "$forbidden_tracked_paths_regex" || true)"
 if [[ -n "$forbidden_tracked_paths" ]]; then
   echo "[repo-hygiene] forbidden tracked local or secret-bearing paths detected:"

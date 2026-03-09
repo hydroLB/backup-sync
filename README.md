@@ -56,9 +56,10 @@ Details: see [`docs/storage.md`](docs/storage.md) and [`docs/ui.md`](docs/ui.md)
 ## Setup
 1. Install Rust stable, Node 18 or newer, and npm.
 2. Enable git hooks with `make hooks`.
-3. On macOS, install the optional native desktop bridge helper with `./scripts/install_desktopctl.sh` when you need the desktop tooling in `tools/desktopctl`.
-4. Build everything with `make build`.
-5. Run the desktop app with `make run`.
+3. Remove local build and cache junk with `make clean-local` when you want a clean working tree.
+4. On macOS, install the optional native desktop bridge helper with `./scripts/install_desktopctl.sh` when you need the desktop tooling in `tools/desktopctl`.
+5. Build everything with `make build`.
+6. Run the desktop app with `make run`.
 
 Quickstart (dev):
 - `./start` (builds prerequisites and launches the desktop app)
@@ -69,6 +70,7 @@ Local-only paths:
 Public-repo contract:
 - Git must contain everything required to rebuild the app from a clean clone except local secrets and machine-specific runtime state.
 - Pre-commit, pre-push, and CI all run a repository hygiene gate that blocks tracked local state, machine-specific absolute paths, restore-breaking omissions, and oversized tracked files.
+- `make clean-local` removes disposable local caches and reports (`.npm-cache`, `.reports`, `target`, and stray `.DS_Store` files) so they never linger between pushes.
 - To restore after local disk loss, clone the repo, install toolchains, run `make frontend-install`, then `make build` or `make run`.
 
 ## Usage
