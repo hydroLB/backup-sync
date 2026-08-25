@@ -23,42 +23,14 @@ type MinimalPickers = {
   ) => Promise<void>;
 };
 
-/**
- * Summary: Normalize a dialog selection into a single path string.
- *
- * Inputs: Result from the Tauri open dialog.
- *
- * Outputs: The selected path or `null`.
- *
- * Side effects: None.
- *
- * Error handling: Returns `null` for cancelled selections and empty arrays.
- *
- * Ties to other methods: Used by both destination and watched-path picker flows.
- *
- * Why this exists: Tauri dialog results can be either a string, a string array, or `null`.
- */
+/** Tauri dialog results can be either a string, a string array, or `null`. */
 function firstPath(selection: string | string[] | null): string | null {
   if (typeof selection === 'string') return selection;
   if (Array.isArray(selection)) return selection[0] ?? null;
   return null;
 }
 
-/**
- * Summary: Build the desktop-only picker handlers used by the minimal shell.
- *
- * Inputs: Event callback and picker busy-state callback.
- *
- * Outputs: Stable picker handlers for destination and watched-path selection.
- *
- * Side effects: Opens native dialogs and updates picker busy state.
- *
- * Error handling: Reports actionable picker failures through `onEvent`.
- *
- * Ties to other methods: Used by `MinimalMain` and `useMinimalActions`.
- *
- * Why this exists: Keeps native picker wiring local to the active minimal UI after removing the legacy settings shell.
- */
+/** Keeps native picker wiring local to the active minimal UI after removing the legacy settings shell. */
 export function useMinimalPickers({ onEvent, onPickerBusyChange }: Params): MinimalPickers {
   const pickDestinationPath = useCallback(async () => {
     onPickerBusyChange(true);

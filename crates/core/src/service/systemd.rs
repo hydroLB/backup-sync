@@ -1,21 +1,9 @@
 use crate::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Summary: Resolves the systemd unit path for user or system scope.
-///
-/// Inputs: a user scope flag.
-///
-/// Outputs: the resolved unit file path.
-///
-/// Side effects: Reads the user config directory when user scope is requested.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI and GUI service installation flows.
-///
-/// Why this exists: centralize systemd path decisions for consistent installs.
+/// Centralize systemd path decisions for consistent installs.
 pub fn default_unit_path(user: bool) -> Result<PathBuf> {
     if user {
         let mut path = dirs::config_dir().ok_or_else(|| anyhow::anyhow!("config dir not found"))?;
@@ -26,19 +14,7 @@ pub fn default_unit_path(user: bool) -> Result<PathBuf> {
     }
 }
 
-/// Summary: Builds and optionally writes a systemd unit file.
-///
-/// Inputs: the destination path, executable path, user scope, and optional log path.
-///
-/// Outputs: the unit file content string.
-///
-/// Side effects: Creates directories and writes the unit file when a destination is provided.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation and manifest printing commands.
-///
-/// Why this exists: keep service unit formatting consistent across installation paths.
+/// Keep service unit formatting consistent across installation paths.
 pub fn write_unit(
     destination: &Path,
     exec: &Path,
@@ -46,10 +22,17 @@ pub fn write_unit(
     log_path: Option<&Path>,
 ) -> Result<String> {
     let io_policy = BlockingIoPolicy::bootstrap_defaults();
-    let exec_str = exec.display().to_string();
-    let log_str = log_path
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "/var/log/backup_sync.log".to_string());
+    let exec_str = quote_unit_value(&exec.display().to_string(), "executable path", true)?;
+    let log_str = quote_unit_value(
+        &format!(
+            "append:{}",
+            log_path
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "/var/log/backup_sync.log".to_string())
+        ),
+        "log path",
+        false,
+    )?;
     let after = if user {
         "default.target"
     } else {
@@ -64,8 +47,8 @@ After={after}
 Type=simple
 ExecStart={exec}
 Restart=on-failure
-StandardOutput=append:{log}
-StandardError=append:{log}
+StandardOutput={log}
+StandardError={log}
 
 [Install]
 WantedBy=default.target
@@ -99,4 +82,34 @@ WantedBy=default.target
         },
     )?;
     Ok(contents)
+}
+
+fn quote_unit_value(value: &str, field: &str, escape_dollar: bool) -> Result<String> {
+    if value.contains(['\n', '\r']) {
+        bail!("{field} must not contain newline characters");
+    }
+
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '$' if escape_dollar => quoted.push_str("$$"),
+            '%' => quoted.push_str("%%"),
+            '\t' => quoted.push_str("\\t"),
+            '\u{07}' => quoted.push_str("\\a"),
+            '\u{08}' => quoted.push_str("\\b"),
+            '\u{0B}' => quoted.push_str("\\v"),
+            '\u{0C}' => quoted.push_str("\\f"),
+            character if character.is_control() => {
+                use std::fmt::Write;
+                write!(quoted, "\\u{:04x}", character as u32)
+                    .expect("writing to a String cannot fail");
+            }
+            _ => quoted.push(character),
+        }
+    }
+    quoted.push('"');
+    Ok(quoted)
 }

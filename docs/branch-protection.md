@@ -1,57 +1,48 @@
-# Branch Protection and Required Checks Policy
+# Branch Protection and Required Checks
 
-Last updated: 2026-02-20
+Last updated: 2026-08-23
 
-## Scope
-This policy applies to the `main` branch.
+This is the intended policy for `main`; GitHub rulesets enforce it outside the repository.
 
-## Required Status Checks
-Configure branch protection to require these checks before merge.
-The names must match GitHub check run names exactly.
+## Required checks
 
-### CI workflow required checks
+Require these exact CI jobs:
+
 1. `ci-format`
 2. `ci-lint`
 3. `ci-typecheck`
 4. `ci-tests`
 5. `ci-coverage`
-6. `ci-build`
-7. `ci-security`
-8. `ci-canonical-contract`
+6. `ci-perf`
+7. `ci-build`
+8. `ci-security`
+9. `ci-canonical-contract`
+10. `ci-platform-compile-macos`
+11. `ci-platform-compile-windows`
+12. `Analyze (rust)`
+13. `Analyze (javascript-typescript)`
 
-### SAST workflow required checks
-1. `Analyze (rust)`
-2. `Analyze (javascript-typescript)`
+If a job is renamed, update this document and the repository's CI-contract smoke test in the same change.
 
-## Merge Policy (GitHub settings)
-Enable these settings for `main`:
+## Merge settings
 
-1. Require a pull request before merging.
-2. Require approvals: minimum `1`.
-3. Dismiss stale pull request approvals when new commits are pushed.
-4. Require review from Code Owners.
-5. Require status checks to pass before merging.
-6. Require branches to be up to date before merging.
-7. Require conversation resolution before merging.
-8. Do not allow force pushes.
-9. Do not allow branch deletions.
+1. Require pull requests and at least one approval.
+2. Require code-owner review and dismiss stale approvals.
+3. Require all status checks and an up-to-date branch.
+4. Require resolved conversations.
+5. Disallow force pushes and branch deletion.
 
-## Canonical Command Contract
-`make ci` is the canonical full-gate command.
+## Canonical local contract
 
-- CI job `ci-canonical-contract` validates this contract by checking `make -n ci` output for:
-  - format checks
-  - lint checks
-  - typecheck checks
-  - hygiene check
-  - secrets scan
-  - perf gate
-  - coverage gate
-  - dependency audits
+`make check` is the full gate; `make ci` delegates to it. The command includes:
 
-## Enforcement Notes
-1. If a workflow job is renamed, update this file in the same PR.
-2. If a new gate is introduced, add it to both:
-   - required checks in GitHub branch protection settings
-   - this policy document
-3. Required checks should stay deterministic and avoid dynamic naming.
+- Rust/frontend format, lint, Rustdoc, and type checks
+- architecture, operability, hygiene, documentation, desktop-tool, and lockfile checks
+- performance guards, backend tests, workspace/frontend builds, and coverage
+- working-tree/history secret scans, `cargo deny`, `cargo audit`, and full npm audit
+
+The `ci-canonical-contract` smoke test prevents workflows from describing a smaller command as canonical.
+
+## Platform confidence boundary
+
+Linux runs the complete hosted gate. macOS and Windows jobs compile the full workspace and all targets/features. They do not produce installers or prove service registration, IPC permissions, native dialogs, upgrade/uninstall, or backup/restore behavior on a clean machine.

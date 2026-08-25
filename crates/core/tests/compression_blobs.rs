@@ -12,19 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
-/// Summary: base_cfg orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn base_cfg(source: &Path, dest: &Path) -> Config {
     Config {
         backup_root: dest.to_path_buf(),
@@ -59,19 +46,6 @@ fn base_cfg(source: &Path, dest: &Path) -> Config {
     }
 }
 
-/// Summary: locate_one_blob orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn locate_one_blob(dest: &Path) -> PathBuf {
     let store_root = dest.join(".backup_sync").join("v1");
     let sources_root = store_root.join("sources");
@@ -118,19 +92,6 @@ fn locate_one_blob(dest: &Path) -> PathBuf {
     panic!("compression_blobs::locate_one_blob no file entry found");
 }
 
-/// Summary: latest_version_id orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn latest_version_id(cfg: &Config, source: &Path) -> String {
     let listed = list_versions(cfg).expect("compression_blobs::latest_version_id list_versions");
     let (_, versions) = listed
@@ -144,19 +105,6 @@ fn latest_version_id(cfg: &Config, source: &Path) -> String {
         .clone()
 }
 
-/// Summary: compression_only_writes_compressed_blobs_and_restores orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn compression_only_writes_compressed_blobs_and_restores() {
     let tmp = tempdir().expect("compression_blobs::compression_only tempdir");
@@ -199,19 +147,6 @@ fn compression_only_writes_compressed_blobs_and_restores() {
     assert_eq!(scrub.manifests_bad, 0);
 }
 
-/// Summary: encryption_plus_compression_restores_and_scrubs orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn encryption_plus_compression_restores_and_scrubs() {
     let tmp = tempdir().expect("compression_blobs::enc_plus_comp tempdir");

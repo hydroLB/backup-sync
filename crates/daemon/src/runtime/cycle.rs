@@ -11,6 +11,11 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::JoinError;
+
+// Serialize merge-and-persist commits without holding the shared state mutex during filesystem IO.
+// This prevents an older snapshot from finishing after and overwriting a newer commit.
+static STATE_COMMIT_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, Clone)]
 struct DestinationWriteHealth {
@@ -19,37 +24,136 @@ struct DestinationWriteHealth {
     message: String,
 }
 
-/// Summary: Runs a full backup cycle including planning, safe mode checks, and execution.
-///
-/// Inputs: config, dirty set, state store, and shared state.
-///
-/// Outputs: `Ok(())` when the cycle completes without fatal errors.
-///
-/// Side effects: Reads filesystem metadata, performs backup IO, mutates state, and emits logs.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: the daemon scheduler loop.
-///
-/// Why this exists: encapsulate the end to end backup cycle behavior.
-pub async fn run_cycle(
-    cfg: &Config,
-    dirty: &DirtySet,
+#[derive(Debug, Clone)]
+struct DestinationPauseTransition {
+    pause_reason: Option<String>,
+    destination_recovered: bool,
+}
+
+fn apply_backup_cycle_result(
+    state: &mut StoredState,
+    result: &versioned::BackupCycleResult,
+    now: i64,
+) {
+    state.last_files_backed_up = result.versions_created;
+    state.last_run_ts = Some(now);
+    state.last_error = None;
+    state.cycles_since_full_scan = 0;
+    if let Some(warning) = result.safety_warnings.last().cloned() {
+        state.last_safety_warning = Some(warning);
+    }
+}
+
+fn safety_warning_eq(
+    left: &Option<backup_core::SafetyWarning>,
+    right: &Option<backup_core::SafetyWarning>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            left.ts == right.ts
+                && left.message == right.message
+                && left.watched_path == right.watched_path
+                && left.kept_version_id == right.kept_version_id
+        }
+        _ => false,
+    }
+}
+
+/// Merge cycle-owned fields without reverting updates made by IPC or verification while the
+/// filesystem work was running.
+fn merge_cycle_state(current: &mut StoredState, baseline: &StoredState, mut cycle: StoredState) {
+    cycle.safe_mode = current.safe_mode;
+    cycle.last_verify_ts = current.last_verify_ts;
+    cycle.last_verify_status = current.last_verify_status.clone();
+    cycle.last_verify_issues = current.last_verify_issues;
+    cycle.last_scrub_full_ts = current.last_scrub_full_ts;
+    if !safety_warning_eq(&current.last_safety_warning, &baseline.last_safety_warning) {
+        cycle.last_safety_warning = current.last_safety_warning.clone();
+    }
+    *current = cycle;
+}
+
+fn classify_join_error(operation: &str, error: JoinError) -> anyhow::Error {
+    let kind = if error.is_panic() {
+        "panicked"
+    } else if error.is_cancelled() {
+        "was cancelled"
+    } else {
+        "failed"
+    };
+    anyhow::anyhow!("daemon blocking task {operation} {kind}: {error}")
+}
+
+async fn persist_snapshot(
+    store: &StateStore,
+    state: StoredState,
+    context: &'static str,
+) -> Result<()> {
+    let store = store.clone();
+    tokio::task::spawn_blocking(move || store.persist(&state))
+        .await
+        .map_err(|error| classify_join_error("state persistence", error))?
+        .context(context)
+}
+
+async fn commit_cycle_state(
     store: &StateStore,
     shared_state: &Arc<Mutex<StoredState>>,
-) -> Result<()> {
-    let cycle_cid = logging::cid("cycle");
-    logging::log_info("run_cycle_start", &cycle_cid, None, "starting backup cycle");
-    let mut state = shared_state.lock().await.clone();
-    state.last_dirty_count = dirty.0.lock().len();
+    baseline: &StoredState,
+    cycle: StoredState,
+    context: &'static str,
+) -> Result<StoredState> {
+    let _commit_guard = STATE_COMMIT_LOCK.lock().await;
+    let snapshot = {
+        let mut current = shared_state.lock().await;
+        merge_cycle_state(&mut current, baseline, cycle);
+        current.clone()
+    };
+    persist_snapshot(store, snapshot.clone(), context).await?;
+    Ok(snapshot)
+}
 
-    let now = chrono::Utc::now().timestamp();
-    let needed_destination_ids = required_destination_ids(cfg);
-    let dest_health = probe_required_destinations_for_write(cfg, &needed_destination_ids);
+fn apply_replication_success(
+    state: &mut StoredState,
+    summary: &versioned::ReplicationSummary,
+    now: i64,
+) {
+    state.replication_last_run_ts = Some(now);
+    state.replication_last_bytes_copied = summary.bytes_copied;
+    state.replication_last_blobs_copied = summary.blobs_copied;
+    state.replication_last_manifests_copied = summary.manifests_copied;
+    state.replication_last_manifests_deleted = summary.manifests_deleted;
+    state.replication_last_pairs_ok = summary.pairs_ok;
+    state.replication_last_pairs_failed = summary.pairs_failed;
+    state.replication_last_targets_failed = summary.targets_failed.clone();
+    state.replication_last_status = Some(if summary.pairs_failed == 0 {
+        "ok".to_string()
+    } else {
+        "degraded".to_string()
+    });
+    state.replication_last_error = if summary.pairs_failed == 0 {
+        None
+    } else {
+        Some(summary.message.clone())
+    };
+}
+
+fn apply_replication_failure(state: &mut StoredState, error: &anyhow::Error, now: i64) {
+    state.replication_last_run_ts = Some(now);
+    state.replication_last_status = Some("failed".to_string());
+    state.replication_last_error = Some(format!("{error:#}"));
+}
+
+fn apply_destination_health(
+    state: &mut StoredState,
+    dest_health: &[DestinationWriteHealth],
+    now: i64,
+) -> DestinationPauseTransition {
     let unavailable: Vec<String> = dest_health
         .iter()
-        .filter(|d| !d.ok)
-        .map(|d| d.id.clone())
+        .filter(|destination| !destination.ok)
+        .map(|destination| destination.id.clone())
         .collect();
     state.destination_unavailable_ids = unavailable.clone();
 
@@ -58,23 +162,55 @@ pub async fn run_cycle(
     } else {
         let details: Vec<String> = dest_health
             .iter()
-            .filter(|d| !d.ok)
-            .map(|d| format!("{} ({})", d.id, d.message))
+            .filter(|destination| !destination.ok)
+            .map(|destination| format!("{} ({})", destination.id, destination.message))
             .collect();
         Some(format!(
             "Destination unavailable: {}. Writes paused and will auto-resume when the destination returns.",
             details.join(", ")
         ))
     };
+
     let was_paused = state.destination_paused;
-    let is_paused = pause_reason.is_some();
-    state.destination_paused = is_paused;
+    state.destination_paused = pause_reason.is_some();
     state.destination_pause_reason = pause_reason.clone();
-    if is_paused && (!was_paused || state.destination_last_unavailable_ts.is_none()) {
+    if state.destination_paused && (!was_paused || state.destination_last_unavailable_ts.is_none())
+    {
         state.destination_last_unavailable_ts = Some(now);
     }
-    let destination_recovered = was_paused && !is_paused;
-    if destination_recovered {
+
+    DestinationPauseTransition {
+        pause_reason,
+        destination_recovered: was_paused && !state.destination_paused,
+    }
+}
+
+/// Run one daemon backup cycle, including destination gating, scan decisions, backup, and replication.
+pub async fn run_cycle(
+    cfg: &Config,
+    dirty: &DirtySet,
+    store: &StateStore,
+    shared_state: &Arc<Mutex<StoredState>>,
+) -> Result<()> {
+    let cycle_cid = logging::cid("cycle");
+    logging::log_info("run_cycle_start", &cycle_cid, None, "starting backup cycle");
+    let baseline = shared_state.lock().await.clone();
+    let mut state = baseline.clone();
+    state.last_dirty_count = dirty.0.lock().len();
+
+    let now = chrono::Utc::now().timestamp();
+    let probe_cfg = cfg.clone();
+    let dest_health = tokio::task::spawn_blocking(move || {
+        let needed_destination_ids = required_destination_ids(&probe_cfg);
+        probe_required_destinations_for_write(&probe_cfg, &needed_destination_ids)
+    })
+    .await
+    .map_err(|error| classify_join_error("destination probe", error))?;
+
+    // Stage 1: update pause/recovery state from destination health before deciding whether the
+    // engine is even allowed to run this cycle.
+    let transition = apply_destination_health(&mut state, &dest_health, now);
+    if transition.destination_recovered {
         state.destination_last_recovered_ts = Some(now);
         state.destination_unavailable_ids.clear();
         // Clear the destination pause error if it was the last error recorded.
@@ -94,7 +230,7 @@ pub async fn run_cycle(
         );
     }
 
-    if let Some(reason) = pause_reason.as_deref() {
+    if let Some(reason) = transition.pause_reason.as_deref() {
         logging::log_warn("destination_unavailable", &cycle_cid, None, reason);
         if apply_safe_mode(cfg, &mut state, store, &cycle_cid, shared_state)
             .await
@@ -106,10 +242,14 @@ pub async fn run_cycle(
         state.last_files_backed_up = 0;
         state.cycles_since_full_scan = state.cycles_since_full_scan.saturating_add(1);
         state.last_error = Some(reason.to_string());
-        store.persist(&state).context(
+        commit_cycle_state(
+            store,
+            shared_state,
+            &baseline,
+            state,
             "daemon::runtime::run_cycle failed to persist state after destination pause",
-        )?;
-        *shared_state.lock().await = state.clone();
+        )
+        .await?;
         return Ok(());
     }
 
@@ -121,16 +261,28 @@ pub async fn run_cycle(
     }
 
     state.last_dirty_count = drain_dirty_count(cfg, dirty).await;
-    match decide_scan(state.last_dirty_count, &state, cfg, destination_recovered) {
+
+    // Stage 2: use watcher dirtiness plus periodic forced scans to decide whether to pay the cost
+    // of a full versioned scan on this cycle.
+    match decide_scan(
+        state.last_dirty_count,
+        &state,
+        cfg,
+        transition.destination_recovered,
+    ) {
         ScanDecision::SkipClean { force_due_in } => {
             state.cycles_since_full_scan = state.cycles_since_full_scan.saturating_add(1);
             state.last_run_ts = Some(now);
             state.last_files_backed_up = 0;
             state.last_error = None;
-            store
-                .persist(&state)
-                .context("daemon::runtime::run_cycle failed to persist state after clean skip")?;
-            *shared_state.lock().await = state.clone();
+            commit_cycle_state(
+                store,
+                shared_state,
+                &baseline,
+                state,
+                "daemon::runtime::run_cycle failed to persist state after clean skip",
+            )
+            .await?;
             logging::log_info(
                 "cycle_clean_skip",
                 &cycle_cid,
@@ -147,58 +299,53 @@ pub async fn run_cycle(
         }
     }
 
-    let result = versioned::run_backup_cycle(cfg)
-        .with_context(|| "daemon::runtime::run_cycle versioned backup cycle failed")?;
-    state.last_files_backed_up = result.versions_created;
-    state.last_run_ts = Some(now);
-    state.last_error = None;
-    state.cycles_since_full_scan = 0;
-    if let Some(w) = result.safety_warnings.last().cloned() {
-        state.last_safety_warning = Some(w);
-    }
+    // Stage 3: run the core engine, then fold backup and replication outcomes back into daemon
+    // state for UI/status consumers.
+    let engine_cfg = cfg.clone();
+    let (result, replication) = tokio::task::spawn_blocking(move || {
+        let result = versioned::run_backup_cycle(&engine_cfg)
+            .with_context(|| "daemon::runtime::run_cycle versioned backup cycle failed")?;
+        let has_replication_pairs = engine_cfg
+            .destinations
+            .iter()
+            .any(|d| !d.replicate_to.is_empty());
+        let replication = if has_replication_pairs && engine_cfg.runtime.replication_enabled {
+            Some(versioned::replicate_configured_stores(&engine_cfg))
+        } else {
+            None
+        };
+        Ok::<_, anyhow::Error>((result, replication))
+    })
+    .await
+    .map_err(|error| classify_join_error("backup and replication", error))??;
+    apply_backup_cycle_result(&mut state, &result, now);
 
-    let has_replication_pairs = cfg.destinations.iter().any(|d| !d.replicate_to.is_empty());
-    if has_replication_pairs && cfg.runtime.replication_enabled {
-        match versioned::replicate_configured_stores(cfg) {
-            Ok(rep) => {
-                state.replication_last_run_ts = Some(now);
-                state.replication_last_bytes_copied = rep.bytes_copied;
-                state.replication_last_blobs_copied = rep.blobs_copied;
-                state.replication_last_manifests_copied = rep.manifests_copied;
-                state.replication_last_manifests_deleted = rep.manifests_deleted;
-                state.replication_last_pairs_ok = rep.pairs_ok;
-                state.replication_last_pairs_failed = rep.pairs_failed;
-                state.replication_last_targets_failed = rep.targets_failed.clone();
-                state.replication_last_status = Some(if rep.pairs_failed == 0 {
-                    "ok".to_string()
-                } else {
-                    "degraded".to_string()
-                });
-                state.replication_last_error = if rep.pairs_failed == 0 {
-                    None
-                } else {
-                    Some(rep.message.clone())
-                };
-                logging::log_info("replication_complete", &cycle_cid, None, &rep.message);
+    if let Some(replication) = replication {
+        match replication {
+            Ok(summary) => {
+                apply_replication_success(&mut state, &summary, now);
+                logging::log_info("replication_complete", &cycle_cid, None, &summary.message);
             }
-            Err(e) => {
-                state.replication_last_run_ts = Some(now);
-                state.replication_last_status = Some("failed".to_string());
-                state.replication_last_error = Some(format!("{e:#}"));
+            Err(error) => {
+                apply_replication_failure(&mut state, &error, now);
                 logging::log_warn(
                     "replication_failed",
                     &cycle_cid,
                     None,
-                    &format!("replication error: {e:#}"),
+                    &format!("replication error: {error:#}"),
                 );
             }
         }
     }
 
-    store
-        .persist(&state)
-        .context("daemon::runtime::run_cycle failed to persist state after backup")?;
-    *shared_state.lock().await = state.clone();
+    commit_cycle_state(
+        store,
+        shared_state,
+        &baseline,
+        state,
+        "daemon::runtime::run_cycle failed to persist state after backup",
+    )
+    .await?;
 
     if result.versions_created == 0 {
         logging::log_info(
@@ -230,19 +377,7 @@ enum ScanDecision<'a> {
     SkipClean { force_due_in: u64 },
 }
 
-/// Summary: Decide whether the daemon should run a full versioned scan this cycle.
-///
-/// Inputs: watcher dirty count, current stored state, and config runtime tuning.
-///
-/// Outputs: a `ScanDecision` indicating whether to run the scan or skip it.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `run_cycle` and watcher-based scan skipping behavior.
-///
-/// Why this exists: watchers can often detect changes; skipping clean cycles avoids expensive full scans while still forcing periodic safety scans.
+/// Decide whether this cycle needs a full scan or can safely skip on watcher cleanliness.
 fn decide_scan<'a>(
     dirty_count: usize,
     state: &StoredState,
@@ -292,19 +427,7 @@ fn decide_scan<'a>(
     }
 }
 
-/// Summary: Drains the dirty set and returns a debounced count for metrics.
-///
-/// Inputs: config and dirty set.
-///
-/// Outputs: count of dirty paths drained since last call.
-///
-/// Side effects: Drains the dirty set.
-///
-/// Error handling: Never fails; returns 0 on errors.
-///
-/// Ties to other methods: Used by `run_cycle` for UI observability.
-///
-/// Why this exists: Preserve watcher metrics while decoupling from backup engine internals.
+/// Drain the watcher dirty set and return the debounced count used for scan decisions and status.
 async fn drain_dirty_count(cfg: &Config, dirty: &DirtySet) -> usize {
     if dirty.0.lock().is_empty() {
         return 0;
@@ -313,19 +436,7 @@ async fn drain_dirty_count(cfg: &Config, dirty: &DirtySet) -> usize {
     dirty_paths.len()
 }
 
-/// Summary: Return the set of destination ids required by enabled watched paths.
-///
-/// Inputs: loaded config.
-///
-/// Outputs: a set of destination ids referenced by enabled watched entries.
-///
-/// Side effects: None.
-///
-/// Error handling: Never fails; returns an empty set when nothing is watched.
-///
-/// Ties to other methods: Used by destination health checks and write pause decisions.
-///
-/// Why this exists: The daemon should only pause writes for destinations that are actually in use.
+/// Return the destination ids referenced by enabled watched paths.
 fn required_destination_ids(cfg: &Config) -> HashSet<&str> {
     cfg.watched
         .iter()
@@ -334,19 +445,7 @@ fn required_destination_ids(cfg: &Config) -> HashSet<&str> {
         .collect()
 }
 
-/// Summary: Probe destinations required by watched paths to decide whether writes can proceed.
-///
-/// Inputs: config and the set of required destination ids.
-///
-/// Outputs: a vector of per destination health results.
-///
-/// Side effects: May create directories under each destination to validate write readiness.
-///
-/// Error handling: Never panics; returns `ok=false` with contextual message when probing fails.
-///
-/// Ties to other methods: Used by `run_cycle` to pause writes when a destination is disconnected.
-///
-/// Why this exists: Detecting disconnected or unwritable destinations early avoids spamming engine errors and enables auto-resume.
+/// Probe the destinations in active use and report whether each one is write-ready.
 fn probe_required_destinations_for_write(
     cfg: &Config,
     needed_ids: &HashSet<&str>,
@@ -363,19 +462,7 @@ fn probe_required_destinations_for_write(
         .collect()
 }
 
-/// Summary: Probe a single destination for “write-ready” status.
-///
-/// Inputs: destination configuration.
-///
-/// Outputs: `DestinationWriteHealth` with `ok=true` when the destination can be written to.
-///
-/// Side effects: May create `.backup_sync` folder under the destination path.
-///
-/// Error handling: Returns a non-OK probe with a clear message on IO failures.
-///
-/// Ties to other methods: Used by `probe_required_destinations_for_write` and `run_cycle`.
-///
-/// Why this exists: Create-dir failures are the most common symptom of disconnected drives or permission issues.
+/// Probe one destination by checking the path shape and attempting to create the store root.
 fn probe_destination_for_write(
     cfg: &Config,
     d: &backup_core::config::model::Destination,
@@ -436,19 +523,7 @@ fn probe_destination_for_write(
     }
 }
 
-/// Summary: Applies safe mode behavior and persists state when writes are skipped.
-///
-/// Inputs: config, plan, state, store, correlation id, and shared state handle.
-///
-/// Outputs: `Ok(true)` when safe mode short-circuits the cycle.
-///
-/// Side effects: Mutates stored state and persists it when safe mode is active.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: safe mode enforcement and state persistence.
-///
-/// Why this exists: prevent writes while still updating run metadata.
+/// Short-circuit a cycle when safe mode is active while still updating observable state.
 pub(crate) async fn apply_safe_mode(
     cfg: &Config,
     state: &mut StoredState,
@@ -456,6 +531,8 @@ pub(crate) async fn apply_safe_mode(
     cid: &str,
     shared_state: &Arc<Mutex<StoredState>>,
 ) -> Result<bool> {
+    let baseline = state.clone();
+    state.safe_mode = shared_state.lock().await.safe_mode;
     if cfg.safe_mode || state.safe_mode {
         logging::log_info(
             "safe_mode_skip",
@@ -467,28 +544,41 @@ pub(crate) async fn apply_safe_mode(
         state.last_files_backed_up = 0;
         state.cycles_since_full_scan = state.cycles_since_full_scan.saturating_add(1);
         state.last_error = Some("Safe mode: no writes performed".into());
-        store
-            .persist(state)
-            .context("daemon::runtime::apply_safe_mode failed to persist state in safe mode")?;
-        *shared_state.lock().await = state.clone();
+        *state = commit_cycle_state(
+            store,
+            shared_state,
+            &baseline,
+            state.clone(),
+            "daemon::runtime::apply_safe_mode failed to persist state in safe mode",
+        )
+        .await?;
         return Ok(true);
     }
     Ok(false)
 }
 
-/// Summary: Runs a verification cycle and persists verification results.
-///
-/// Inputs: the state store and shared state handle.
-///
-/// Outputs: `Ok(())` after persisting verification updates.
-///
-/// Side effects: Reads backup files for hashing, mutates state, and writes state to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: scheduled verification flows.
-///
-/// Why this exists: keep verification results up to date for UI and logs.
+enum VerifyOutcome {
+    Skipped(Vec<String>),
+    Scrubbed(Result<versioned::ScrubResult>),
+}
+
+struct VerifyStateUpdate {
+    last_verify_ts: Option<i64>,
+    last_verify_status: Option<String>,
+    last_verify_issues: Option<usize>,
+    last_scrub_full_ts: Option<i64>,
+}
+
+fn apply_verify_update(state: &mut StoredState, update: VerifyStateUpdate) {
+    state.last_verify_ts = update.last_verify_ts;
+    state.last_verify_status = update.last_verify_status;
+    state.last_verify_issues = update.last_verify_issues;
+    if let Some(timestamp) = update.last_scrub_full_ts {
+        state.last_scrub_full_ts = Some(timestamp);
+    }
+}
+
+/// Keep verification results up to date for UI and logs without holding state across a scrub.
 pub async fn run_verify_cycle(
     cfg: &Config,
     store: &StateStore,
@@ -496,33 +586,9 @@ pub async fn run_verify_cycle(
     hashing: &HashingTuning,
 ) -> Result<()> {
     let cid = logging::cid("verify");
-    let mut guard = shared_state.lock().await;
     let now = chrono::Utc::now().timestamp();
-
-    let needed_destination_ids = required_destination_ids(cfg);
-    let unavailable: Vec<_> = cfg
-        .destinations
-        .iter()
-        .filter(|d| needed_destination_ids.contains(d.id.as_str()))
-        .filter(|d| !d.path.exists() || !d.path.is_dir())
-        .map(|d| d.id.clone())
-        .collect();
-    if !unavailable.is_empty() {
-        let msg = format!(
-            "skipped: destination unavailable ({})",
-            unavailable.join(", ")
-        );
-        guard.last_verify_ts = Some(now);
-        guard.last_verify_status = Some(msg.clone());
-        guard.last_verify_issues = None;
-        logging::log_warn("verify_skipped", &cid, None, &msg);
-        store.persist(&guard).context(
-            "daemon::runtime::run_verify_cycle failed to persist state after verify skip",
-        )?;
-        return Ok(());
-    }
-
-    let full_due = match guard.last_scrub_full_ts {
+    let last_scrub_full_ts = shared_state.lock().await.last_scrub_full_ts;
+    let full_due = match last_scrub_full_ts {
         None => true,
         Some(ts) => now.saturating_sub(ts) >= cfg.runtime.scrub_full_interval_seconds as i64,
     };
@@ -531,30 +597,62 @@ pub async fn run_verify_cycle(
     } else {
         versioned::ScrubMode::Sampled
     };
-    match versioned::scrub_versioned_store(
-        cfg,
-        hashing,
-        mode,
-        cfg.runtime.scrub_sample_blobs,
-        cfg.runtime.scrub_sample_versions_per_source,
-        now as u64,
-    ) {
-        Ok(res) => {
+    let verify_cfg = cfg.clone();
+    let verify_hashing = hashing.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let needed_destination_ids = required_destination_ids(&verify_cfg);
+        let unavailable: Vec<_> = verify_cfg
+            .destinations
+            .iter()
+            .filter(|d| needed_destination_ids.contains(d.id.as_str()))
+            .filter(|d| !d.path.exists() || !d.path.is_dir())
+            .map(|d| d.id.clone())
+            .collect();
+        if !unavailable.is_empty() {
+            return VerifyOutcome::Skipped(unavailable);
+        }
+        VerifyOutcome::Scrubbed(versioned::scrub_versioned_store(
+            &verify_cfg,
+            &verify_hashing,
+            mode,
+            verify_cfg.runtime.scrub_sample_blobs,
+            verify_cfg.runtime.scrub_sample_versions_per_source,
+            now as u64,
+        ))
+    })
+    .await
+    .map_err(|error| classify_join_error("versioned store scrub", error))?;
+
+    let mut update = VerifyStateUpdate {
+        last_verify_ts: Some(now),
+        last_verify_status: None,
+        last_verify_issues: None,
+        last_scrub_full_ts: None,
+    };
+    match outcome {
+        VerifyOutcome::Skipped(unavailable) => {
+            let msg = format!(
+                "skipped: destination unavailable ({})",
+                unavailable.join(", ")
+            );
+            update.last_verify_status = Some(msg.clone());
+            logging::log_warn("verify_skipped", &cid, None, &msg);
+        }
+        VerifyOutcome::Scrubbed(Ok(res)) => {
             let bad = res.hash_mismatches + res.missing_blobs + res.manifests_bad;
             let ok = res.blobs_hashed.saturating_sub(res.hash_mismatches);
             let mode_label = match res.mode {
                 versioned::ScrubMode::Sampled => "sampled",
                 versioned::ScrubMode::Full => "full",
             };
-            guard.last_verify_ts = Some(now);
-            guard.last_verify_issues = Some(bad);
-            guard.last_verify_status = Some(if bad == 0 {
+            update.last_verify_issues = Some(bad);
+            update.last_verify_status = Some(if bad == 0 {
                 format!("ok ({mode_label})")
             } else {
                 format!("issues_detected ({mode_label})")
             });
             if res.mode == versioned::ScrubMode::Full {
-                guard.last_scrub_full_ts = Some(now);
+                update.last_scrub_full_ts = Some(now);
             }
             logging::log_info(
                 "verify_complete",
@@ -572,17 +670,28 @@ pub async fn run_verify_cycle(
                 ),
             );
         }
-        Err(e) => {
-            guard.last_verify_ts = Some(now);
-            guard.last_verify_status = Some(format!("failed: {e}"));
-            guard.last_verify_issues = None;
-            logging::log_warn("verify_failed", &cid, None, &format!("verify error: {e:?}"));
+        VerifyOutcome::Scrubbed(Err(error)) => {
+            update.last_verify_status = Some(format!("failed: {error}"));
+            logging::log_warn(
+                "verify_failed",
+                &cid,
+                None,
+                &format!("verify error: {error:?}"),
+            );
         }
+    }
+    let _commit_guard = STATE_COMMIT_LOCK.lock().await;
+    let snapshot = {
+        let mut state = shared_state.lock().await;
+        apply_verify_update(&mut state, update);
+        state.clone()
     };
-    store
-        .persist(&guard)
-        .context("daemon::runtime::run_verify_cycle failed to persist state after verify")?;
-    Ok(())
+    persist_snapshot(
+        store,
+        snapshot,
+        "daemon::runtime::run_verify_cycle failed to persist state after verify",
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -591,19 +700,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    /// Summary: Ensures the scan decision runs on first cycle even when no dirty paths exist.
-    ///
-    /// Inputs: A default stored state with no `last_run_ts`.
-    ///
-    /// Outputs: A `RunFullScan` decision.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: startup cycle behavior.
-    ///
-    /// Why this exists: the first cycle must establish baseline state even if watchers have not fired yet.
+    /// The first cycle must establish baseline state even if watchers have not fired yet.
     fn decide_scan_runs_on_first_cycle() {
         let mut cfg = Config {
             backup_root: std::path::PathBuf::from("/tmp"),
@@ -638,19 +735,7 @@ mod tests {
     }
 
     #[test]
-    /// Summary: Ensures clean cycles are skipped until the forced full-scan interval is due.
-    ///
-    /// Inputs: A stored state with a prior run, no dirty paths, and a configured interval.
-    ///
-    /// Outputs: Skip decision before due and run decision when due.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: watcher-based scan skipping.
-    ///
-    /// Why this exists: avoid expensive scans when nothing changed while still providing a periodic safety scan.
+    /// Avoid expensive scans when nothing changed while still providing a periodic safety scan.
     fn decide_scan_skips_clean_until_due() {
         let mut cfg = Config {
             backup_root: std::path::PathBuf::from("/tmp"),
@@ -691,19 +776,7 @@ mod tests {
     }
 
     #[test]
-    /// Summary: Ensures destination recovery forces a full scan even when nothing is dirty.
-    ///
-    /// Inputs: Clean cycle state with `force_full_scan=true`.
-    ///
-    /// Outputs: A `RunFullScan` decision.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: destination health auto-resume behavior.
-    ///
-    /// Why this exists: watchers do not track destination availability; a recovery must trigger a scan so backups resume promptly.
+    /// Watchers do not track destination availability; a recovery must trigger a scan so backups resume promptly.
     fn decide_scan_forced_on_destination_recovery() {
         let cfg = Config {
             backup_root: std::path::PathBuf::from("/tmp"),
@@ -732,19 +805,214 @@ mod tests {
         );
     }
 
-    /// Summary: Runs apply_safe_mode with a configured safe_mode setting and returns results.
-    ///
-    /// Inputs: the desired safe_mode flag.
-    ///
-    /// Outputs: the resulting state and skip flag.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: safe mode behavior tests.
-    ///
-    /// Why this exists: keep test setup for safe mode behavior consistent.
+    #[test]
+    fn apply_destination_health_marks_pause_and_reason() {
+        let mut state = StoredState::default();
+        let health = vec![DestinationWriteHealth {
+            id: "usb".to_string(),
+            ok: false,
+            message: "destination folder not found".to_string(),
+        }];
+
+        let transition = apply_destination_health(&mut state, &health, 42);
+
+        assert!(state.destination_paused);
+        assert_eq!(state.destination_last_unavailable_ts, Some(42));
+        assert_eq!(state.destination_unavailable_ids, vec!["usb".to_string()]);
+        assert!(!transition.destination_recovered);
+        assert!(transition
+            .pause_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("usb (destination folder not found)"));
+    }
+
+    #[test]
+    fn apply_destination_health_detects_recovery() {
+        let mut state = StoredState {
+            destination_paused: true,
+            destination_pause_reason: Some("Destination unavailable: usb".to_string()),
+            destination_unavailable_ids: vec!["usb".to_string()],
+            ..StoredState::default()
+        };
+
+        let transition = apply_destination_health(&mut state, &[], 100);
+
+        assert!(!state.destination_paused);
+        assert!(state.destination_unavailable_ids.is_empty());
+        assert!(transition.destination_recovered);
+        assert!(transition.pause_reason.is_none());
+    }
+
+    #[test]
+    fn apply_backup_cycle_result_updates_state_summary() {
+        let mut state = StoredState::default();
+        let result = versioned::BackupCycleResult {
+            folders_scanned: 2,
+            versions_created: 3,
+            blobs_written: 4,
+            bytes_written: 5,
+            safety_warnings: vec![backup_core::state::models::SafetyWarning {
+                ts: 70,
+                message: "check shrink".to_string(),
+                watched_path: Some("/src".to_string()),
+                kept_version_id: Some("v1".to_string()),
+            }],
+        };
+
+        apply_backup_cycle_result(&mut state, &result, 77);
+
+        assert_eq!(state.last_run_ts, Some(77));
+        assert_eq!(state.last_files_backed_up, 3);
+        assert_eq!(state.cycles_since_full_scan, 0);
+        assert_eq!(state.last_error, None);
+        assert_eq!(
+            state
+                .last_safety_warning
+                .as_ref()
+                .map(|warning| warning.message.as_str()),
+            Some("check shrink")
+        );
+    }
+
+    fn warning(message: &str, ts: i64) -> backup_core::SafetyWarning {
+        backup_core::SafetyWarning {
+            ts,
+            message: message.to_string(),
+            watched_path: Some("/src".to_string()),
+            kept_version_id: Some("v1".to_string()),
+        }
+    }
+
+    #[test]
+    fn cycle_merge_preserves_concurrent_ipc_and_verify_updates() {
+        let baseline = StoredState {
+            safe_mode: false,
+            last_verify_ts: Some(10),
+            last_verify_status: Some("old".into()),
+            last_verify_issues: Some(1),
+            last_scrub_full_ts: Some(9),
+            last_safety_warning: Some(warning("old warning", 10)),
+            ..StoredState::default()
+        };
+        let mut cycle = baseline.clone();
+        cycle.last_run_ts = Some(100);
+        cycle.last_safety_warning = Some(warning("cycle warning", 100));
+        let mut current = baseline.clone();
+        current.safe_mode = true;
+        current.last_verify_ts = Some(90);
+        current.last_verify_status = Some("ok (full)".into());
+        current.last_verify_issues = Some(0);
+        current.last_scrub_full_ts = Some(90);
+        current.last_safety_warning = None;
+
+        merge_cycle_state(&mut current, &baseline, cycle);
+
+        assert_eq!(current.last_run_ts, Some(100));
+        assert!(current.safe_mode);
+        assert_eq!(current.last_verify_ts, Some(90));
+        assert_eq!(current.last_verify_status.as_deref(), Some("ok (full)"));
+        assert_eq!(current.last_verify_issues, Some(0));
+        assert_eq!(current.last_scrub_full_ts, Some(90));
+        assert!(current.last_safety_warning.is_none());
+    }
+
+    #[test]
+    fn cycle_merge_accepts_cycle_warning_only_when_warning_was_unchanged() {
+        let baseline = StoredState {
+            last_safety_warning: Some(warning("old", 1)),
+            ..StoredState::default()
+        };
+        let mut cycle = baseline.clone();
+        cycle.last_safety_warning = Some(warning("from cycle", 2));
+
+        let mut unchanged = baseline.clone();
+        merge_cycle_state(&mut unchanged, &baseline, cycle.clone());
+        assert_eq!(
+            unchanged
+                .last_safety_warning
+                .as_ref()
+                .map(|warning| warning.message.as_str()),
+            Some("from cycle")
+        );
+
+        let mut concurrently_replaced = baseline.clone();
+        concurrently_replaced.last_safety_warning = Some(warning("from ipc", 3));
+        merge_cycle_state(&mut concurrently_replaced, &baseline, cycle);
+        assert_eq!(
+            concurrently_replaced
+                .last_safety_warning
+                .as_ref()
+                .map(|warning| warning.message.as_str()),
+            Some("from ipc")
+        );
+    }
+
+    #[test]
+    fn verify_update_changes_only_verify_owned_fields() {
+        let mut state = StoredState {
+            safe_mode: true,
+            last_run_ts: Some(7),
+            last_safety_warning: Some(warning("keep", 1)),
+            last_scrub_full_ts: Some(4),
+            ..StoredState::default()
+        };
+
+        apply_verify_update(
+            &mut state,
+            VerifyStateUpdate {
+                last_verify_ts: Some(8),
+                last_verify_status: Some("ok (sampled)".into()),
+                last_verify_issues: Some(0),
+                last_scrub_full_ts: None,
+            },
+        );
+
+        assert!(state.safe_mode);
+        assert_eq!(state.last_run_ts, Some(7));
+        assert_eq!(state.last_scrub_full_ts, Some(4));
+        assert_eq!(state.last_verify_ts, Some(8));
+        assert_eq!(
+            state
+                .last_safety_warning
+                .as_ref()
+                .map(|warning| warning.message.as_str()),
+            Some("keep")
+        );
+    }
+
+    #[test]
+    fn apply_replication_success_marks_degraded_when_pairs_fail() {
+        let mut state = StoredState::default();
+        let summary = versioned::ReplicationSummary {
+            pairs_attempted: 2,
+            pairs_ok: 1,
+            pairs_failed: 1,
+            manifests_copied: 3,
+            blobs_copied: 4,
+            bytes_copied: 5,
+            manifests_deleted: 6,
+            targets_failed: vec!["replica-b".to_string()],
+            message: "replication degraded".to_string(),
+        };
+
+        apply_replication_success(&mut state, &summary, 88);
+
+        assert_eq!(state.replication_last_run_ts, Some(88));
+        assert_eq!(state.replication_last_status.as_deref(), Some("degraded"));
+        assert_eq!(state.replication_last_pairs_ok, 1);
+        assert_eq!(state.replication_last_pairs_failed, 1);
+        assert_eq!(
+            state.replication_last_targets_failed,
+            vec!["replica-b".to_string()]
+        );
+        assert_eq!(
+            state.replication_last_error.as_deref(),
+            Some("replication degraded")
+        );
+    }
+
+    /// Keep test setup for safe mode behavior consistent.
     async fn apply_safe_mode_case(safe_mode: bool) -> (StoredState, bool) {
         let _tmp = tempdir().expect("cycle::apply_safe_mode_case failed to create temp dir");
         let root = _tmp.path().to_path_buf();
@@ -788,19 +1056,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Summary: Ensures safe mode short-circuits execution and updates state.
-    ///
-    /// Inputs: a safe_mode enabled config.
-    ///
-    /// Outputs: a skipped flag and updated state fields.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: safe mode enforcement.
-    ///
-    /// Why this exists: avoid writes while reporting safe mode status.
+    /// Avoid writes while reporting safe mode status.
     async fn safe_mode_short_circuits_and_sets_state() {
         let (state, skipped) = apply_safe_mode_case(true).await;
         assert!(skipped, "safe mode should short-circuit execution");
@@ -810,19 +1066,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Summary: Ensures normal execution continues when safe mode is disabled.
-    ///
-    /// Inputs: a safe_mode disabled config.
-    ///
-    /// Outputs: a skip flag set to false.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: safe mode enforcement.
-    ///
-    /// Why this exists: allow backups when safe mode is off.
+    /// Allow backups when safe mode is off.
     async fn safe_mode_disabled_continues() {
         let (_state, skipped) = apply_safe_mode_case(false).await;
         assert!(!skipped, "should continue when safe mode disabled");

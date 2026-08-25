@@ -11,19 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
-/// Summary: Request payload controlling hardening checks.
-///
-/// Inputs: Deserialized from IPC.
-///
-/// Outputs: A typed request used by `hardening_check_cmd`.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: First-run wizard gating in the frontend.
-///
-/// Why this exists: Keep optional checks explicit so potentially privileged operations are opt-in.
+/// Keep optional checks explicit so potentially privileged operations are opt-in.
 pub struct HardeningCheckRequest {
     pub check_snapshots: bool,
     #[serde(default)]
@@ -31,19 +19,7 @@ pub struct HardeningCheckRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Summary: Structured result describing a watched-path permission probe outcome.
-///
-/// Inputs: Derived from filesystem access tests.
-///
-/// Outputs: A serializable issue record.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: First-run wizard display and gating.
-///
-/// Why this exists: Provide actionable feedback on which path is blocking scheduling.
+/// Provide actionable feedback on which path is blocking scheduling.
 pub struct WatchedIssue {
     pub path: String,
     pub kind: String,
@@ -51,19 +27,7 @@ pub struct WatchedIssue {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Summary: Structured result describing a destination preflight check.
-///
-/// Inputs: Derived from store write probes and free-space checks.
-///
-/// Outputs: A serializable destination result.
-///
-/// Side effects: May create and remove a tiny probe file under the destination store.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: First-run wizard display and gating.
-///
-/// Why this exists: Backups should not begin scheduling when the destination is unwritable or nearly full.
+/// Backups should not begin scheduling when the destination is unwritable or nearly full.
 pub struct DestinationHardening {
     pub id: String,
     pub path: String,
@@ -74,19 +38,7 @@ pub struct DestinationHardening {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Summary: Structured result describing snapshot capability probing.
-///
-/// Inputs: Derived from best-effort snapshot preparation.
-///
-/// Outputs: A serializable snapshot probe result.
-///
-/// Side effects: May invoke OS snapshot tooling when enabled.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: First-run wizard optional snapshot validation.
-///
-/// Why this exists: Snapshot-backed scans reduce the chance of inconsistent versions on changing sources.
+/// Snapshot-backed scans reduce the chance of inconsistent versions on changing sources.
 pub struct SnapshotHardening {
     pub checked: bool,
     pub supported: bool,
@@ -94,19 +46,7 @@ pub struct SnapshotHardening {
 }
 
 #[derive(Debug, Clone, Serialize)]
-/// Summary: Report payload describing whether it is safe to enable scheduling.
-///
-/// Inputs: Derived from config and filesystem probes.
-///
-/// Outputs: A serializable hardening report.
-///
-/// Side effects: May create destination store directories and probe files; may run snapshot tooling when opted in.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: First-run wizard gating in Settings and Minimal UI.
-///
-/// Why this exists: Prevent enabling background writes before basic prerequisites are satisfied.
+/// Prevent enabling background writes before basic prerequisites are satisfied.
 pub struct HardeningReport {
     pub ok: bool,
     pub message: String,
@@ -117,19 +57,7 @@ pub struct HardeningReport {
 }
 
 #[tauri::command]
-/// Summary: Run first-run hardening checks before enabling scheduling.
-///
-/// Inputs: A `HardeningCheckRequest` specifying whether to probe snapshot capability.
-///
-/// Outputs: A `HardeningReport` or an error envelope on config load/validation failures.
-///
-/// Side effects: Reads filesystem metadata; may create and remove a tiny destination probe file; may invoke OS snapshot tooling.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: First-run wizard and "enable running" gating.
-///
-/// Why this exists: Scheduling should only be enabled once the app can reliably read sources and write to the destination.
+/// Scheduling should only be enabled once the app can reliably read sources and write to the destination.
 pub fn hardening_check_cmd(
     request: Option<HardeningCheckRequest>,
 ) -> Result<HardeningReport, ErrorEnvelope> {
@@ -232,19 +160,7 @@ pub fn hardening_check_cmd(
     })
 }
 
-/// Summary: Probe a watched path for basic readability.
-///
-/// Inputs: Filesystem path and watched kind.
-///
-/// Outputs: `Ok(())` when the path is accessible; otherwise an issue string.
-///
-/// Side effects: Reads filesystem metadata and may open the path.
-///
-/// Error handling: Returns a precise issue string for UI display.
-///
-/// Ties to other methods: Used by `hardening_check_cmd`.
-///
-/// Why this exists: Scheduling should not be enabled if the daemon cannot read the source.
+/// Scheduling should not be enabled if the daemon cannot read the source.
 fn probe_watched_path(
     path: &Path,
     kind: &backup_core::config::model::WatchedKind,
@@ -290,19 +206,7 @@ fn probe_watched_path(
     Ok(())
 }
 
-/// Summary: Probe destination store writability and free space.
-///
-/// Inputs: destination id, destination root path, and required free space threshold.
-///
-/// Outputs: A `DestinationHardening` record.
-///
-/// Side effects: May create store directories and create/remove a tiny probe file.
-///
-/// Error handling: Never panics; records a `ok=false` message on failures.
-///
-/// Ties to other methods: Used by `hardening_check_cmd`.
-///
-/// Why this exists: Backups require creating `.backup_sync/v1` and writing blobs/manifests without disk-full failures.
+/// Backups require creating `.backup_sync/v1` and writing blobs/manifests without disk-full failures.
 fn probe_destination_store(
     id: &str,
     destination_root: &Path,
@@ -422,19 +326,7 @@ fn probe_destination_store(
     }
 }
 
-/// Summary: Write and fsync a small probe file under the store root.
-///
-/// Inputs: Store root directory path.
-///
-/// Outputs: `Ok(())` when write + fsync succeed.
-///
-/// Side effects: Creates and deletes a small file.
-///
-/// Error handling: Returns a contextual error string for UI display.
-///
-/// Ties to other methods: Used by `probe_destination_store`.
-///
-/// Why this exists: Free-space checks do not guarantee write permission; a real write probe catches mount/ACL issues.
+/// Free-space checks do not guarantee write permission; a real write probe catches mount/ACL issues.
 fn write_probe_file(store_root: &Path) -> Result<(), String> {
     let policy = BlockingIoPolicy::single_attempt(BlockingIoPolicy::bootstrap_defaults().timeout);
     let token = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -490,19 +382,7 @@ fn write_probe_file(store_root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Summary: Probe OS snapshot capability (best-effort) for the current config.
-///
-/// Inputs: Config and whether snapshots are required.
-///
-/// Outputs: A `SnapshotHardening` report describing support and a user-facing message.
-///
-/// Side effects: May invoke OS snapshot tooling.
-///
-/// Error handling: Never fails the overall hardening command; reports issues in the message.
-///
-/// Ties to other methods: Uses `prepare_source_view`, consistent with versioned backup scanning.
-///
-/// Why this exists: Snapshot-backed scans reduce inconsistencies when sources change during backup.
+/// Snapshot-backed scans reduce inconsistencies when sources change during backup.
 fn probe_snapshots(cfg: &backup_core::Config, require_snapshots: bool) -> SnapshotHardening {
     let Some(sample) = cfg.watched.iter().find(|w| w.enabled) else {
         return SnapshotHardening {

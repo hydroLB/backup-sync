@@ -2,40 +2,92 @@ use anyhow::{Context, Result};
 use backup_core::config::model::RuntimeTuning;
 use backup_core::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
 use chrono::Utc;
+use std::collections::hash_map::RandomState;
+use std::fs::{self, File, OpenOptions};
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
-/// Summary: Resolves the daemon log file path.
-///
-/// Inputs: none.
-///
-/// Outputs: the resolved log path.
-///
-/// Side effects: Reads platform log directory locations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: log tail and export operations.
-///
-/// Why this exists: centralize log path resolution for GUI features.
+const EXCLUSIVE_CREATE_ATTEMPTS: usize = 32;
+static EXPORT_FILE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+struct IncompleteFileGuard {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl IncompleteFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for IncompleteFileGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn create_exclusive_export(dir: &Path, stem: &str) -> std::io::Result<(PathBuf, File)> {
+    let random_state = RandomState::new();
+    for _ in 0..EXCLUSIVE_CREATE_ATTEMPTS {
+        let mut hasher = random_state.build_hasher();
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .hash(&mut hasher);
+        std::process::id().hash(&mut hasher);
+        EXPORT_FILE_SEQ
+            .fetch_add(1, Ordering::Relaxed)
+            .hash(&mut hasher);
+        let path = dir.join(format!("{stem}-{:016x}.txt", hasher.finish()));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique log export filename",
+    ))
+}
+
+fn write_exclusive_export_with<F>(dir: &Path, stem: &str, mut write: F) -> Result<PathBuf>
+where
+    F: FnMut(&mut File) -> std::io::Result<()>,
+{
+    let (path, mut file) = create_exclusive_export(dir, stem)
+        .context("failed to create a new log export in the selected directory")?;
+    let mut guard = IncompleteFileGuard::new(path.clone());
+    write(&mut file).context("failed to write the new log export")?;
+    file.sync_all()
+        .context("failed to finish the new log export")?;
+    guard.commit();
+    Ok(path)
+}
+
+/// Centralize log path resolution for GUI features.
 pub fn log_path() -> Result<PathBuf> {
     backup_core::platform::paths::log_file_path()
         .context("gui::api::logs_api::log_path failed to resolve log path")
 }
 
-/// Summary: Reads the log file and returns the last N lines.
-///
-/// Inputs: an optional line limit.
-///
-/// Outputs: the tail string for display.
-///
-/// Side effects: Reads the log file from disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI log tail commands.
-///
-/// Why this exists: provide quick access to recent daemon logs.
+/// Provide quick access to recent daemon logs.
 pub fn read_log_tail(limit: Option<usize>) -> Result<String> {
     let path = log_path()?;
     let runtime = resolve_runtime_tuning();
@@ -65,19 +117,7 @@ pub fn read_log_tail(limit: Option<usize>) -> Result<String> {
     Ok(filter_hidden_log_lines(&tail))
 }
 
-/// Summary: Exports the full log content to a destination directory.
-///
-/// Inputs: the destination directory.
-///
-/// Outputs: the path of the written log file.
-///
-/// Side effects: Reads the log file and writes an exported copy.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI export logs commands.
-///
-/// Why this exists: allow users to share logs for support.
+/// Allow users to share logs for support.
 pub fn export_logs(dest_dir: &Path) -> Result<PathBuf> {
     let io_policy = BlockingIoPolicy::bootstrap_defaults();
     let path = log_path()?;
@@ -95,34 +135,17 @@ pub fn export_logs(dest_dir: &Path) -> Result<PathBuf> {
         },
     )?;
     let data = filter_hidden_log_lines(&data);
-    let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    let dest = dest_dir.join(format!("BackupSync-logs-{}.txt", ts));
-    run_with_policy(
+    let stem = format!("BackupSync-logs-{}", Utc::now().format("%Y%m%d-%H%M%S"));
+    let dest = run_with_policy(
         "gui::api::logs_api::export_logs write export file",
         &io_policy,
         CancellationFlag::none(),
-        || {
-            std::fs::write(&dest, data.as_bytes()).with_context(|| {
-                format!("gui::api::logs_api::export_logs failed to write {:?}", dest)
-            })
-        },
+        || write_exclusive_export_with(dest_dir, &stem, |file| file.write_all(data.as_bytes())),
     )?;
     Ok(dest)
 }
 
-/// Summary: Resolves the log tail line count from the configuration or default values.
-///
-/// Inputs: an optional line limit override.
-///
-/// Outputs: the resolved line count.
-///
-/// Side effects: Reads config defaults when no override is provided.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: log tail responses from the GUI.
-///
-/// Why this exists: centralize log tail limit selection with clear fallback logging.
+/// Centralize log tail limit selection with clear fallback logging.
 fn resolve_runtime_tuning() -> RuntimeTuning {
     match backup_core::load_validated_config() {
         Ok(cfg) => cfg.runtime,
@@ -136,19 +159,7 @@ fn resolve_runtime_tuning() -> RuntimeTuning {
     }
 }
 
-/// Summary: Resolves the log tail line count from the provided override and runtime tuning.
-///
-/// Inputs: optional override and loaded runtime tuning.
-///
-/// Outputs: the resolved line count.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: log tail responses from the GUI.
-///
-/// Why this exists: keep log tail policy selection centralized and free of magic values.
+/// Keep log tail policy selection centralized and free of magic values.
 fn resolve_tail_limit(limit: Option<usize>, runtime: &RuntimeTuning) -> usize {
     if let Some(limit) = limit {
         return limit;
@@ -156,19 +167,7 @@ fn resolve_tail_limit(limit: Option<usize>, runtime: &RuntimeTuning) -> usize {
     runtime.log_tail_lines
 }
 
-/// Summary: Returns the last N lines from a string.
-///
-/// Inputs: the log data and maximum line count.
-///
-/// Outputs: the truncated log text.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: log tail formatting.
-///
-/// Why this exists: avoid sending large logs when only recent lines are needed.
+/// Avoid sending large logs when only recent lines are needed.
 fn tail_lines(data: &str, max_lines: usize) -> String {
     if max_lines == 0 {
         return String::new();
@@ -178,37 +177,13 @@ fn tail_lines(data: &str, max_lines: usize) -> String {
     lines[start..].join("\n")
 }
 
-/// Summary: Detects whether an error is a file-not-found IO error.
-///
-/// Inputs: An error value.
-///
-/// Outputs: `true` when the root cause is `ErrorKind::NotFound`.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: log tail and export error handling.
-///
-/// Why this exists: Keep `read_log_tail` behavior stable when logs are not present yet.
+/// Keep `read_log_tail` behavior stable when logs are not present yet.
 fn is_not_found(err: &anyhow::Error) -> bool {
     err.downcast_ref::<std::io::Error>()
         .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
 }
 
-/// Summary: Read the last N lines from a file without loading the full file.
-///
-/// Inputs: Path to the log file and maximum lines.
-///
-/// Outputs: The tail text.
-///
-/// Side effects: Reads from disk using file seeks.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `read_log_tail`.
-///
-/// Why this exists: Avoid large allocations when logs grow over time.
+/// Avoid large allocations when logs grow over time.
 fn read_tail_from_file(
     path: &Path,
     max_lines: usize,
@@ -279,19 +254,7 @@ fn read_tail_from_file(
     )
 }
 
-/// Summary: Removes legacy auth bypass noise from log output.
-///
-/// Inputs: a raw log string.
-///
-/// Outputs: a filtered log string with noisy lines removed.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: log tail and log export operations.
-///
-/// Why this exists: ensure removed authentication flows do not linger in UI log views or exports.
+/// Ensure removed authentication flows do not linger in UI log views or exports.
 fn filter_hidden_log_lines(data: &str) -> String {
     const NEEDLES: [&str; 2] = ["AUTH_BYPASS", "allowing without unlock"];
     if !NEEDLES.iter().any(|needle| data.contains(needle)) {
@@ -312,21 +275,19 @@ fn filter_hidden_log_lines(data: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::filter_hidden_log_lines;
+    use super::{filter_hidden_log_lines, write_exclusive_export_with};
+    use std::fs;
 
-    /// Summary: filter_hidden_log_lines_removes_legacy_auth_lines orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "backup-sync-logs-api-{name}-{}-{}",
+            std::process::id(),
+            super::EXPORT_FILE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        fs::create_dir(&dir).expect("create test directory");
+        dir
+    }
+
     #[test]
     fn filter_hidden_log_lines_removes_legacy_auth_lines() {
         let input = "\
@@ -339,5 +300,57 @@ S allowing without unlock\n\
         assert!(filtered.contains("INFO still here"));
         assert!(!filtered.contains("AUTH_BYPASS"));
         assert!(!filtered.contains("allowing without unlock"));
+    }
+
+    #[test]
+    fn exclusive_export_preserves_predictable_existing_file() {
+        let dir = test_dir("collision");
+        let predictable = dir.join("BackupSync-logs-fixed.txt");
+        fs::write(&predictable, b"keep me").expect("seed predictable file");
+
+        let exported = write_exclusive_export_with(&dir, "BackupSync-logs-fixed", |file| {
+            std::io::Write::write_all(file, b"new export")
+        })
+        .expect("write exclusive export");
+
+        assert_ne!(exported, predictable);
+        assert_eq!(fs::read(&predictable).expect("read seed"), b"keep me");
+        assert_eq!(fs::read(&exported).expect("read export"), b"new export");
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn failed_export_removes_partial_output() {
+        let dir = test_dir("cleanup");
+        let error = write_exclusive_export_with(&dir, "BackupSync-logs-fixed", |file| {
+            std::io::Write::write_all(file, b"partial")?;
+            Err(std::io::Error::other("injected write failure"))
+        })
+        .expect_err("export must fail");
+
+        assert!(error.to_string().contains("failed to write"));
+        assert_eq!(fs::read_dir(&dir).expect("read test directory").count(), 0);
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_export_does_not_follow_predictable_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("symlink");
+        let target = dir.join("target.txt");
+        let predictable = dir.join("BackupSync-logs-fixed.txt");
+        fs::write(&target, b"target contents").expect("seed target");
+        symlink(&target, &predictable).expect("create symlink");
+
+        let exported = write_exclusive_export_with(&dir, "BackupSync-logs-fixed", |file| {
+            std::io::Write::write_all(file, b"new export")
+        })
+        .expect("write exclusive export");
+
+        assert_ne!(exported, predictable);
+        assert_eq!(fs::read(&target).expect("read target"), b"target contents");
+        fs::remove_dir_all(dir).expect("remove test directory");
     }
 }

@@ -15,26 +15,81 @@ use dirs::desktop_dir;
 use fs2::free_space;
 use serde::Serialize;
 use serde_json::json;
-use std::fs;
+use std::collections::hash_map::RandomState;
+use std::fs::{self, File, OpenOptions};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Seek, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
+const EXCLUSIVE_CREATE_ATTEMPTS: usize = 32;
+static DIAGNOSTIC_FILE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Create a hard-to-guess output name without ever replacing an existing directory entry.
+fn create_exclusive_file(
+    dir: &Path,
+    stem: &str,
+    extension: &str,
+) -> std::io::Result<(PathBuf, File)> {
+    let random_state = RandomState::new();
+    for _ in 0..EXCLUSIVE_CREATE_ATTEMPTS {
+        let mut hasher = random_state.build_hasher();
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .hash(&mut hasher);
+        std::process::id().hash(&mut hasher);
+        DIAGNOSTIC_FILE_SEQ
+            .fetch_add(1, Ordering::Relaxed)
+            .hash(&mut hasher);
+        let path = dir.join(format!("{stem}-{:016x}.{extension}", hasher.finish()));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique diagnostics filename",
+    ))
+}
+
+/// Remove an incomplete output unless its writer explicitly commits it.
+struct IncompleteFileGuard {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl IncompleteFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for IncompleteFileGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
 #[tauri::command]
-/// Summary: Generates a doctor report and writes it to the Desktop.
-///
-/// Inputs: an optional correlation id and auth state.
-///
-/// Outputs: the report path string or an error envelope.
-///
-/// Side effects: Reads config/state data, writes a report file, and emits logs.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI diagnostics commands.
-///
-/// Why this exists: provide a quick diagnostic snapshot for users.
+/// Provide a quick diagnostic snapshot for users.
 pub async fn doctor_report_cmd(correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
     let cid = correlation::cid("doctor", correlation_id);
     info!(cid = %cid, action = "doctor_report_start", "gui doctor report requested");
@@ -74,15 +129,24 @@ pub async fn doctor_report_cmd(correlation_id: Option<String>) -> Result<String,
     let dest_dir = desktop_dir()
         .ok_or_else(|| ErrorEnvelope::new("NO_DESKTOP", "No desktop directory available"))?;
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    let dest = dest_dir.join(format!("BackupSync-doctor-{}.txt", ts));
-    run_blocking_io("gui::support::doctor_report_cmd write report", || {
-        fs::write(&dest, report.as_bytes())
-            .with_context(|| format!("support::doctor_report_cmd failed to write {:?}", dest))
+    let stem = format!("BackupSync-doctor-{ts}");
+    let dest = run_blocking_io("gui::support::doctor_report_cmd write report", || {
+        let (dest, mut file) = create_exclusive_file(&dest_dir, &stem, "txt")
+            .context("failed to reserve a unique report filename")?;
+        let mut incomplete = IncompleteFileGuard::new(dest.clone());
+        file.write_all(report.as_bytes())
+            .context("failed to write the doctor report")?;
+        file.sync_all().context("failed to flush the doctor report")?;
+        incomplete.commit();
+        Ok(dest)
     })
     .map_err(|e| {
         ErrorEnvelope::new(
             "DOCTOR_WRITE",
-            format!("support::doctor_report_cmd failed to write report: {}", e),
+            format!(
+                "Could not save the doctor report: {} Hint: confirm the Desktop exists and is writable, then retry.",
+                redact_text(&e.to_string())
+            ),
         )
     })?;
     info!(
@@ -94,19 +158,7 @@ pub async fn doctor_report_cmd(correlation_id: Option<String>) -> Result<String,
     Ok(dest.display().to_string())
 }
 
-/// Summary: Builds the doctor report body from config and state data.
-///
-/// Inputs: config, state, and resolved config and state paths.
-///
-/// Outputs: the report string content.
-///
-/// Side effects: Reads filesystem metadata and writes a probe file via helpers.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: doctor report generation.
-///
-/// Why this exists: centralize report formatting.
+/// Centralize report formatting.
 fn build_doctor_report(
     cfg: &backup_core::Config,
     state: &backup_core::state::StoredState,
@@ -143,19 +195,7 @@ fn build_doctor_report(
     Ok(report)
 }
 
-/// Summary: Appends missing watched path information to the report.
-///
-/// Inputs: the config and the report buffer.
-///
-/// Outputs: `()` after appending text.
-///
-/// Side effects: Reads filesystem metadata to detect missing paths.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: doctor report generation.
-///
-/// Why this exists: surface missing paths in diagnostics.
+/// Surface missing paths in diagnostics.
 fn append_missing_paths(cfg: &backup_core::Config, out: &mut String) {
     if cfg.watched.is_empty() {
         out.push_str("Problem: no watched paths configured.\n");
@@ -169,19 +209,7 @@ fn append_missing_paths(cfg: &backup_core::Config, out: &mut String) {
     }
 }
 
-/// Summary: Appends free space information to the report.
-///
-/// Inputs: the config, destination path, and report buffer.
-///
-/// Outputs: `()` after appending text.
-///
-/// Side effects: Reads filesystem free space metadata.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: doctor report generation.
-///
-/// Why this exists: surface free space issues in diagnostics.
+/// Surface free space issues in diagnostics.
 fn append_free_space(cfg: &backup_core::Config, dest_path: &std::path::Path, out: &mut String) {
     match free_space(dest_path) {
         Ok(bytes) => {
@@ -199,67 +227,38 @@ fn append_free_space(cfg: &backup_core::Config, dest_path: &std::path::Path, out
     }
 }
 
-/// Summary: Appends a write probe result to the report.
-///
-/// Inputs: the destination path and report buffer.
-///
-/// Outputs: `()` after appending text.
-///
-/// Side effects: Writes and removes a probe file to verify writability.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: doctor report generation.
-///
-/// Why this exists: surface writability issues in diagnostics.
+/// Surface writability issues in diagnostics.
 fn append_write_probe(_cfg: &backup_core::Config, dest_path: &std::path::Path, out: &mut String) {
-    let probe = dest_path.join(".backup_sync_probe");
-    match run_blocking_io("gui::support::append_write_probe write probe", || {
-        fs::write(&probe, b"probe")
-            .with_context(|| format!("support::append_write_probe failed to write {:?}", probe))
-    }) {
-        Ok(_) => {
-            if let Err(error) =
-                run_blocking_io("gui::support::append_write_probe remove probe", || {
-                    fs::remove_file(&probe).with_context(|| {
-                        format!(
-                            "support::append_write_probe failed to remove probe {:?}",
-                            probe
-                        )
-                    })
-                })
-            {
-                let warn_cid = correlation::cid("doctor", None);
-                warn!(
-                    cid = %warn_cid,
-                    probe_path = %redact_path(&probe),
-                    error = %error,
-                    "support::append_write_probe failed to remove probe file"
-                );
-            }
-            out.push_str("Write check: OK\n");
-        }
+    match write_probe(dest_path) {
+        Ok(()) => out.push_str("Write check: OK\n"),
         Err(e) => out.push_str(&format!(
-            "Problem: cannot write to backup destination: {}\n",
-            e
+            "Problem: cannot write to backup destination: {}. Check destination permissions and available space.\n",
+            redact_text(&e.to_string())
         )),
     }
 }
 
+fn write_probe(dest_path: &Path) -> anyhow::Result<()> {
+    let stem = ".backup-sync-write-probe";
+    let (probe, mut file) = run_blocking_io("gui::support::write_probe create probe", || {
+        create_exclusive_file(dest_path, stem, "tmp")
+            .context("failed to create an exclusive write probe")
+    })?;
+    let mut cleanup = IncompleteFileGuard::new(probe.clone());
+    run_blocking_io("gui::support::write_probe write probe", || {
+        file.write_all(b"probe")
+            .context("failed to write the destination probe")?;
+        file.sync_all()
+            .context("failed to flush the destination probe")
+    })?;
+    drop(file);
+    fs::remove_file(&probe).context("failed to remove the destination probe")?;
+    cleanup.commit();
+    Ok(())
+}
+
 #[derive(Serialize)]
-/// Summary: Redacted configuration payload for diagnostics bundles.
-///
-/// Inputs: derived from the config.
-///
-/// Outputs: a redacted config snapshot.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: include config metadata without sensitive path details.
+/// Include config metadata without sensitive path details.
 struct RedactedConfig {
     backup_root: String,
     watched_count: usize,
@@ -287,19 +286,7 @@ struct RedactedConfig {
     scan_capacity_multiplier: usize,
 }
 
-/// Summary: Builds a redacted config payload for diagnostics.
-///
-/// Inputs: the config.
-///
-/// Outputs: a redacted config struct.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: share configuration metadata safely.
+/// Share configuration metadata safely.
 fn build_redacted(cfg: &backup_core::Config) -> RedactedConfig {
     RedactedConfig {
         backup_root: redact_path(&cfg.backup_root),
@@ -329,19 +316,7 @@ fn build_redacted(cfg: &backup_core::Config) -> RedactedConfig {
     }
 }
 
-/// Summary: Builds a diff between current config and defaults for diagnostics.
-///
-/// Inputs: the config.
-///
-/// Outputs: a JSON diff payload.
-///
-/// Side effects: Reads platform defaults for comparison.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: surface deviations from defaults in support bundles.
+/// Surface deviations from defaults in support bundles.
 fn build_diff(cfg: &backup_core::Config) -> serde_json::Value {
     let defaults = match default_config() {
         Ok(defaults) => defaults,
@@ -381,19 +356,7 @@ fn build_diff(cfg: &backup_core::Config) -> serde_json::Value {
     })
 }
 
-/// Summary: Returns the tail of the log file for diagnostics.
-///
-/// Inputs: the log file path.
-///
-/// Outputs: the tail string.
-///
-/// Side effects: Reads the log file from disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: include recent logs in support bundles.
+/// Include recent logs in support bundles.
 fn tail_logs(path: &std::path::Path, max_lines: usize) -> String {
     let logs = match run_blocking_io("gui::support::tail_logs read log", || {
         std::fs::read_to_string(path)
@@ -420,19 +383,7 @@ fn tail_logs(path: &std::path::Path, max_lines: usize) -> String {
     redact_text(&tail)
 }
 
-/// Summary: Serializes a value to pretty JSON with a labeled error message on failure.
-///
-/// Inputs: a label string and a serializable value reference.
-///
-/// Outputs: a JSON string or an error message string.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: avoid silent serialization failures while keeping the bundle readable.
+/// Avoid silent serialization failures while keeping the bundle readable.
 fn serialize_json<T: Serialize>(label: &str, value: &T) -> String {
     match serde_json::to_string_pretty(value) {
         Ok(data) => data,
@@ -440,19 +391,7 @@ fn serialize_json<T: Serialize>(label: &str, value: &T) -> String {
     }
 }
 
-/// Summary: Formats recent activity entries for diagnostics.
-///
-/// Inputs: stored state.
-///
-/// Outputs: a vector of formatted activity strings.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: include recent activity in support bundles.
+/// Include recent activity in support bundles.
 fn recent_activity_lines(state: &backup_core::state::StoredState) -> Vec<String> {
     state
         .recent_activity
@@ -470,19 +409,7 @@ fn recent_activity_lines(state: &backup_core::state::StoredState) -> Vec<String>
         .collect()
 }
 
-/// Summary: Builds the primary diagnostic text file content.
-///
-/// Inputs: paths, state, and recent activity lines.
-///
-/// Outputs: the diagnostic text content.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: provide a human readable summary in the bundle.
+/// Provide a human readable summary in the bundle.
 fn build_primary_text(
     config_path: &std::path::Path,
     state_path: &std::path::Path,
@@ -513,19 +440,7 @@ fn build_primary_text(
     primary
 }
 
-/// Summary: Writes a text entry to the diagnostics zip bundle.
-///
-/// Inputs: the zip writer, entry name, data, and options.
-///
-/// Outputs: `Ok(())` when the entry is written.
-///
-/// Side effects: Writes entries into the diagnostics zip archive.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: keep zip writing logic centralized.
+/// Keep zip writing logic centralized.
 fn write_zip_entry<W: Write + Seek>(
     zip: &mut ZipWriter<W>,
     name: &str,
@@ -547,19 +462,7 @@ fn write_zip_entry<W: Write + Seek>(
 }
 
 #[tauri::command]
-/// Summary: Exports a diagnostics bundle zip to the Desktop.
-///
-/// Inputs: an optional correlation id and auth state.
-///
-/// Outputs: the path to the bundle or an error envelope.
-///
-/// Side effects: Reads config/state/logs and writes a diagnostics zip bundle.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI diagnostics actions.
-///
-/// Why this exists: provide a comprehensive bundle for support.
+/// Provide a comprehensive bundle for support.
 pub async fn export_diagnostic_bundle_cmd(
     correlation_id: Option<String>,
 ) -> Result<String, ErrorEnvelope> {
@@ -638,27 +541,24 @@ pub async fn export_diagnostic_bundle_cmd(
         )
     })?;
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    let dest = dest_dir.join(format!("BackupSync-support-{}.zip", ts));
-    let file = run_blocking_io(
+    let stem = format!("BackupSync-support-{ts}");
+    let (dest, file) = run_blocking_io(
         "gui::support::export_diagnostic_bundle_cmd create bundle file",
         || {
-            std::fs::File::create(&dest).with_context(|| {
-                format!(
-                    "support::export_diagnostic_bundle_cmd failed to create {:?}",
-                    dest
-                )
-            })
+            create_exclusive_file(&dest_dir, &stem, "zip")
+                .context("failed to reserve a unique support bundle filename")
         },
     )
     .map_err(|e| {
         ErrorEnvelope::new(
             "DIAG_WRITE",
             format!(
-                "support::export_diagnostic_bundle_cmd failed to create bundle: {}",
-                e
+                "Could not save the support bundle: {} Hint: confirm the Desktop exists and is writable, then retry.",
+                redact_text(&e.to_string())
             ),
         )
     })?;
+    let mut incomplete = IncompleteFileGuard::new(dest.clone());
     let mut zip = ZipWriter::new(file);
     let opts = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
@@ -693,11 +593,12 @@ pub async fn export_diagnostic_bundle_cmd(
         ErrorEnvelope::new(
             "DIAG_WRITE",
             format!(
-                "support::export_diagnostic_bundle_cmd failed to finalize bundle: {}",
-                e
+                "Could not finalize the support bundle: {} Hint: confirm sufficient Desktop space and retry.",
+                redact_text(&e.to_string())
             ),
         )
     })?;
+    incomplete.commit();
     info!(
         cid = %cid,
         action = "diagnostic_bundle_complete",
@@ -707,19 +608,7 @@ pub async fn export_diagnostic_bundle_cmd(
     Ok(dest.display().to_string())
 }
 
-/// Summary: Adds state.json to the diagnostics bundle when it exists.
-///
-/// Inputs: the zip writer, state path, and zip options.
-///
-/// Outputs: `Ok(())` after writing the entry when present.
-///
-/// Side effects: Reads the state file and writes it into the zip archive.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: diagnostic bundle generation.
-///
-/// Why this exists: include state for support without failing when missing.
+/// Include state for support without failing when missing.
 fn maybe_add_state<W: Write + Seek>(
     zip: &mut ZipWriter<W>,
     state_path: &std::path::Path,
@@ -744,4 +633,84 @@ fn maybe_add_state<W: Write + Seek>(
         write_zip_entry(zip, "state.json", &redact_text(&data), opts)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{create_exclusive_file, write_probe};
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::path::PathBuf;
+
+    fn test_dir(label: &str) -> PathBuf {
+        let base = std::env::temp_dir();
+        for attempt in 0..32 {
+            let candidate = base.join(format!(
+                "backup-sync-diagnostics-{label}-{}-{attempt}",
+                std::process::id()
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("failed to create test directory: {error}"),
+            }
+        }
+        panic!("failed to allocate a unique test directory")
+    }
+
+    #[test]
+    fn exclusive_outputs_do_not_overwrite_predictable_name() {
+        let dir = test_dir("output");
+        let predictable = dir.join("BackupSync-support-20260101-010101.zip");
+        fs::write(&predictable, b"existing").expect("write collision fixture");
+
+        let (created, mut file) =
+            create_exclusive_file(&dir, "BackupSync-support-20260101-010101", "zip")
+                .expect("create exclusive output");
+        file.write_all(b"new").expect("write exclusive output");
+        drop(file);
+
+        assert_ne!(created, predictable);
+        assert_eq!(fs::read(&predictable).expect("read fixture"), b"existing");
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn write_probe_never_touches_legacy_probe_file() {
+        let dir = test_dir("legacy-probe");
+        let legacy = dir.join(".backup_sync_probe");
+        fs::write(&legacy, b"keep-me").expect("write legacy probe fixture");
+
+        write_probe(&dir).expect("probe destination");
+
+        assert_eq!(fs::read(&legacy).expect("read fixture"), b"keep-me");
+        assert_eq!(fs::read_dir(&dir).expect("list directory").count(), 1);
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_probe_does_not_follow_legacy_probe_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("probe-symlink");
+        let victim = dir.join("victim.txt");
+        fs::write(&victim, b"unchanged").expect("write victim");
+        let legacy = dir.join(".backup_sync_probe");
+        symlink(&victim, &legacy).expect("create legacy probe symlink");
+
+        write_probe(&dir).expect("probe destination");
+
+        let mut contents = String::new();
+        fs::File::open(&victim)
+            .expect("open victim")
+            .read_to_string(&mut contents)
+            .expect("read victim");
+        assert_eq!(contents, "unchanged");
+        assert!(fs::symlink_metadata(&legacy)
+            .expect("stat legacy symlink")
+            .file_type()
+            .is_symlink());
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
 }

@@ -11,19 +11,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tempfile::TempDir;
 
-/// Summary: Capture timing metrics for a single run.
-///
-/// Inputs: Timing measurements for hashing and retention.
-///
-/// Outputs: A serialized JSON payload with timing metrics.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Baseline comparisons in the perf guard.
-///
-/// Why this exists: Standardize how performance metrics are recorded and compared.
+/// Standardize how performance metrics are recorded and compared.
 #[derive(Debug, Serialize, Deserialize)]
 struct PerfMetrics {
     sha256_small_ms: u128,
@@ -33,19 +21,7 @@ struct PerfMetrics {
     versioned_incremental_change_ms: u128,
 }
 
-/// Summary: Provide the performance guard configuration.
-///
-/// Inputs: CLI args and environment.
-///
-/// Outputs: Parsed configuration with baseline path and tolerance.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI handling in `main`.
-///
-/// Why this exists: Keep the perf guard configuration explicit and testable.
+/// Keep the perf guard configuration explicit and testable.
 #[derive(Debug)]
 struct PerfConfig {
     baseline_path: PathBuf,
@@ -53,19 +29,7 @@ struct PerfConfig {
     record: bool,
 }
 
-/// Summary: Parse CLI args into a structured config.
-///
-/// Inputs: CLI args from `std::env::args`.
-///
-/// Outputs: A `PerfConfig` instance.
-///
-/// Side effects: Reads CLI arguments from the process environment.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `main` and baseline checks.
-///
-/// Why this exists: Avoid scattered argument parsing logic.
+/// Avoid scattered argument parsing logic.
 fn parse_args() -> Result<PerfConfig> {
     let mut baseline_path = PathBuf::from("docs/perf-baseline.json");
     let mut max_ratio = 1.5f64;
@@ -100,19 +64,7 @@ fn parse_args() -> Result<PerfConfig> {
     })
 }
 
-/// Summary: Create a deterministic file payload for hashing.
-///
-/// Inputs: `dir` as the temp directory, `bytes` as size.
-///
-/// Outputs: Path to the created file.
-///
-/// Side effects: Writes a file to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Hashing measurements.
-///
-/// Why this exists: Keep hashing input consistent across runs.
+/// Keep hashing input consistent across runs.
 fn create_payload(dir: &TempDir, bytes: usize) -> Result<PathBuf> {
     let path = dir.path().join("payload.bin");
     let mut file = File::create(&path).with_context(|| {
@@ -127,19 +79,7 @@ fn create_payload(dir: &TempDir, bytes: usize) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Summary: Create a deterministic watched tree for versioned simulation tests.
-///
-/// Inputs: `dir` as the temp directory root, `files` count, and `bytes_each` size.
-///
-/// Outputs: The watched directory path created under `dir`.
-///
-/// Side effects: Writes a set of files to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Versioned scan and hashing measurement in `measure_metrics`.
-///
-/// Why this exists: Keep the simulation workload stable so regressions are meaningful.
+/// Keep the simulation workload stable so regressions are meaningful.
 fn create_watched_tree(dir: &TempDir, files: usize, bytes_each: usize) -> Result<PathBuf> {
     let watched = dir.path().join("watched");
     fs::create_dir_all(&watched).with_context(|| {
@@ -161,19 +101,7 @@ fn create_watched_tree(dir: &TempDir, files: usize, bytes_each: usize) -> Result
     Ok(watched)
 }
 
-/// Summary: Builds deterministic versioned benchmark config and destination paths.
-///
-/// Inputs: temporary directory, watched file count, and bytes per watched file.
-///
-/// Outputs: configured backup config and watched directory path.
-///
-/// Side effects: creates destination directory and writes watched fixture files.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: versioned simulation and incremental metrics in `measure_metrics`.
-///
-/// Why this exists: avoid duplicate setup logic for versioned workload measurements.
+/// Avoid duplicate setup logic for versioned workload measurements.
 fn build_versioned_fixture(
     temp: &TempDir,
     files: usize,
@@ -208,19 +136,7 @@ fn build_versioned_fixture(
     Ok((cfg, watched))
 }
 
-/// Summary: Measure hashing and retention timings for the perf guard.
-///
-/// Inputs: None.
-///
-/// Outputs: A `PerfMetrics` struct with timing data.
-///
-/// Side effects: Reads and writes temporary files.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Baseline recording and comparison.
-///
-/// Why this exists: Track real hot paths for regression detection.
+/// Track real hot paths for regression detection.
 fn measure_metrics() -> Result<PerfMetrics> {
     let temp = TempDir::new().context("perf_guard::measure_metrics failed to create temp dir")?;
     let payload_small = create_payload(&temp, 1024 * 1024)?;
@@ -289,19 +205,7 @@ fn measure_metrics() -> Result<PerfMetrics> {
     })
 }
 
-/// Summary: Load a performance baseline from disk.
-///
-/// Inputs: Baseline path.
-///
-/// Outputs: Parsed `PerfMetrics` data.
-///
-/// Side effects: Reads a JSON file.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Baseline checks in `main`.
-///
-/// Why this exists: Compare current performance to a committed baseline.
+/// Compare current performance to a committed baseline.
 fn load_baseline(path: &PathBuf) -> Result<PerfMetrics> {
     let mut file = File::open(path)
         .with_context(|| format!("perf_guard::load_baseline failed to open {:?}", path))?;
@@ -312,19 +216,7 @@ fn load_baseline(path: &PathBuf) -> Result<PerfMetrics> {
         .with_context(|| format!("perf_guard::load_baseline failed to parse {:?}", path))
 }
 
-/// Summary: Write a performance baseline to disk.
-///
-/// Inputs: Baseline path and metrics to serialize.
-///
-/// Outputs: None.
-///
-/// Side effects: Writes a JSON file to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `--record` flow in `main`.
-///
-/// Why this exists: Persist a reproducible baseline for future comparisons.
+/// Persist a reproducible baseline for future comparisons.
 fn write_baseline(path: &PathBuf, metrics: &PerfMetrics) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -341,19 +233,7 @@ fn write_baseline(path: &PathBuf, metrics: &PerfMetrics) -> Result<()> {
     Ok(())
 }
 
-/// Summary: Compare metrics against the baseline and enforce a slowdown ratio.
-///
-/// Inputs: Baseline metrics, current metrics, and max ratio.
-///
-/// Outputs: `Ok(())` when within tolerance, `Err` otherwise.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CI performance gating.
-///
-/// Why this exists: Fail fast on performance regressions.
+/// Fail fast on performance regressions.
 fn compare_metrics(baseline: &PerfMetrics, current: &PerfMetrics, max_ratio: f64) -> Result<()> {
     let ratio = |current_ms: u128, baseline_ms: u128| -> f64 {
         let current = current_ms.max(1) as f64;
@@ -414,19 +294,7 @@ fn compare_metrics(baseline: &PerfMetrics, current: &PerfMetrics, max_ratio: f64
     Ok(())
 }
 
-/// Summary: Execute the perf guard entrypoint.
-///
-/// Inputs: CLI args for baseline path, ratio, and record mode.
-///
-/// Outputs: `Ok(())` on success or a descriptive error on failure.
-///
-/// Side effects: Reads and writes files, runs performance measurements.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `scripts/perf/check_baseline.sh` and CI.
-///
-/// Why this exists: Provide a reproducible performance gate for hot paths.
+/// Provide a reproducible performance gate for hot paths.
 fn main() -> Result<()> {
     let config = parse_args()?;
     let metrics = measure_metrics()?;

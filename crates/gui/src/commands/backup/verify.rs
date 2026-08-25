@@ -10,22 +10,91 @@ use backup_core::{
 use chrono::Utc;
 use dirs::desktop_dir;
 use serde::Serialize;
+use std::collections::hash_map::RandomState;
+use std::fs::{self, File, OpenOptions};
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
+const EXCLUSIVE_CREATE_ATTEMPTS: usize = 32;
+static HEALTH_FILE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+struct IncompleteFileGuard {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl IncompleteFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for IncompleteFileGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn create_exclusive_health_report(dir: &Path, stem: &str) -> std::io::Result<(PathBuf, File)> {
+    let random_state = RandomState::new();
+    for _ in 0..EXCLUSIVE_CREATE_ATTEMPTS {
+        let mut hasher = random_state.build_hasher();
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .hash(&mut hasher);
+        std::process::id().hash(&mut hasher);
+        HEALTH_FILE_SEQ
+            .fetch_add(1, Ordering::Relaxed)
+            .hash(&mut hasher);
+        let path = dir.join(format!("{stem}-{:016x}.txt", hasher.finish()));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique health report filename",
+    ))
+}
+
+fn write_exclusive_health_report_with<F>(
+    dir: &Path,
+    stem: &str,
+    mut write: F,
+) -> anyhow::Result<PathBuf>
+where
+    F: FnMut(&mut File) -> std::io::Result<()>,
+{
+    let (path, mut file) = create_exclusive_health_report(dir, stem)
+        .context("failed to create a new health report on the Desktop")?;
+    let mut guard = IncompleteFileGuard::new(path.clone());
+    write(&mut file).context("failed to write the new health report")?;
+    file.sync_all()
+        .context("failed to finish the new health report")?;
+    guard.commit();
+    Ok(path)
+}
+
 #[derive(Serialize)]
-/// Summary: Payload describing verification results.
-///
-/// Inputs: derived from verify runs.
-///
-/// Outputs: a serializable summary.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI verification results.
-///
-/// Why this exists: show verification status in the UI.
+/// Show verification status in the UI.
 pub struct VerifyResult {
     pub ok: usize,
     pub bad: usize,
@@ -35,21 +104,16 @@ pub struct VerifyResult {
 }
 
 #[tauri::command]
-/// Summary: Runs a verification pass over recent backups.
-///
-/// Inputs: an optional correlation id.
-///
-/// Outputs: a `VerifyResult` or an error envelope.
-///
-/// Side effects: Reads config/state, hashes backup files, and writes updated state.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI verify actions.
-///
-/// Why this exists: allow users to verify backup integrity on demand.
+/// Allow users to verify backup integrity on demand.
 pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, ErrorEnvelope> {
     let cid = correlation::cid("verify", correlation_id);
+    let task_cid = cid.clone();
+    tokio::task::spawn_blocking(move || verify_blocking(task_cid))
+        .await
+        .map_err(|error| blocking_task_error(&cid, "verify_cmd", error))?
+}
+
+fn verify_blocking(cid: String) -> Result<VerifyResult, ErrorEnvelope> {
     info!(cid = %cid, action = "verify_start", "gui verify requested");
     let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
@@ -126,19 +190,7 @@ pub async fn verify_cmd(correlation_id: Option<String>) -> Result<VerifyResult, 
 }
 
 #[tauri::command]
-/// Summary: Exports a health report to the Desktop directory.
-///
-/// Inputs: an optional correlation id.
-///
-/// Outputs: the path to the report file or an error envelope.
-///
-/// Side effects: Reads config/state and writes a health report file.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI diagnostics actions.
-///
-/// Why this exists: allow users to share health summaries.
+/// Allow users to share health summaries.
 pub async fn export_health_report_cmd(
     correlation_id: Option<String>,
 ) -> Result<String, ErrorEnvelope> {
@@ -148,6 +200,14 @@ pub async fn export_health_report_cmd(
         action = "export_health_start",
         "gui health report export requested"
     );
+    let status = fetch_status_snapshot().await;
+    let task_cid = cid.clone();
+    tokio::task::spawn_blocking(move || export_health_report_blocking(task_cid, status))
+        .await
+        .map_err(|error| blocking_task_error(&cid, "export_health_report_cmd", error))?
+}
+
+fn export_health_report_blocking(cid: String, status: String) -> Result<String, ErrorEnvelope> {
     let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -175,14 +235,14 @@ pub async fn export_health_report_cmd(
             ),
         )
     })?;
-    let status = fetch_status_snapshot().await;
     let report = build_health_report(&cfg, &state, &state_path, &status);
     let dest = write_health_report(&report).map_err(|e| {
         ErrorEnvelope::new(
             "HEALTH_WRITE",
             format!(
                 "[cid={}] export_health_report_cmd failed to write report: {}",
-                cid, e
+                cid,
+                redact_text(&e.to_string())
             ),
         )
     })?;
@@ -195,19 +255,14 @@ pub async fn export_health_report_cmd(
     Ok(dest.display().to_string())
 }
 
-/// Summary: Fetches a status snapshot string for the health report.
-///
-/// Inputs: none.
-///
-/// Outputs: a formatted status snapshot string.
-///
-/// Side effects: Performs an IPC status request.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: health report generation.
-///
-/// Why this exists: include current daemon status in diagnostics.
+fn blocking_task_error(cid: &str, command: &str, error: tokio::task::JoinError) -> ErrorEnvelope {
+    ErrorEnvelope::new(
+        "BLOCKING_TASK_FAILED",
+        format!("[cid={cid}] {command} blocking task failed: {error}"),
+    )
+}
+
+/// Include current daemon status in diagnostics.
 async fn fetch_status_snapshot() -> String {
     match super::super::status::get_status().await {
         Ok(status) => match serde_json::to_string_pretty(&status) {
@@ -224,19 +279,7 @@ async fn fetch_status_snapshot() -> String {
     }
 }
 
-/// Summary: Builds the health report content from config, state, and status.
-///
-/// Inputs: config, state, state path, and status text.
-///
-/// Outputs: the full report string.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: health report export.
-///
-/// Why this exists: keep report formatting centralized.
+/// Keep report formatting centralized.
 fn build_health_report(
     cfg: &backup_core::Config,
     state: &backup_core::state::StoredState,
@@ -251,7 +294,7 @@ fn build_health_report(
         ),
     };
     let mut report = String::new();
-    report.push_str("# Local Backup Manager Health Report\n");
+    report.push_str("# Backup Sync Health Report\n");
     report.push_str(&format!("Generated: {}\n", Utc::now()));
     report.push_str(&format!(
         "Config path: {}\n",
@@ -272,40 +315,96 @@ fn build_health_report(
     report
 }
 
-/// Summary: Writes the health report to the Desktop directory.
-///
-/// Inputs: the report content.
-///
-/// Outputs: the written file path.
-///
-/// Side effects: Writes the report file to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: health report export.
-///
-/// Why this exists: persist the report for sharing and diagnostics.
-fn write_health_report(report: &str) -> Result<std::path::PathBuf, ErrorEnvelope> {
-    let dest_dir = desktop_dir()
-        .ok_or_else(|| ErrorEnvelope::new("NO_DESKTOP", "No desktop directory available"))?;
-    let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    let dest = dest_dir.join(format!("BackupSync-health-{}.txt", ts));
+/// Persist the report for sharing and diagnostics.
+fn write_health_report(report: &str) -> anyhow::Result<PathBuf> {
+    let dest_dir = desktop_dir().ok_or_else(|| {
+        anyhow::anyhow!("No Desktop directory is available for the health report")
+    })?;
+    let stem = format!("BackupSync-health-{}", Utc::now().format("%Y%m%d-%H%M%S"));
     run_blocking_io(
         "gui::backup::verify::write_health_report write file",
         || {
-            std::fs::write(&dest, report.as_bytes()).with_context(|| {
-                format!(
-                    "backup::verify::write_health_report failed writing report at {:?}",
-                    dest
-                )
+            write_exclusive_health_report_with(&dest_dir, &stem, |file| {
+                file.write_all(report.as_bytes())
             })
         },
     )
-    .map_err(|e| {
-        ErrorEnvelope::new(
-            "HEALTH_WRITE",
-            format!("backup::verify::write_health_report failed: {}", e),
-        )
-    })?;
-    Ok(dest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_health_report, write_exclusive_health_report_with};
+    use std::fs;
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "backup-sync-health-report-{name}-{}-{}",
+            std::process::id(),
+            super::HEALTH_FILE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        fs::create_dir(&dir).expect("create test directory");
+        dir
+    }
+
+    #[test]
+    fn health_report_uses_product_identity() {
+        let cfg = backup_core::config::load::default_config().expect("build default config");
+        let state = backup_core::state::StoredState::default();
+        let report = build_health_report(&cfg, &state, std::path::Path::new("state.json"), "ok");
+        assert!(report.starts_with("# Backup Sync Health Report\n"));
+    }
+
+    #[test]
+    fn exclusive_health_report_preserves_predictable_existing_file() {
+        let dir = test_dir("collision");
+        let predictable = dir.join("BackupSync-health-fixed.txt");
+        fs::write(&predictable, b"keep me").expect("seed predictable file");
+
+        let exported =
+            write_exclusive_health_report_with(&dir, "BackupSync-health-fixed", |file| {
+                std::io::Write::write_all(file, b"new report")
+            })
+            .expect("write exclusive report");
+
+        assert_ne!(exported, predictable);
+        assert_eq!(fs::read(&predictable).expect("read seed"), b"keep me");
+        assert_eq!(fs::read(&exported).expect("read report"), b"new report");
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn failed_health_report_removes_partial_output() {
+        let dir = test_dir("cleanup");
+        let error = write_exclusive_health_report_with(&dir, "BackupSync-health-fixed", |file| {
+            std::io::Write::write_all(file, b"partial")?;
+            Err(std::io::Error::other("injected write failure"))
+        })
+        .expect_err("report must fail");
+
+        assert!(error.to_string().contains("failed to write"));
+        assert_eq!(fs::read_dir(&dir).expect("read test directory").count(), 0);
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_health_report_does_not_follow_predictable_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("symlink");
+        let target = dir.join("target.txt");
+        let predictable = dir.join("BackupSync-health-fixed.txt");
+        fs::write(&target, b"target contents").expect("seed target");
+        symlink(&target, &predictable).expect("create symlink");
+
+        let exported =
+            write_exclusive_health_report_with(&dir, "BackupSync-health-fixed", |file| {
+                std::io::Write::write_all(file, b"new report")
+            })
+            .expect("write exclusive report");
+
+        assert_ne!(exported, predictable);
+        assert_eq!(fs::read(&target).expect("read target"), b"target contents");
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
 }

@@ -1,14 +1,20 @@
 #!/bin/sh
 set -e
 
-echo "[pre-push] Running Rust tests"
-cargo test -p backup_core -p daemon -p cli
+echo "[pre-push] Running complete Rust workspace tests"
+make test
 
 echo "[pre-push] Running frontend tests"
-( cd crates/gui/frontend && npm test )
+make frontend-test
+
+echo "[pre-push] Building the Rust workspace and frontend bundle"
+make build
 
 echo "[pre-push] Running repository hygiene gate"
 make hygiene-check
+
+echo "[pre-push] Checking documentation links"
+make docs-check
 
 echo "[pre-push] Running full git history secret scan"
 make secrets-history

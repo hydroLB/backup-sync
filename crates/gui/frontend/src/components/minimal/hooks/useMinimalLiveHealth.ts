@@ -16,40 +16,12 @@ type LiveHealthState = {
   watchedHealthWarning: string | null;
 };
 
-/**
- * Summary: Build a stable key for destination and watched issue comparisons.
- *
- * Inputs: List of issue strings.
- *
- * Outputs: Deterministic key string for transition detection.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `useMinimalLiveHealth` event transition logic.
- *
- * Why this exists: Avoid repeatedly firing toasts when issue sets are unchanged.
- */
+/** Avoid repeatedly firing toasts when issue sets are unchanged. */
 function issueKey(issues: string[]): string {
   return issues.slice().sort().join('\n');
 }
 
-/**
- * Summary: Build a concise destination warning string for inline UI display.
- *
- * Inputs: Destination issue list.
- *
- * Outputs: User-facing warning string or null.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `useMinimalLiveHealth`.
- *
- * Why this exists: Keep destination health issues visible without flooding the interface.
- */
+/** Keep destination health issues visible without flooding the interface. */
 function destinationWarningFromIssues(issues: string[]): string | null {
   if (issues.length === 0) return null;
   if (issues.length === 1) {
@@ -58,21 +30,7 @@ function destinationWarningFromIssues(issues: string[]): string | null {
   return `Destination issues (${issues.length}): ${issues.slice(0, 2).join(' • ')}`;
 }
 
-/**
- * Summary: Build a concise watched path warning string for inline UI display.
- *
- * Inputs: Missing and inaccessible watched path lists.
- *
- * Outputs: User-facing warning string or null.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `useMinimalLiveHealth`.
- *
- * Why this exists: Keep watched source health actionable and compact.
- */
+/** Keep watched source health actionable and compact. */
 function watchedWarningFromIssues(missing: string[], inaccessible: string[]): string | null {
   const total = missing.length + inaccessible.length;
   if (total === 0) return null;
@@ -86,21 +44,7 @@ function watchedWarningFromIssues(missing: string[], inaccessible: string[]): st
   return `Protected path issues (${total}): ${parts.join(', ')}.`;
 }
 
-/**
- * Summary: Poll destination and watched-path accessibility for minimal mode.
- *
- * Inputs: Config and event callback.
- *
- * Outputs: Inline warning strings for destination and watched path health.
- *
- * Side effects: Calls IPC probes on a timer and emits transition toasts when health changes.
- *
- * Error handling: Tolerates transient probe failures and emits actionable probe errors.
- *
- * Ties to other methods: Consumed by `MinimalMain` to render live health warnings.
- *
- * Why this exists: Surface filesystem regressions quickly without requiring manual checks.
- */
+/** Surface filesystem regressions quickly without requiring manual checks. */
 export function useMinimalLiveHealth({ cfg, onEvent, suspend = false }: Params): LiveHealthState {
   const [destinationIssues, setDestinationIssues] = useState<string[]>([]);
   const [watchedMissing, setWatchedMissing] = useState<string[]>([]);

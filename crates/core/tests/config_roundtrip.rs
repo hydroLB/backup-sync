@@ -6,19 +6,7 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
-/// Summary: Ensures config serialization and loading round-trip correctly.
-///
-/// Inputs: a serialized config written to disk.
-///
-/// Outputs: a loaded config matching core fields.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: TOML config persistence.
-///
-/// Why this exists: verify config load paths preserve critical settings.
+/// Verify config load paths preserve critical settings.
 fn config_roundtrip() {
     let dir = tempdir().expect("config_roundtrip::config_roundtrip failed to create temp dir");
     let path = dir.path().join("cfg.toml");

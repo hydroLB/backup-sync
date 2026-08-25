@@ -5,19 +5,7 @@
 )]
 use tracing::error;
 
-/// Summary: Starts the GUI process and exits on startup failure.
-///
-/// Inputs: none.
-///
-/// Outputs: `()` after the GUI exits or the process terminates.
-///
-/// Side effects: Launches the Tauri runtime and may terminate the process on error.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `gui::run`.
-///
-/// Why this exists: provide a single entry point with explicit failure handling.
+/// Provide a single entry point with explicit failure handling.
 fn main() {
     if let Err(err) = gui::run() {
         let classified = backup_core::classify_anyhow(&anyhow::Error::msg(err.to_string()));

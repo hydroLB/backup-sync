@@ -1,18 +1,6 @@
 use anyhow::Error;
 
-/// Summary: Canonical boundary error codes used to normalize process and command failures.
-///
-/// Inputs: produced by boundary error classifiers.
-///
-/// Outputs: stable typed code values for boundary adapters.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI, daemon, and GUI boundary error mapping.
-///
-/// Why this exists: keep boundary error classification centralized and consistent.
+/// Keep boundary error classification centralized and consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalErrorCode {
     ConfigInvalid,
@@ -29,19 +17,7 @@ pub enum CanonicalErrorCode {
 }
 
 impl CanonicalErrorCode {
-    /// Summary: Returns a stable string identifier for serialization and logs.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: string form for this code.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: boundary adapters and structured logs.
-    ///
-    /// Why this exists: preserve deterministic code values at process boundaries.
+    /// Preserve deterministic code values at process boundaries.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ConfigInvalid => "CONFIG_INVALID",
@@ -58,19 +34,7 @@ impl CanonicalErrorCode {
         }
     }
 
-    /// Summary: Returns whether this code is typically safe to retry.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: `true` when retrying may succeed without code/config changes.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: boundary adapters and operator guidance.
-    ///
-    /// Why this exists: attach deterministic retry guidance to structured failures.
+    /// Attach deterministic retry guidance to structured failures.
     pub fn retryable(self) -> bool {
         matches!(
             self,
@@ -78,19 +42,7 @@ impl CanonicalErrorCode {
         )
     }
 
-    /// Summary: Returns default operator guidance for this code.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: short actionable hint string.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: boundary rendering for CLI/daemon/GUI.
-    ///
-    /// Why this exists: keep failure guidance consistent without duplicating strings.
+    /// Keep failure guidance consistent without duplicating strings.
     pub fn hint(self) -> &'static str {
         match self {
             Self::ConfigInvalid => {
@@ -128,19 +80,7 @@ impl CanonicalErrorCode {
     }
 }
 
-/// Summary: Structured result of classifying a boundary-facing failure.
-///
-/// Inputs: produced from `anyhow::Error` values.
-///
-/// Outputs: canonical code plus standard guidance and retry metadata.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI/daemon/GUI boundary mappers.
-///
-/// Why this exists: provide one classifier contract for all boundaries.
+/// Provide one classifier contract for all boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassifiedBoundaryError {
     pub code: CanonicalErrorCode,
@@ -148,19 +88,7 @@ pub struct ClassifiedBoundaryError {
     pub retryable: bool,
 }
 
-/// Summary: Classifies an anyhow error into a canonical boundary code.
-///
-/// Inputs: a boundary-facing error.
-///
-/// Outputs: normalized code with retry and hint metadata.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: boundary-specific adapters in CLI, daemon, and GUI.
-///
-/// Why this exists: enforce one classification pipeline across process boundaries.
+/// Enforce one classification pipeline across process boundaries.
 pub fn classify_anyhow(error: &Error) -> ClassifiedBoundaryError {
     let code = classify_from_chain(error).unwrap_or_else(|| classify_from_message(error));
     ClassifiedBoundaryError {
@@ -170,19 +98,7 @@ pub fn classify_anyhow(error: &Error) -> ClassifiedBoundaryError {
     }
 }
 
-/// Summary: Attempts to classify errors from typed causes in the chain.
-///
-/// Inputs: a boundary-facing error.
-///
-/// Outputs: optional canonical code.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: primary classifier for IO-backed failures.
-///
-/// Why this exists: prefer typed root-cause signals over string matching.
+/// Prefer typed root-cause signals over string matching.
 fn classify_from_chain(error: &Error) -> Option<CanonicalErrorCode> {
     for cause in error.chain() {
         if let Some(io_error) = cause.downcast_ref::<std::io::Error>() {
@@ -208,19 +124,7 @@ fn classify_from_chain(error: &Error) -> Option<CanonicalErrorCode> {
     None
 }
 
-/// Summary: Classifies errors using stable message heuristics when typed causes are unavailable.
-///
-/// Inputs: a boundary-facing error.
-///
-/// Outputs: canonical code selected from normalized message content.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: fallback classifier for context-only failures.
-///
-/// Why this exists: preserve deterministic mapping even when errors are context wrappers.
+/// Preserve deterministic mapping even when errors are context wrappers.
 fn classify_from_message(error: &Error) -> CanonicalErrorCode {
     let msg = format!("{error:#}").to_ascii_lowercase();
     if msg.contains("invalid configuration")

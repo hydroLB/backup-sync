@@ -7,19 +7,7 @@ use tokio::time::timeout;
 use tracing::{info, warn};
 
 #[derive(Deserialize, Debug, Clone)]
-/// Summary: Status payload returned by the daemon IPC server.
-///
-/// Inputs: deserialized from IPC responses.
-///
-/// Outputs: a status structure used by the GUI layer.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status queries.
-///
-/// Why this exists: mirror daemon status fields for the UI.
+/// Mirror daemon status fields for the UI.
 pub struct Status {
     pub last_run_ts: Option<i64>,
     pub last_files_backed_up: usize,
@@ -69,19 +57,7 @@ pub struct Status {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-/// Summary: Destination status payload returned by the daemon IPC server.
-///
-/// Inputs: deserialized from IPC responses.
-///
-/// Outputs: a destination status structure.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status queries.
-///
-/// Why this exists: expose per destination free space and labels.
+/// Expose per destination free space and labels.
 pub struct DestinationStatus {
     pub id: String,
     pub label: Option<String>,
@@ -127,36 +103,12 @@ struct AckReply {
     request_id: Option<String>,
 }
 
-/// Summary: Resolves an IPC request id from optional incoming correlation context.
-///
-/// Inputs: optional correlation id from GUI command boundaries.
-///
-/// Outputs: sanitized request id string.
-///
-/// Side effects: Reads time when generating fallback ids.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC request serialization and structured logging.
-///
-/// Why this exists: keep GUI-to-daemon IPC correlation ids consistent and index-safe.
+/// Keep GUI-to-daemon IPC correlation ids consistent and index-safe.
 fn request_id(correlation_id: Option<&str>) -> String {
     backup_core::logging::correlation_id("gui-ipc", correlation_id)
 }
 
-/// Summary: Resolve the IPC timeout used for status calls.
-///
-/// Inputs: Reads config if available.
-///
-/// Outputs: A timeout duration for IPC operations.
-///
-/// Side effects: May read configuration from disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `fetch_status` connection and read/write time bounds.
-///
-/// Why this exists: Keep IPC calls bounded even when the daemon or filesystem misbehaves.
+/// Keep IPC calls bounded even when the daemon or filesystem misbehaves.
 fn resolve_runtime_tuning() -> RuntimeTuning {
     match backup_core::load_validated_config() {
         Ok(cfg) => cfg.runtime,
@@ -170,36 +122,12 @@ fn resolve_runtime_tuning() -> RuntimeTuning {
     }
 }
 
-/// Summary: Resolves the status IPC timeout from runtime tuning.
-///
-/// Inputs: runtime tuning.
-///
-/// Outputs: timeout duration for IPC operations.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: status request/response connection and stream time bounds.
-///
-/// Why this exists: keep status IPC timeout logic centralized for all status endpoints.
+/// Keep status IPC timeout logic centralized for all status endpoints.
 fn resolve_ipc_timeout(runtime: &RuntimeTuning) -> Duration {
     Duration::from_secs(runtime.ipc_timeout_seconds.max(1))
 }
 
-/// Summary: Read an IPC response to EOF with a hard size cap.
-///
-/// Inputs: A readable stream and maximum byte limit.
-///
-/// Outputs: The collected bytes.
-///
-/// Side effects: Reads from the IPC stream until EOF or error.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `fetch_status_over_stream` response parsing.
-///
-/// Why this exists: Avoid unbounded memory growth on malformed or hostile IPC peers.
+/// Avoid unbounded memory growth on malformed or hostile IPC peers.
 async fn read_bounded_to_end<R>(
     reader: &mut R,
     max_bytes: usize,
@@ -230,19 +158,7 @@ where
     Ok(buf)
 }
 
-/// Summary: Perform the status request/response exchange on an established IPC stream.
-///
-/// Inputs: A connected stream and an operation timeout.
-///
-/// Outputs: A deserialized `Status` value.
-///
-/// Side effects: Writes a JSON request, half-closes the write side, then reads a JSON reply.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `fetch_status` and the daemon's IPC server implementation.
-///
-/// Why this exists: Keep the on-the-wire protocol consistent and testable, and prevent request deadlocks.
+/// Keep the on-the-wire protocol consistent and testable, and prevent request deadlocks.
 async fn request_over_stream<S, T>(
     mut stream: S,
     request: &[u8],
@@ -319,19 +235,7 @@ use tokio::{
 };
 
 #[cfg(unix)]
-/// Summary: Fetches status from the daemon over Unix IPC with correlation context.
-///
-/// Inputs: optional correlation id propagated from command boundaries.
-///
-/// Outputs: a deserialized `Status` value.
-///
-/// Side effects: Performs IPC over a Unix domain socket and emits structured telemetry.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status refresh and daemon IPC request tracing.
-///
-/// Why this exists: preserve end-to-end request correlation from GUI to daemon logs.
+/// Preserve end-to-end request correlation from GUI to daemon logs.
 pub async fn fetch_status_with_correlation(correlation_id: Option<&str>) -> Result<Status> {
     let runtime = resolve_runtime_tuning();
     let request_id = request_id(correlation_id);
@@ -750,19 +654,6 @@ mod tests {
         assert_eq!(cid, "gui_cid");
     }
 
-    /// Summary: fetch_status_over_stream_signals_eof_to_avoid_deadlock orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[tokio::test]
     async fn fetch_status_over_stream_signals_eof_to_avoid_deadlock() {
         let (mut client, mut server) = tokio::net::UnixStream::pair().unwrap();

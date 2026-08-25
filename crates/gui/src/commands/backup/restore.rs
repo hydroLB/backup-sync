@@ -76,24 +76,18 @@ pub struct RestoreFilesArgs {
     pub target_dir: Option<String>,
 }
 
-/// Summary: list_versions_cmd orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn list_versions_cmd(
     correlation_id: Option<String>,
 ) -> Result<Vec<FolderVersionsDto>, ErrorEnvelope> {
     let cid = correlation::cid("restore_list", correlation_id);
+    let task_cid = cid.clone();
+    tokio::task::spawn_blocking(move || list_versions_blocking(task_cid))
+        .await
+        .map_err(|error| blocking_task_error(&cid, "list_versions_cmd", error))?
+}
+
+fn list_versions_blocking(cid: String) -> Result<Vec<FolderVersionsDto>, ErrorEnvelope> {
     let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -125,25 +119,22 @@ pub async fn list_versions_cmd(
         .collect())
 }
 
-/// Summary: list_version_files_cmd orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn list_version_files_cmd(
     args: ListVersionFilesArgs,
     correlation_id: Option<String>,
 ) -> Result<ListVersionFilesResultDto, ErrorEnvelope> {
     let cid = correlation::cid("restore_files_list", correlation_id);
+    let task_cid = cid.clone();
+    tokio::task::spawn_blocking(move || list_version_files_blocking(args, task_cid))
+        .await
+        .map_err(|error| blocking_task_error(&cid, "list_version_files_cmd", error))?
+}
+
+fn list_version_files_blocking(
+    args: ListVersionFilesArgs,
+    cid: String,
+) -> Result<ListVersionFilesResultDto, ErrorEnvelope> {
     let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -194,25 +185,22 @@ pub async fn list_version_files_cmd(
     })
 }
 
-/// Summary: restore_version_cmd orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn restore_version_cmd(
     args: RestoreArgs,
     correlation_id: Option<String>,
 ) -> Result<RestoreResultDto, ErrorEnvelope> {
     let cid = correlation::cid("restore", correlation_id);
+    let task_cid = cid.clone();
+    tokio::task::spawn_blocking(move || restore_version_blocking(args, task_cid))
+        .await
+        .map_err(|error| blocking_task_error(&cid, "restore_version_cmd", error))?
+}
+
+fn restore_version_blocking(
+    args: RestoreArgs,
+    cid: String,
+) -> Result<RestoreResultDto, ErrorEnvelope> {
     let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -246,25 +234,22 @@ pub async fn restore_version_cmd(
     })
 }
 
-/// Summary: restore_files_cmd orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[tauri::command]
 pub async fn restore_files_cmd(
     args: RestoreFilesArgs,
     correlation_id: Option<String>,
 ) -> Result<RestoreResultDto, ErrorEnvelope> {
     let cid = correlation::cid("restore_files", correlation_id);
+    let task_cid = cid.clone();
+    tokio::task::spawn_blocking(move || restore_files_blocking(args, task_cid))
+        .await
+        .map_err(|error| blocking_task_error(&cid, "restore_files_cmd", error))?
+}
+
+fn restore_files_blocking(
+    args: RestoreFilesArgs,
+    cid: String,
+) -> Result<RestoreResultDto, ErrorEnvelope> {
     let cfg = load_validated_config().map_err(|e| {
         ErrorEnvelope::new(
             "CONFIG_LOAD",
@@ -298,4 +283,11 @@ pub async fn restore_files_cmd(
         files_removed: result.files_removed,
         dirs_created: result.dirs_created,
     })
+}
+
+fn blocking_task_error(cid: &str, command: &str, error: tokio::task::JoinError) -> ErrorEnvelope {
+    ErrorEnvelope::new(
+        "BLOCKING_TASK_FAILED",
+        format!("[cid={cid}] {command} blocking task failed: {error}"),
+    )
 }

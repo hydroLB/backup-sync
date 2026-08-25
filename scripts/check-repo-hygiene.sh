@@ -14,6 +14,8 @@ require_cmd() {
 
 require_cmd git
 require_cmd rg
+require_cmd tr
+require_cmd wc
 
 required_files=(
   "README.md"
@@ -39,7 +41,14 @@ if [[ -n "$forbidden_tracked_paths" ]]; then
   exit 1
 fi
 
-machine_paths="$(git ls-files | rg -v '\.(png|jpg|jpeg|gif|ico|icns|pdf|lock|sarif|json)$' | xargs rg -n --no-heading '/Users/|/home/|C:\\Users\\' || true)"
+machine_paths="$(
+  while IFS= read -r path; do
+    [[ -f "$path" ]] || continue
+    [[ "$path" == "scripts/check-repo-hygiene.sh" ]] && continue
+    [[ "$path" =~ \.(png|jpg|jpeg|gif|ico|icns|pdf|lock|sarif|json)$ ]] && continue
+    rg -n --no-heading '/Users/|/home/|C:\\Users\\' "$path" || true
+  done < <(git ls-files)
+)"
 filtered_machine_paths="$(printf '%s\n' "$machine_paths" | rg -v '/Users/me/|/home/user/|C:\\Users\\user|C:\\Users\\me' || true)"
 if [[ -n "${filtered_machine_paths//$'\n'/}" ]]; then
   echo "[repo-hygiene] machine-specific absolute paths detected in tracked text files:"
@@ -47,10 +56,30 @@ if [[ -n "${filtered_machine_paths//$'\n'/}" ]]; then
   exit 1
 fi
 
-large_files="$(git ls-files -z | xargs -0 stat -f '%z %N' | awk '$1 > 5242880 {print $2 " (" $1 " bytes)"}' || true)"
+large_files="$(
+  while IFS= read -r path; do
+    [[ -f "$path" ]] || continue
+    size="$(wc -c < "$path" | tr -d '[:space:]')"
+    if (( size > 5242880 )); then
+      printf '%s (%s bytes)\n' "$path" "$size"
+    fi
+  done < <(git ls-files)
+)"
 if [[ -n "$large_files" ]]; then
   echo "[repo-hygiene] tracked files larger than 5 MiB detected:"
   echo "$large_files"
+  exit 1
+fi
+
+generated_comment_templates="$(
+  rg -n \
+    --glob '*.{rs,ts,tsx,js,jsx}' \
+    '^\s*(\*|///) (Summary|Inputs|Outputs|Side effects|Error handling|Ties to other methods|Why this exists):' \
+    crates || true
+)"
+if [[ -n "$generated_comment_templates" ]]; then
+  echo "[repo-hygiene] generated comment templates detected; keep only non-obvious contracts or rationale:"
+  echo "$generated_comment_templates"
   exit 1
 fi
 

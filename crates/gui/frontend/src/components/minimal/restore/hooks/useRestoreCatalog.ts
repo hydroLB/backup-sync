@@ -23,21 +23,7 @@ type Result = {
   reload: () => void;
 };
 
-/**
- * Summary: Load restore catalog data and keep folder/version selections in sync.
- *
- * Inputs: Modal open state and event callback.
- *
- * Outputs: Restore catalog state, derived selections, and a reload action.
- *
- * Side effects: Calls the restore-list IPC endpoint and updates React state.
- *
- * Error handling: Emits contextual restore load failures through `onEvent`.
- *
- * Ties to other methods: Used by `RestoreModal` and `RestoreModalBody`.
- *
- * Why this exists: Keep version-catalog loading and selection synchronization out of the modal shell.
- */
+/** Keep version-catalog loading and selection synchronization out of the modal shell. */
 export function useRestoreCatalog({ isOpen, onEvent }: Params): Result {
   const [folders, setFolders] = useState<FolderVersionsDto[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -101,21 +87,7 @@ export function useRestoreCatalog({ isOpen, onEvent }: Params): Result {
     }
   }, [isOpen, selectedVersions, versionId]);
 
-  /**
-   * Summary: Request a fresh restore-catalog load for the current modal session.
-   *
-   * Inputs: None.
-   *
-   * Outputs: Bumps the internal reload token.
-   *
-   * Side effects: Triggers the catalog-loading effect.
-   *
-   * Error handling: None.
-   *
-   * Ties to other methods: Wired into the retry button in `RestoreModalBody`.
-   *
-   * Why this exists: Keep retry semantics explicit and easy to pass into the view.
-   */
+  /** Keep retry semantics explicit and easy to pass into the view. */
   const reload = useCallback(() => {
     setReloadToken((previous) => previous + 1);
   }, []);

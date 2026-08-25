@@ -1,5 +1,5 @@
+import type { ReactNode } from 'react';
 import { Button } from '../../ui/Button';
-import { StateBlock } from '../../ui/StateBlock';
 
 type SetupNoticeStep = 'destination' | 'folders' | 'ready';
 
@@ -12,21 +12,34 @@ type Props = {
   onAddPath: () => void;
 };
 
-/**
- * Summary: Render the single highest-priority setup cue for the minimal shell.
- *
- * Inputs: Setup state, current counts, busy flag, and quick-action handlers.
- *
- * Outputs: A focused setup notice block.
- *
- * Side effects: Calls the provided quick action when the user follows the prompt.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `MinimalMain` before the setup cards.
- *
- * Why this exists: Keep the next required setup step obvious without repeating helper copy in every card.
- */
+type GuideStepProps = {
+  number: string;
+  label: string;
+  title: string;
+  description: string;
+  state: 'complete' | 'current' | 'locked';
+  status: string;
+  action?: ReactNode;
+};
+
+function GuideStep({ number, label, title, description, state, status, action }: GuideStepProps) {
+  return (
+    <li className={`workflow-step workflow-step--${state}`}>
+      <div className="workflow-step__topline">
+        <span className="workflow-step__number" aria-hidden="true">
+          {number}
+        </span>
+        <span className="workflow-step__label">{label}</span>
+        <span className="workflow-step__status">{status}</span>
+      </div>
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {action && <div className="workflow-step__action">{action}</div>}
+    </li>
+  );
+}
+
+/** Explain the complete workflow in place while highlighting only the next useful action. */
 export function SetupNotice({
   step,
   destinationCount,
@@ -35,44 +48,76 @@ export function SetupNotice({
   onChooseDestination,
   onAddPath,
 }: Props) {
-  if (step === 'ready') {
-    return (
-      <StateBlock
-        tone="info"
-        title="Setup complete"
-        message={`Watching ${watchedCount} protected path${watchedCount === 1 ? '' : 's'} across ${destinationCount} destination${destinationCount === 1 ? '' : 's'}. Restore unlocks after backup history is written.`}
-        className="setup-notice"
-      />
-    );
-  }
+  const destinationReady = destinationCount > 0;
+  const foldersReady = watchedCount > 0;
+  const ready = step === 'ready';
 
-  if (step === 'destination') {
-    return (
-      <StateBlock
-        tone="info"
-        title="Choose a primary destination first"
-        message="Backup setup starts here. Protected paths and restore stay inactive until a destination is selected."
-        className="setup-notice"
-        action={
-          <Button type="button" size="sm" onClick={onChooseDestination} disabled={busy}>
-            Choose destination
-          </Button>
-        }
-      />
-    );
-  }
+  const title =
+    step === 'destination'
+      ? 'Start with a safe place for your copies.'
+      : step === 'folders'
+        ? 'Storage is ready. Choose what matters.'
+        : 'Your protection workflow is connected.';
+
+  const message =
+    step === 'destination'
+      ? 'Backup Sync needs a destination before it can preserve any versions.'
+      : step === 'folders'
+        ? 'Add a folder or file and Backup Sync will begin building recoverable history.'
+        : 'New changes are saved automatically, and Restore lets you return to an earlier version.';
 
   return (
-    <StateBlock
-      tone="info"
-      title="Add the first protected path"
-      message="New protected paths are copied to every configured destination. Restore becomes useful after the first saved version exists."
-      className="setup-notice"
-      action={
-        <Button type="button" size="sm" onClick={onAddPath} disabled={busy}>
-          Add path…
-        </Button>
-      }
-    />
+    <section className="workflow-guide" aria-labelledby="workflow-guide-title">
+      <div className="workflow-guide__intro">
+        <div>
+          <span className="workflow-guide__eyebrow">How Backup Sync works</span>
+          <h2 id="workflow-guide-title">{title}</h2>
+        </div>
+        <p>{message}</p>
+      </div>
+
+      <ol className="workflow-steps">
+        <GuideStep
+          number="01"
+          label="Storage"
+          title="Choose where copies live"
+          description="Use one destination, or add a second independent location for automatic mirroring."
+          state={destinationReady ? 'complete' : 'current'}
+          status={destinationReady ? `${destinationCount} ready` : 'Start here'}
+          action={
+            step === 'destination' ? (
+              <Button type="button" size="sm" onClick={onChooseDestination} disabled={busy}>
+                Choose destination
+              </Button>
+            ) : undefined
+          }
+        />
+        <GuideStep
+          number="02"
+          label="Protection"
+          title="Add what matters"
+          description="Select folders or files. Only changed content is stored when a new version is created."
+          state={foldersReady ? 'complete' : destinationReady ? 'current' : 'locked'}
+          status={
+            foldersReady ? `${watchedCount} protected` : destinationReady ? 'Next' : 'Waiting'
+          }
+          action={
+            step === 'folders' ? (
+              <Button type="button" size="sm" onClick={onAddPath} disabled={busy}>
+                Add protected path
+              </Button>
+            ) : undefined
+          }
+        />
+        <GuideStep
+          number="03"
+          label="Recovery"
+          title="Return to any version"
+          description="Browse saved versions, recover one file, or restore an entire protected folder."
+          state={ready ? 'complete' : 'locked'}
+          status={ready ? 'Available' : 'Waiting'}
+        />
+      </ol>
+    </section>
   );
 }

@@ -1,18 +1,4 @@
-/**
- * Summary: Centralize UI tuning knobs and defaults used across the frontend.
- *
- * Inputs: None.
- *
- * Outputs: Exported constants for UI behaviors.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Status polling, toast timing, and storage keys in settings.
- *
- * Why this exists: Make UI behavior adjustments simple and consistent.
- */
+/** Make UI behavior adjustments simple and consistent. */
 export const UI_TUNING = {
   planTooLargeCode: 'PLAN_TOO_LARGE',
   statusRefreshMs: 10_000,
@@ -38,6 +24,7 @@ export const UI_TUNING = {
     retryDelaysMs: [0, 200, 400, 800],
     retryJitterPct: 0.2,
     ipcTimeoutMs: 5_000,
+    configSaveTimeoutMs: 30_000,
   },
   performancePresets: {
     quiet: { max_parallel_copies: 1, max_bytes_per_second: 5 * 1024 * 1024 },

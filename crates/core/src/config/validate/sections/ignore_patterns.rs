@@ -2,19 +2,7 @@ use crate::config::model::Config;
 use crate::config::validate::ValidationLimits;
 use anyhow::{bail, Result};
 
-/// Summary: Validates ignore pattern syntax and collection size.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when patterns compile and list size is within limits.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: scan filtering during planning and verification.
-///
-/// Why this exists: fail fast on invalid patterns to avoid silently skipping files.
+/// Fail fast on invalid patterns to avoid silently skipping files.
 pub(crate) fn validate_ignore_patterns(
     cfg: &Config,
     limits: &ValidationLimits,

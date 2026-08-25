@@ -6,19 +6,7 @@ use std::{
 };
 use tracing::warn;
 
-/// Summary: Prompts the user for a string input and trims the response.
-///
-/// Inputs: the prompt message.
-///
-/// Outputs: the trimmed user input string.
-///
-/// Side effects: Writes to stdout and reads from stdin.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: interactive CLI flows such as init.
-///
-/// Why this exists: centralize prompt handling with consistent IO behavior.
+/// Centralize prompt handling with consistent IO behavior.
 pub fn prompt_string(msg: &str) -> Result<String> {
     print!("{} ", msg);
     if let Err(error) = io::stdout().flush() {
@@ -37,19 +25,7 @@ pub fn prompt_string(msg: &str) -> Result<String> {
     Ok(buf.trim().to_string())
 }
 
-/// Summary: Prompts the user for a yes or no response with a default.
-///
-/// Inputs: the prompt message and the default answer.
-///
-/// Outputs: the parsed boolean response.
-///
-/// Side effects: Writes to stdout and reads from stdin.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: interactive CLI flows for confirmation prompts.
-///
-/// Why this exists: keep confirmation prompts consistent across commands.
+/// Keep confirmation prompts consistent across commands.
 pub fn prompt_yes(msg: &str, default_yes: bool) -> Result<bool> {
     let default_hint = if default_yes { "[Y/n]" } else { "[y/N]" };
     let input = prompt_string(&format!("{} {}", msg, default_hint))
@@ -61,19 +37,7 @@ pub fn prompt_yes(msg: &str, default_yes: bool) -> Result<bool> {
     Ok(matches!(first, 'y' | 'Y'))
 }
 
-/// Summary: Prompts the user for a path, applying defaults and tilde expansion.
-///
-/// Inputs: the prompt message and an optional default string.
-///
-/// Outputs: a resolved `PathBuf`.
-///
-/// Side effects: Writes to stdout and reads from stdin.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: interactive CLI flows for path inputs.
-///
-/// Why this exists: normalize path inputs before writing config.
+/// Normalize path inputs before writing config.
 pub fn prompt_path(msg: &str, default: Option<&str>) -> Result<PathBuf> {
     let input = prompt_string(msg).context("cli::prompt_path failed to read path input")?;
     let raw = if input.is_empty() {
@@ -87,19 +51,7 @@ pub fn prompt_path(msg: &str, default: Option<&str>) -> Result<PathBuf> {
     Ok(PathBuf::from(expand_tilde(&raw)))
 }
 
-/// Summary: Expands a tilde prefixed path to the user home directory.
-///
-/// Inputs: the raw input string.
-///
-/// Outputs: the expanded string with home directory resolved when applicable.
-///
-/// Side effects: Reads the user home directory.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: prompt path handling.
-///
-/// Why this exists: allow convenient user input for home relative paths.
+/// Allow convenient user input for home relative paths.
 pub fn expand_tilde(input: &str) -> String {
     if let Some(stripped) = input.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {

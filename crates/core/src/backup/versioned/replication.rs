@@ -1,13 +1,17 @@
 use super::model::{Manifest, ManifestEntryKind, VersionIndex};
+use super::operation_lock::acquire_store_leases;
 use super::store::{blob_path, blobs_root, sources_root, store_root};
+use super::validation::validate_version_index;
 use crate::config::model::{Config, Destination};
+use crate::encryption::blobs::BlobCodec;
+use crate::io::BlockingIoPolicy;
 use crate::logging::redact_path;
 use crate::scheduling::throttling::Throttle;
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use walkdir::WalkDir;
 
@@ -32,19 +36,22 @@ struct PairCounters {
     manifests_deleted: usize,
 }
 
-/// Summary: Replicate versioned store data from configured destinations to their replicas.
-///
-/// Inputs: loaded config containing destinations with optional `replicate_to` lists.
-///
-/// Outputs: a `ReplicationSummary` for UI and logs.
-///
-/// Side effects: Copies manifests, blobs, and index files into replica destinations.
-///
-/// Error handling: Best-effort per replica; returns `Ok` with failure counts unless a non-recoverable internal error occurs.
-///
-/// Ties to other methods: Intended to run after `run_backup_cycle` in the daemon and CLI for 3-2-1 workflows.
-///
-/// Why this exists: A second destination provides an immediate redundant copy without changing the manifest model.
+#[derive(Debug)]
+struct BlobReplicationPlan {
+    src: PathBuf,
+    dst: PathBuf,
+    expected_sha256: String,
+}
+
+#[derive(Debug)]
+struct VersionReplicationPlan {
+    version_id: String,
+    src_manifest: PathBuf,
+    dst_manifest: PathBuf,
+    blobs: Vec<BlobReplicationPlan>,
+}
+
+/// A second destination provides an immediate redundant copy without changing the manifest model.
 pub fn replicate_configured_stores(cfg: &Config) -> Result<ReplicationSummary> {
     let by_id: HashMap<&str, &Destination> = cfg
         .destinations
@@ -59,35 +66,58 @@ pub fn replicate_configured_stores(cfg: &Config) -> Result<ReplicationSummary> {
         return Ok(summary);
     }
 
+    // Resolve the complete attempt set before touching any store. Missing target
+    // IDs remain in the set so their existing per-pair summary behavior is kept,
+    // while every source and resolvable target path is leased exactly once.
+    let mut pairs = Vec::new();
     for src in cfg.destinations.iter() {
         if src.replicate_to.is_empty() {
             continue;
         }
         for target_id in src.replicate_to.iter() {
-            summary.pairs_attempted += 1;
-            let Some(dst) = by_id.get(target_id.as_str()).copied() else {
+            pairs.push((
+                src,
+                target_id.as_str(),
+                by_id.get(target_id.as_str()).copied(),
+            ));
+        }
+    }
+
+    let mut involved_destinations = Vec::with_capacity(pairs.len().saturating_mul(2));
+    for (src, _target_id, dst) in &pairs {
+        involved_destinations.push(src.path.as_path());
+        if let Some(dst) = dst {
+            involved_destinations.push(dst.path.as_path());
+        }
+    }
+    let lock_policy = BlockingIoPolicy::from_config(cfg);
+    let _operation_leases = acquire_store_leases(involved_destinations, &lock_policy)
+        .context("versioned::replicate_configured_stores could not serialize destination stores")?;
+
+    for (src, target_id, dst) in pairs {
+        summary.pairs_attempted += 1;
+        let Some(dst) = dst else {
+            summary.pairs_failed += 1;
+            summary.targets_failed.push(target_id.to_string());
+            continue;
+        };
+        match replicate_one_pair(cfg, src, dst) {
+            Ok(pair) => {
+                summary.pairs_ok += 1;
+                counters.manifests_copied += pair.manifests_copied;
+                counters.blobs_copied += pair.blobs_copied;
+                counters.bytes_copied = counters.bytes_copied.saturating_add(pair.bytes_copied);
+                counters.manifests_deleted += pair.manifests_deleted;
+            }
+            Err(e) => {
                 summary.pairs_failed += 1;
-                summary.targets_failed.push(target_id.clone());
-                continue;
-            };
-            match replicate_one_pair(cfg, src, dst) {
-                Ok(pair) => {
-                    summary.pairs_ok += 1;
-                    counters.manifests_copied += pair.manifests_copied;
-                    counters.blobs_copied += pair.blobs_copied;
-                    counters.bytes_copied = counters.bytes_copied.saturating_add(pair.bytes_copied);
-                    counters.manifests_deleted += pair.manifests_deleted;
-                }
-                Err(e) => {
-                    summary.pairs_failed += 1;
-                    summary.targets_failed.push(dst.id.clone());
-                    tracing::warn!(
-                        source_id = %src.id,
-                        target_id = %dst.id,
-                        error = %e,
-                        "versioned replication failed for destination pair"
-                    );
-                }
+                summary.targets_failed.push(dst.id.clone());
+                tracing::warn!(
+                    source_id = %src.id,
+                    target_id = %dst.id,
+                    error = %e,
+                    "versioned replication failed for destination pair"
+                );
             }
         }
     }
@@ -109,19 +139,7 @@ pub fn replicate_configured_stores(cfg: &Config) -> Result<ReplicationSummary> {
     Ok(summary)
 }
 
-/// Summary: Replicate one source destination store into one replica destination store.
-///
-/// Inputs: config plus a source and destination entry.
-///
-/// Outputs: per-pair replication counters.
-///
-/// Side effects: Reads from the source store and writes missing content into the replica store.
-///
-/// Error handling: Returns contextual errors when the replica is unreachable or when store reads are inconsistent.
-///
-/// Ties to other methods: Called by `replicate_configured_stores`.
-///
-/// Why this exists: Keep pair replication logic isolated for easier testing and observability.
+/// Keep pair replication logic isolated for easier testing and observability.
 fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Result<PairCounters> {
     if !dst.path.exists() || !dst.path.is_dir() {
         anyhow::bail!(
@@ -147,6 +165,8 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
     let src_blobs = blobs_root(&src_store);
     let dst_sources = sources_root(&dst_store);
     let dst_blobs = blobs_root(&dst_store);
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::replicate_one_pair failed to initialize blob codec")?;
     fs::create_dir_all(&dst_sources).with_context(|| {
         format!(
             "versioned::replicate_one_pair failed to create replica sources root {}",
@@ -176,11 +196,15 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "<unknown>".to_string());
         let src_index_path = source_root.join("index.json");
-        if !src_index_path.exists() {
-            continue;
+        match regular_file_state(&src_index_path)? {
+            RegularFileState::Missing => continue,
+            RegularFileState::Regular => {}
         }
         let src_index: VersionIndex = read_json(&src_index_path)
             .with_context(|| format!("versioned::replicate_one_pair parse {:?}", src_index_path))?;
+        validate_version_index(&src_index).with_context(|| {
+            format!("versioned::replicate_one_pair validate source index {source_id}")
+        })?;
 
         let dst_source_root = dst_sources.join(source_id.as_str());
         let dst_index_path = dst_source_root.join("index.json");
@@ -191,21 +215,16 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
             )
         })?;
 
-        let dst_index: Option<VersionIndex> = if dst_index_path.exists() {
-            Some(read_json(&dst_index_path).with_context(|| {
+        if regular_file_state(&dst_index_path)? == RegularFileState::Regular {
+            let dst_index: VersionIndex = read_json(&dst_index_path).with_context(|| {
                 format!(
                     "versioned::replicate_one_pair parse replica index {:?}",
                     dst_index_path
                 )
-            })?)
-        } else {
-            None
-        };
-        let mut dst_versions: HashSet<String> = HashSet::new();
-        if let Some(di) = dst_index.as_ref() {
-            for v in di.versions.iter() {
-                dst_versions.insert(v.id.clone());
-            }
+            })?;
+            validate_version_index(&dst_index).with_context(|| {
+                format!("versioned::replicate_one_pair validate replica index {source_id}")
+            })?;
         }
 
         let src_manifests_root = source_root.join("manifests");
@@ -217,78 +236,97 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
             )
         })?;
 
-        for v in src_index.versions.iter() {
-            if dst_versions.contains(v.id.as_str()) {
-                continue;
-            }
-            let src_manifest_path = src_manifests_root.join(format!("{}.json", v.id));
-            if !src_manifest_path.exists() {
-                tracing::warn!(
-                    source_id = %source_id,
-                    version_id = %v.id,
-                    "versioned replication skipping missing source manifest"
-                );
-                continue;
-            }
-            let dst_manifest_path = dst_manifests_root.join(format!("{}.json", v.id));
-            let bytes = copy_file_atomic(cfg, &src_manifest_path, &dst_manifest_path)
-                .with_context(|| {
-                    format!(
-                        "versioned::replicate_one_pair failed to copy manifest {} -> {}",
-                        redact_path(&src_manifest_path),
-                        redact_path(&dst_manifest_path)
-                    )
-                })?;
-            pair.bytes_copied = pair.bytes_copied.saturating_add(bytes);
-            pair.manifests_copied += 1;
+        // Validate every artifact referenced by the source index before mutating the
+        // replica. In particular, a missing late manifest/blob must not allow a new
+        // replica index to be published.
+        let plans = build_replication_plans(
+            &src_index,
+            &src_manifests_root,
+            &dst_manifests_root,
+            &src_blobs,
+            &dst_blobs,
+            &blob_codec,
+            cfg.hashing.timeout_seconds,
+        )
+        .with_context(|| {
+            format!("versioned::replicate_one_pair source preflight failed for {source_id}")
+        })?;
 
-            let manifest: Manifest = read_json(&src_manifest_path).with_context(|| {
-                format!(
-                    "versioned::replicate_one_pair failed to parse manifest {:?}",
-                    src_manifest_path
-                )
-            })?;
-            for e in manifest.entries.values() {
-                if e.kind != ManifestEntryKind::File {
-                    continue;
+        for plan in plans.iter() {
+            let manifest_needs_copy = match regular_file_state(&plan.dst_manifest)? {
+                RegularFileState::Missing => true,
+                RegularFileState::Regular => {
+                    !files_have_identical_contents(&plan.src_manifest, &plan.dst_manifest)?
                 }
-                let Some(hash) = e.sha256.as_deref() else {
-                    continue;
+            };
+            if manifest_needs_copy {
+                let bytes = copy_file_atomic(cfg, &plan.src_manifest, &plan.dst_manifest)
+                    .with_context(|| {
+                        format!(
+                            "versioned::replicate_one_pair failed to copy manifest {} -> {}",
+                            redact_path(&plan.src_manifest),
+                            redact_path(&plan.dst_manifest)
+                        )
+                    })?;
+                pair.bytes_copied = pair.bytes_copied.saturating_add(bytes);
+                pair.manifests_copied += 1;
+            }
+
+            // Repair missing blobs regardless of whether this version was already in
+            // the replica index. The index is evidence of intent, not of completeness.
+            for blob in plan.blobs.iter() {
+                let blob_needs_copy = match regular_file_state(&blob.dst)? {
+                    RegularFileState::Missing => true,
+                    RegularFileState::Regular => !blob_matches_plaintext_hash(
+                        &blob_codec,
+                        &blob.dst,
+                        &blob.expected_sha256,
+                        cfg.hashing.timeout_seconds,
+                    ),
                 };
-                let src_blob = blob_path(&src_blobs, hash);
-                if !src_blob.exists() {
-                    tracing::warn!(
-                        source_id = %source_id,
-                        version_id = %v.id,
-                        blob = %hash,
-                        "versioned replication skipping missing source blob"
-                    );
+                if !blob_needs_copy {
                     continue;
                 }
-                let dst_blob = blob_path(&dst_blobs, hash);
-                if dst_blob.exists() {
-                    continue;
-                }
-                let bytes = copy_file_atomic(cfg, &src_blob, &dst_blob).with_context(|| {
+                let bytes = copy_file_atomic(cfg, &blob.src, &blob.dst).with_context(|| {
                     format!(
                         "versioned::replicate_one_pair failed to copy blob {} -> {}",
-                        redact_path(&src_blob),
-                        redact_path(&dst_blob)
+                        redact_path(&blob.src),
+                        redact_path(&blob.dst)
                     )
                 })?;
                 pair.bytes_copied = pair.bytes_copied.saturating_add(bytes);
                 pair.blobs_copied += 1;
+                require_plaintext_hash(
+                    &blob_codec,
+                    &blob.dst,
+                    &blob.expected_sha256,
+                    cfg.hashing.timeout_seconds,
+                    "replica blob after repair",
+                )?;
             }
         }
 
         // Copy last_scan_report.json if present for UI diagnostics parity.
         let src_scan_report = source_root.join("last_scan_report.json");
-        if src_scan_report.exists() {
+        if regular_file_state(&src_scan_report)? == RegularFileState::Regular {
             let dst_scan_report = dst_source_root.join("last_scan_report.json");
+            let _ = regular_file_state(&dst_scan_report)?;
             if let Ok(bytes) = copy_file_atomic(cfg, &src_scan_report, &dst_scan_report) {
                 pair.bytes_copied = pair.bytes_copied.saturating_add(bytes);
             }
         }
+
+        // Recheck both sides immediately before publication, parsing the current
+        // manifests so the check covers exactly the hashes they now reference. The
+        // surrounding store lease will make this boundary stable once lock
+        // integration wraps this call.
+        validate_replication_plans(
+            &plans,
+            &src_blobs,
+            &dst_blobs,
+            &blob_codec,
+            cfg.hashing.timeout_seconds,
+        )?;
 
         // Mirror index last to keep the replica consistent for restores.
         let bytes = copy_file_atomic(cfg, &src_index_path, &dst_index_path).with_context(|| {
@@ -314,19 +352,276 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
     Ok(pair)
 }
 
-/// Summary: Delete replica manifest files that are not present in the source index.
-///
-/// Inputs: config, source index, and replica manifests directory.
-///
-/// Outputs: number of manifest files deleted.
-///
-/// Side effects: Removes manifest files from the replica store.
-///
-/// Error handling: Returns contextual errors on filesystem failures.
-///
-/// Ties to other methods: Used by `replicate_one_pair` when mirror mode is enabled.
-///
-/// Why this exists: Retention pruning on the primary should be reflected in replicas to keep versions aligned.
+fn build_replication_plans(
+    src_index: &VersionIndex,
+    src_manifests_root: &Path,
+    dst_manifests_root: &Path,
+    src_blobs_root: &Path,
+    dst_blobs_root: &Path,
+    blob_codec: &BlobCodec,
+    hash_timeout_seconds: u64,
+) -> Result<Vec<VersionReplicationPlan>> {
+    let mut plans = Vec::with_capacity(src_index.versions.len());
+    for version in src_index.versions.iter() {
+        let src_manifest = src_manifests_root.join(format!("{}.json", version.id));
+        require_regular_file(&src_manifest, "source manifest", &version.id, None)?;
+        let manifest: Manifest = read_json(&src_manifest).with_context(|| {
+            format!(
+                "versioned::build_replication_plans failed to parse manifest {}",
+                redact_path(&src_manifest)
+            )
+        })?;
+
+        let mut seen_hashes = HashSet::new();
+        let mut blobs = Vec::new();
+        for entry in manifest.entries.values() {
+            if entry.kind != ManifestEntryKind::File {
+                continue;
+            }
+            let Some(hash) = entry.sha256.as_deref() else {
+                continue;
+            };
+            validate_blob_hash(hash).with_context(|| {
+                format!(
+                    "versioned::build_replication_plans invalid blob hash in version {}",
+                    version.id
+                )
+            })?;
+            if !seen_hashes.insert(hash.to_string()) {
+                continue;
+            }
+            let src_blob = blob_path(src_blobs_root, hash);
+            require_regular_file(&src_blob, "source blob", &version.id, Some(hash))?;
+            require_plaintext_hash(
+                blob_codec,
+                &src_blob,
+                hash,
+                hash_timeout_seconds,
+                "source blob",
+            )?;
+            blobs.push(BlobReplicationPlan {
+                src: src_blob,
+                dst: blob_path(dst_blobs_root, hash),
+                expected_sha256: hash.to_string(),
+            });
+        }
+
+        plans.push(VersionReplicationPlan {
+            version_id: version.id.clone(),
+            src_manifest,
+            dst_manifest: dst_manifests_root.join(format!("{}.json", version.id)),
+            blobs,
+        });
+    }
+    Ok(plans)
+}
+
+fn validate_replication_plans(
+    plans: &[VersionReplicationPlan],
+    src_blobs_root: &Path,
+    dst_blobs_root: &Path,
+    blob_codec: &BlobCodec,
+    hash_timeout_seconds: u64,
+) -> Result<()> {
+    for plan in plans {
+        if !files_have_identical_contents(&plan.src_manifest, &plan.dst_manifest)? {
+            anyhow::bail!(
+                "versioned replication replica manifest differs from authoritative source for version {}",
+                plan.version_id
+            );
+        }
+        validate_manifest_artifacts(
+            &plan.src_manifest,
+            "source manifest",
+            &plan.version_id,
+            src_blobs_root,
+            blob_codec,
+            hash_timeout_seconds,
+        )?;
+        validate_manifest_artifacts(
+            &plan.dst_manifest,
+            "replica manifest",
+            &plan.version_id,
+            dst_blobs_root,
+            blob_codec,
+            hash_timeout_seconds,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_manifest_artifacts(
+    manifest_path: &Path,
+    artifact: &str,
+    version_id: &str,
+    blobs_root: &Path,
+    blob_codec: &BlobCodec,
+    hash_timeout_seconds: u64,
+) -> Result<()> {
+    require_regular_file(manifest_path, artifact, version_id, None)?;
+    let manifest: Manifest = read_json(manifest_path).with_context(|| {
+        format!(
+            "versioned::validate_manifest_artifacts failed to parse {artifact} {}",
+            redact_path(manifest_path)
+        )
+    })?;
+    for entry in manifest.entries.values() {
+        if entry.kind != ManifestEntryKind::File {
+            continue;
+        }
+        let Some(hash) = entry.sha256.as_deref() else {
+            continue;
+        };
+        validate_blob_hash(hash).with_context(|| {
+            format!(
+                "versioned::validate_manifest_artifacts invalid hash in {artifact} for version {version_id}"
+            )
+        })?;
+        let blob = blob_path(blobs_root, hash);
+        require_regular_file(&blob, "referenced blob", version_id, Some(hash))?;
+        require_plaintext_hash(
+            blob_codec,
+            &blob,
+            hash,
+            hash_timeout_seconds,
+            "referenced blob",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_blob_hash(hash: &str) -> Result<()> {
+    if hash.len() != 64
+        || !hash
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
+        anyhow::bail!("versioned replication expected a 64-character lowercase hex sha256");
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegularFileState {
+    Missing,
+    Regular,
+}
+
+fn regular_file_state(path: &Path) -> Result<RegularFileState> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => anyhow::bail!(
+            "versioned replication refuses symbolic-link artifact at {}",
+            redact_path(path)
+        ),
+        Ok(metadata) if metadata.is_file() => Ok(RegularFileState::Regular),
+        Ok(_) => anyhow::bail!(
+            "versioned replication expected a regular-file artifact at {}",
+            redact_path(path)
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RegularFileState::Missing),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "versioned::regular_file_state failed to inspect {}",
+                redact_path(path)
+            )
+        }),
+    }
+}
+
+fn require_regular_file(
+    path: &Path,
+    artifact: &str,
+    version_id: &str,
+    hash: Option<&str>,
+) -> Result<()> {
+    if regular_file_state(path)? != RegularFileState::Regular {
+        anyhow::bail!(
+            "versioned replication missing {artifact} for version {version_id}{} at {}",
+            hash.map(|value| format!(" (sha256 {value})"))
+                .unwrap_or_default(),
+            redact_path(path)
+        );
+    }
+    Ok(())
+}
+
+fn files_have_identical_contents(left: &Path, right: &Path) -> Result<bool> {
+    require_regular_file(left, "comparison source", "<comparison>", None)?;
+    require_regular_file(right, "comparison target", "<comparison>", None)?;
+    let left_file = fs::File::open(left).with_context(|| {
+        format!(
+            "versioned::files_have_identical_contents failed opening {}",
+            redact_path(left)
+        )
+    })?;
+    let right_file = fs::File::open(right).with_context(|| {
+        format!(
+            "versioned::files_have_identical_contents failed opening {}",
+            redact_path(right)
+        )
+    })?;
+    if left_file.metadata()?.len() != right_file.metadata()?.len() {
+        return Ok(false);
+    }
+    let mut left_reader = BufReader::new(left_file);
+    let mut right_reader = BufReader::new(right_file);
+    let mut left_buffer = [0_u8; 64 * 1024];
+    let mut right_buffer = [0_u8; 64 * 1024];
+    loop {
+        let left_read = left_reader
+            .read(&mut left_buffer)
+            .context("versioned::files_have_identical_contents failed reading source")?;
+        let right_read = right_reader
+            .read(&mut right_buffer)
+            .context("versioned::files_have_identical_contents failed reading target")?;
+        if left_read != right_read || left_buffer[..left_read] != right_buffer[..right_read] {
+            return Ok(false);
+        }
+        if left_read == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+fn blob_matches_plaintext_hash(
+    blob_codec: &BlobCodec,
+    blob_path: &Path,
+    expected_sha256: &str,
+    timeout_seconds: u64,
+) -> bool {
+    blob_codec
+        .sha256_plaintext_blob(blob_path, timeout_seconds)
+        .is_ok_and(|actual| actual == expected_sha256)
+}
+
+fn require_plaintext_hash(
+    blob_codec: &BlobCodec,
+    blob_path: &Path,
+    expected_sha256: &str,
+    timeout_seconds: u64,
+    artifact: &str,
+) -> Result<()> {
+    let actual = blob_codec
+        .sha256_plaintext_blob(blob_path, timeout_seconds)
+        .with_context(|| {
+            format!(
+                "versioned replication failed decoding {artifact} {}",
+                redact_path(blob_path)
+            )
+        })?;
+    if actual != expected_sha256 {
+        anyhow::bail!(
+            "versioned replication plaintext hash mismatch for {artifact} {} (expected {}, got {})",
+            redact_path(blob_path),
+            expected_sha256,
+            actual
+        );
+    }
+    Ok(())
+}
+
+/// Retention pruning on the primary should be reflected in replicas to keep versions aligned.
 fn mirror_manifest_deletions(
     cfg: &Config,
     src_index: &VersionIndex,
@@ -379,19 +674,7 @@ fn mirror_manifest_deletions(
     Ok(deleted)
 }
 
-/// Summary: Atomically copy a file to the replica store with throttling and time bounds.
-///
-/// Inputs: config (for buffer sizing and throttling), source path, and destination path.
-///
-/// Outputs: bytes written to the destination.
-///
-/// Side effects: Writes a temp file, fsyncs it, renames it into place, and best-effort syncs the parent directory.
-///
-/// Error handling: Returns contextual errors for IO, timeouts, and rename failures.
-///
-/// Ties to other methods: Used by replication for manifests, indexes, scan reports, and blobs.
-///
-/// Why this exists: Replicas must not observe partial blobs that could break restore verification.
+/// Replicas must not observe partial blobs that could break restore verification.
 fn copy_file_atomic(cfg: &Config, src: &Path, dst: &Path) -> Result<u64> {
     let parent = dst
         .parent()
@@ -429,19 +712,6 @@ fn copy_file_atomic(cfg: &Config, src: &Path, dst: &Path) -> Result<u64> {
     Ok(bytes)
 }
 
-/// Summary: copy_stream_with_throttle orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn copy_stream_with_throttle(
     src: &Path,
     out: &mut dyn Write,
@@ -500,19 +770,6 @@ fn copy_stream_with_throttle(
     Ok(total)
 }
 
-/// Summary: sync_dir_best_effort orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(target_family = "unix")]
 fn sync_dir_best_effort(path: &Path) {
     match fs::File::open(path) {
@@ -535,19 +792,6 @@ fn sync_dir_best_effort(path: &Path) {
     }
 }
 
-/// Summary: sync_dir_best_effort orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[cfg(not(target_family = "unix"))]
 fn sync_dir_best_effort(_path: &Path) {}
 

@@ -7,6 +7,7 @@ on:
   pull_request:
   schedule:
     - cron: "17 7 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,21 +31,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Tauri Linux prerequisites
+        if: matrix.language == 'rust'
+        run: ./scripts/ci/install-tauri-linux-deps.sh
+
       - name: Set up Rust
         if: matrix.language == 'rust'
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Set up Node
+        if: matrix.language == 'javascript-typescript'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: crates/gui/frontend/package-lock.json
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@865f5f5c36632f18690a3d569fa0a764f2da0c3e # v3
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
 
       - name: Build Rust targets
         if: matrix.language == 'rust'
-        run: cargo build -p backup_core -p daemon -p cli --locked
+        run: cargo build --workspace --all-features --locked
+
+      - name: Build frontend target
+        if: matrix.language == 'javascript-typescript'
+        working-directory: crates/gui/frontend
+        run: |
+          npm ci
+          npm run build
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@865f5f5c36632f18690a3d569fa0a764f2da0c3e # v3
         with:
           category: "/language:${{ matrix.language }}"

@@ -4,19 +4,7 @@ use std::process::{Command, Output};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use tempfile::TempDir;
 
-/// Summary: Returns a process-local lock for tests that mutate process environment variables.
-///
-/// Inputs: none.
-///
-/// Outputs: a mutex guard held for the caller lifetime.
-///
-/// Side effects: Serializes CLI integration tests within a process.
-///
-/// Error handling: Panics with contextual method/file messaging when lock acquisition fails.
-///
-/// Ties to other methods: `CliFixture::command` environment setup and all CLI contract tests.
-///
-/// Why this exists: env vars are process-global and must be isolated for deterministic runs.
+/// Env vars are process-global and must be isolated for deterministic runs.
 pub fn env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -24,19 +12,7 @@ pub fn env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|error| error.into_inner())
 }
 
-/// Summary: Deterministic fixture factory for CLI integration contract tests.
-///
-/// Inputs: none.
-///
-/// Outputs: temporary workspace paths and prewritten validated config file.
-///
-/// Side effects: Creates temporary directories/files and writes config TOML.
-///
-/// Error handling: Panics with contextual method/file messaging on fixture creation failures.
-///
-/// Ties to other methods: `run_cli` and command contract assertions.
-///
-/// Why this exists: keep CLI tests independent from user machine state and existing config.
+/// Keep CLI tests independent from user machine state and existing config.
 pub struct CliFixture {
     _tmp: TempDir,
     config_path: std::path::PathBuf,
@@ -45,19 +21,7 @@ pub struct CliFixture {
 }
 
 impl CliFixture {
-    /// Summary: Builds a new deterministic CLI fixture with a valid config and watched file.
-    ///
-    /// Inputs: fixture name used in temp directory prefix.
-    ///
-    /// Outputs: initialized `CliFixture`.
-    ///
-    /// Side effects: Writes fixture config and watched file to disk.
-    ///
-    /// Error handling: Panics with contextual method/file messaging when setup fails.
-    ///
-    /// Ties to other methods: `command` and `run_cli`.
-    ///
-    /// Why this exists: provide stable preconditions for CLI contract tests.
+    /// Provide stable preconditions for CLI contract tests.
     pub fn new(name: &str) -> Self {
         let tmp = tempfile::Builder::new()
             .prefix(name)
@@ -113,19 +77,7 @@ impl CliFixture {
         }
     }
 
-    /// Summary: Builds a CLI process command with deterministic environment overrides.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: configured `Command` ready for args execution.
-    ///
-    /// Side effects: None until command execution.
-    ///
-    /// Error handling: Panics with contextual method/file messaging when binary path is missing.
-    ///
-    /// Ties to other methods: `run_cli`.
-    ///
-    /// Why this exists: centralize environment contract for all CLI integration tests.
+    /// Centralize environment contract for all CLI integration tests.
     pub fn command(&self) -> Command {
         let exe = std::env::var_os("CARGO_BIN_EXE_cli").unwrap_or_else(|| {
             let current = std::env::current_exe()
@@ -145,19 +97,7 @@ impl CliFixture {
     }
 }
 
-/// Summary: Runs the CLI binary with fixture-provided environment and args.
-///
-/// Inputs: fixture reference and argument slice.
-///
-/// Outputs: process `Output` including status/stdout/stderr.
-///
-/// Side effects: Executes the CLI process.
-///
-/// Error handling: Panics with contextual method/file messaging when process execution fails.
-///
-/// Ties to other methods: all CLI contract tests in this crate.
-///
-/// Why this exists: keep command invocation consistent and reusable across tests.
+/// Keep command invocation consistent and reusable across tests.
 pub fn run_cli(fixture: &CliFixture, args: &[&str]) -> Output {
     fixture
         .command()

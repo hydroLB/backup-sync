@@ -1,46 +1,25 @@
 use crate::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Summary: Resolves the default launchd plist path.
-///
-/// Inputs: none.
-///
-/// Outputs: the default plist path.
-///
-/// Side effects: Reads the user home directory.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation on macOS.
-///
-/// Why this exists: keep launchd manifest placement consistent.
+/// Keep launchd manifest placement consistent.
 pub fn default_plist_path() -> Result<PathBuf> {
     let mut path = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home directory not found"))?;
     path.push("Library/LaunchAgents/com.backup_sync.daemon.plist");
     Ok(path)
 }
 
-/// Summary: Builds and optionally writes the launchd plist manifest.
-///
-/// Inputs: the destination path, daemon executable path, and optional log path.
-///
-/// Outputs: the plist content string.
-///
-/// Side effects: Creates directories and writes the plist when a destination is provided.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: macOS service installation and export flows.
-///
-/// Why this exists: keep launchd manifests consistent across installs.
+/// Keep launchd manifests consistent across installs.
 pub fn write_plist(destination: &Path, exec: &Path, log_path: Option<&Path>) -> Result<String> {
     let io_policy = BlockingIoPolicy::bootstrap_defaults();
-    let exec_str = exec.display().to_string();
-    let log_str = log_path
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "/tmp/backup_sync.log".to_string());
+    let exec_str = escape_xml_text(&exec.display().to_string(), "executable path")?;
+    let log_str = escape_xml_text(
+        &log_path
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "/tmp/backup_sync.log".to_string()),
+        "log path",
+    )?;
     let contents = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -86,4 +65,31 @@ pub fn write_plist(destination: &Path, exec: &Path, log_path: Option<&Path>) -> 
         },
     )?;
     Ok(contents)
+}
+
+fn escape_xml_text(value: &str, field: &str) -> Result<String> {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if !is_xml_10_character(character) {
+            bail!(
+                "{field} contains a character that XML 1.0 cannot represent: U+{:04X}",
+                character as u32
+            );
+        }
+
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(character),
+        }
+    }
+    Ok(escaped)
+}
+
+fn is_xml_10_character(character: char) -> bool {
+    matches!(character, '\u{9}' | '\u{A}' | '\u{D}')
+        || matches!(character as u32, 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF)
 }

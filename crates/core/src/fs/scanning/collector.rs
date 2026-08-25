@@ -8,19 +8,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use tracing::warn;
 use walkdir::{DirEntry, WalkDir};
 
-/// Summary: Converts filesystem modified time to a stable i64 timestamp.
-///
-/// Inputs: filesystem metadata.
-///
-/// Outputs: a Unix timestamp in nanoseconds stored as i64.
-///
-/// Side effects: Reads filesystem metadata timestamps.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: file metadata storage for change detection.
-///
-/// Why this exists: keep timestamps comparable across runs.
+/// Keep timestamps comparable across runs.
 fn mtime_i64(meta: &fs::Metadata) -> Result<i64> {
     let m = meta
         .modified()
@@ -35,19 +23,7 @@ fn mtime_i64(meta: &fs::Metadata) -> Result<i64> {
     Ok(ts)
 }
 
-/// Summary: Checks whether a directory entry is hidden by name.
-///
-/// Inputs: a directory entry from WalkDir.
-///
-/// Outputs: true when the entry is hidden.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: scan filtering for hidden files.
-///
-/// Why this exists: optionally skip hidden files when configured.
+/// Optionally skip hidden files when configured.
 fn is_hidden(entry: &DirEntry) -> bool {
     entry
         .file_name()
@@ -56,19 +32,7 @@ fn is_hidden(entry: &DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-/// Summary: Builds a glob matcher for ignore patterns.
-///
-/// Inputs: a list of glob patterns.
-///
-/// Outputs: a compiled `GlobSet`.
-///
-/// Side effects: Emits warnings for invalid patterns.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: scan filtering for ignored paths.
-///
-/// Why this exists: keep ignore matching efficient during scans.
+/// Keep ignore matching efficient during scans.
 fn build_ignore_set(patterns: &[String]) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for p in patterns {
@@ -86,19 +50,7 @@ fn build_ignore_set(patterns: &[String]) -> Result<GlobSet> {
         .context("fs::scanning::build_ignore_set failed to build ignore set")
 }
 
-/// Summary: Enforces a scan timeout while collecting filesystem metadata.
-///
-/// Inputs: the scan start time, timeout duration, and context label.
-///
-/// Outputs: `Ok(())` when within bounds or an error when timed out.
-///
-/// Side effects: Reads the system clock.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: scan guardrails to avoid long running IO.
-///
-/// Why this exists: keep scan operations bounded on slow or problematic filesystems.
+/// Keep scan operations bounded on slow or problematic filesystems.
 fn check_scan_timeout(start: Instant, timeout: Duration, context: &str) -> Result<()> {
     if start.elapsed() > timeout {
         anyhow::bail!(
@@ -110,19 +62,7 @@ fn check_scan_timeout(start: Instant, timeout: Duration, context: &str) -> Resul
     Ok(())
 }
 
-/// Summary: Collects file metadata for all configured watched paths.
-///
-/// Inputs: the loaded config.
-///
-/// Outputs: a list of `FileMeta` entries for each tracked file.
-///
-/// Side effects: Reads filesystem metadata and emits warnings for skipped entries.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: backup planning and change detection.
-///
-/// Why this exists: provide a consistent snapshot of watched files for planning.
+/// Provide a consistent snapshot of watched files for planning.
 pub fn collect_targets(cfg: &Config) -> Result<Vec<FileMeta>> {
     if cfg.watched.is_empty() {
         anyhow::bail!("fs::scanning::collect_targets no watched paths configured; add a folder/file to continue");

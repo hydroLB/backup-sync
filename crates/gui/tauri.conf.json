@@ -8,16 +8,56 @@
     ]
   },
   "build": {
-    "beforeDevCommand": "cd ../frontend && npm run dev",
-    "beforeBuildCommand": "cd ../frontend && npm run build",
-    "frontendDist": "../frontend/dist",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "frontend/dist",
     "devUrl": "http://localhost:5173"
   },
   "productName": "Backup Sync",
   "version": "0.1.0",
-  "identifier": "com.example.backup_sync",
+  "identifier": "com.hydrolb.backupsync",
   "plugins": {},
   "app": {
+    "security": {
+      "freezePrototype": true,
+      "csp": {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+        "connect-src": ["'self'", "ipc:", "http://ipc.localhost"],
+        "img-src": ["'self'", "asset:", "http://asset.localhost", "data:", "blob:"],
+        "font-src": ["'self'", "data:"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'none'"]
+      },
+      "devCsp": {
+        "default-src": ["'self'", "http://localhost:5173"],
+        "script-src": ["'self'", "'unsafe-inline'", "http://localhost:5173"],
+        "style-src": ["'self'", "'unsafe-inline'", "http://localhost:5173"],
+        "connect-src": [
+          "'self'",
+          "ipc:",
+          "http://ipc.localhost",
+          "http://localhost:5173",
+          "ws://localhost:5173"
+        ],
+        "img-src": [
+          "'self'",
+          "asset:",
+          "http://asset.localhost",
+          "http://localhost:5173",
+          "data:",
+          "blob:"
+        ],
+        "font-src": ["'self'", "http://localhost:5173", "data:"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'none'"]
+      }
+    },
     "windows": [
       {
         "title": "Backup Sync",

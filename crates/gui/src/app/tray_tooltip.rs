@@ -26,19 +26,6 @@ struct TrayHealthCache {
 }
 
 impl Default for TrayHealthCache {
-    /// Summary: default orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn default() -> Self {
         Self {
             last_full_check: None,
@@ -59,19 +46,6 @@ enum TraySeverity {
 }
 
 impl TraySeverity {
-    /// Summary: label orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn label(self) -> &'static str {
         match self {
             TraySeverity::Normal => "Normal",
@@ -82,19 +56,6 @@ impl TraySeverity {
 }
 
 impl TraySeverity {
-    /// Summary: max orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     fn max(self, other: TraySeverity) -> TraySeverity {
         use TraySeverity::*;
         match (self, other) {
@@ -105,19 +66,6 @@ impl TraySeverity {
     }
 }
 
-/// Summary: format_last_sync_label orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn format_last_sync_label(last_run_ts: Option<i64>) -> String {
     match last_run_ts {
         None => "Last sync: Never".to_string(),
@@ -133,19 +81,7 @@ fn format_last_sync_label(last_run_ts: Option<i64>) -> String {
     }
 }
 
-/// Summary: Return cached health snapshot, refreshing it in the background when stale.
-///
-/// Inputs: none.
-///
-/// Outputs: Most recent snapshot.
-///
-/// Side effects: May spawn a blocking refresh task.
-///
-/// Error handling: Refresh failures are stored as error strings; stale values may be used.
-///
-/// Ties to other methods: Used by `update_tray_tooltip` for tray severity calculation.
-///
-/// Why this exists: Keep tray updates responsive even when filesystem checks are slow.
+/// Keep tray updates responsive even when filesystem checks are slow.
 async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
     let runtime = super::tuning::resolve_runtime_tuning();
     let full_check_min_interval =
@@ -253,19 +189,7 @@ async fn read_or_refresh_health_snapshot() -> TrayHealthSnapshot {
     snapshot
 }
 
-/// Summary: Perform a full health check (hardening, access, destination writability).
-///
-/// Inputs: none.
-///
-/// Outputs: A snapshot of checks used by tray severity.
-///
-/// Side effects: Reads config and probes filesystem paths.
-///
-/// Error handling: Converts failures into user-facing strings.
-///
-/// Ties to other methods: Called by `read_or_refresh_health_snapshot` in a blocking task.
-///
-/// Why this exists: Keep tray status aligned with current disk and path health.
+/// Keep tray status aligned with current disk and path health.
 fn run_full_health_check() -> TrayHealthSnapshot {
     let startup_hardening_error =
         match hardening::hardening_check_cmd(Some(hardening::HardeningCheckRequest {
@@ -339,19 +263,7 @@ fn run_full_health_check() -> TrayHealthSnapshot {
     }
 }
 
-/// Summary: Refreshes the system tray tooltip using the latest daemon status.
-///
-/// Inputs: the Tauri app handle.
-///
-/// Outputs: `()` after attempting to set the tooltip.
-///
-/// Side effects: Performs IPC calls and updates the tray tooltip.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: tray refresh loops and IPC status calls.
-///
-/// Why this exists: keep tray feedback aligned with daemon health.
+/// Keep tray feedback aligned with daemon health.
 pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
     let runtime = super::tuning::resolve_runtime_tuning();
     let low_space_warning_bytes = runtime.tray_low_space_warning_bytes.max(1);
@@ -438,7 +350,8 @@ pub(crate) async fn update_tray_tooltip(handle: &tauri::AppHandle) {
                 }
             }
             if let Some(last_sync_line) = super::tray_menu::last_sync_line_handle() {
-                if let Err(error) = last_sync_line.set_text(format_last_sync_label(status.last_run_ts))
+                if let Err(error) =
+                    last_sync_line.set_text(format_last_sync_label(status.last_run_ts))
                 {
                     warn!(
                         error = %error,

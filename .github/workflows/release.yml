@@ -6,18 +6,26 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     name: release-validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+
+      - name: Fetch main for ancestry validation
+        run: git fetch origin main --force
+
+      - name: Validate release ref policy
+        run: ./scripts/release/validate_release_ref.sh "${GITHUB_REF_NAME}" "origin/main"
 
       - name: Validate SemVer tag
         run: ./scripts/release/validate_semver_tag.sh "${GITHUB_REF_NAME}"
@@ -25,15 +33,20 @@ jobs:
       - name: Validate changelog entry for tagged version
         run: ./scripts/release/validate_changelog_for_release.sh "${GITHUB_REF_NAME#v}" CHANGELOG.md
 
+      - name: Validate release workflow permissions
+        run: ./scripts/tests/release-permissions-smoke.sh
+
   publish:
     name: release-publish
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs:
       - validate
+    permissions:
+      contents: write
     steps:
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: "Backup Sync ${{ github.ref_name }}"
           tag_name: ${{ github.ref_name }}

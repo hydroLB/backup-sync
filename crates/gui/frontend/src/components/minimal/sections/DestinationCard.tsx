@@ -16,21 +16,7 @@ type Props = {
   onRemoveDestination: (destinationId: string) => void;
 };
 
-/**
- * Summary: Render the destination selection card in minimal mode.
- *
- * Inputs: Current destination path, busy flag, and choose handler.
- *
- * Outputs: Card React element tree.
- *
- * Side effects: Calls `onChoose` when the user clicks the picker button.
- *
- * Error handling: Delegated to parent via handler.
- *
- * Ties to other methods: Used by `MinimalMain` layout for destination setup.
- *
- * Why this exists: Keep section layout consistent and reduce inline markup in `MinimalMain`.
- */
+/** Keep section layout consistent and reduce inline markup in `MinimalMain`. */
 export function DestinationCard({
   destinations,
   busy,
@@ -47,12 +33,22 @@ export function DestinationCard({
   ).length;
 
   return (
-    <div className="card destination-card">
-      <h2 className="section-heading">Destination</h2>
-      <p className="section-subtitle">
+    <section className="card destination-card" aria-labelledby="destination-card-title">
+      <div className="section-identity">
+        <span className="section-step-badge" aria-hidden="true">
+          01
+        </span>
+        <div>
+          <span className="section-eyebrow">Storage</span>
+          <h2 className="section-heading" id="destination-card-title">
+            Where should copies live?
+          </h2>
+        </div>
+      </div>
+      <p className="section-subtitle section-subtitle--roomy">
         {destinationCount > 0
-          ? `${destinationCount} destination${destinationCount === 1 ? '' : 's'} ready. Additional destinations automatically mirror protected paths.`
-          : 'Pick where Backup Sync stores version history before adding protected paths.'}
+          ? `${destinationCount} location${destinationCount === 1 ? ' is' : 's are'} ready. Every added location receives its own recoverable copy.`
+          : 'Choose the first place where Backup Sync should preserve version history.'}
       </p>
       {primaryDestination?.path ? (
         <div className="pill pill-row destination-primary-row mt-3" title={primaryDestination.path}>
@@ -135,6 +131,6 @@ export function DestinationCard({
         </Button>
       </div>
       {replicationWarning && <InlineAlert kind="error">{replicationWarning}</InlineAlert>}
-    </div>
+    </section>
   );
 }

@@ -1,81 +1,123 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { defineConfig, Plugin } from 'vite';
+import react from '@vitejs/plugin-react';
+import { sites } from '@openai/sites-vite-plugin';
+import { cloudflare } from '@cloudflare/vite-plugin';
+import { fileURLToPath } from 'node:url';
 
-/**
- * Summary: Compute a stable 32-bit FNV-1a hash for an input string.
- *
- * Inputs: `input` as a string.
- *
- * Outputs: A 32-bit unsigned integer hash.
- *
- * Side effects: None.
- *
- * Error handling: None (pure computation).
- *
- * Ties to other methods: Used by `stableDevPort`.
- *
- * Why this exists: Derive a deterministic per-repo port without hardcoding.
- */
-function fnv1a32(input: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
+const WEB_TITLE = 'Backup Sync — Content-addressed local backups';
+const WEB_DESCRIPTION =
+  'A fully interactive browser edition of Backup Sync with real hashing, deduplication, immutable versions, integrity verification, replication repair, and restore.';
+const WEB_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self' blob:";
+
+function webMetadata(): Plugin {
+  return {
+    name: 'backup-sync-web-metadata',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        const siteUrl = process.env.VITE_PUBLIC_SITE_URL?.replace(/\/$/, '');
+        const tags = [
+          {
+            tag: 'meta',
+            attrs: { 'http-equiv': 'Content-Security-Policy', content: WEB_CSP },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { name: 'description', content: WEB_DESCRIPTION },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { name: 'theme-color', content: '#050a16' },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { property: 'og:type', content: 'website' },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { property: 'og:title', content: WEB_TITLE },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { property: 'og:description', content: WEB_DESCRIPTION },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { name: 'twitter:card', content: 'summary_large_image' },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { name: 'twitter:title', content: WEB_TITLE },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'meta',
+            attrs: { name: 'twitter:description', content: WEB_DESCRIPTION },
+            injectTo: 'head' as const,
+          },
+          {
+            tag: 'link',
+            attrs: { rel: 'icon', type: 'image/png', href: '/favicon.png' },
+            injectTo: 'head' as const,
+          },
+        ];
+        if (siteUrl) {
+          tags.push(
+            {
+              tag: 'meta',
+              attrs: { property: 'og:url', content: siteUrl },
+              injectTo: 'head' as const,
+            },
+            {
+              tag: 'meta',
+              attrs: { property: 'og:image', content: `${siteUrl}/og.png` },
+              injectTo: 'head' as const,
+            },
+            {
+              tag: 'meta',
+              attrs: { name: 'twitter:image', content: `${siteUrl}/og.png` },
+              injectTo: 'head' as const,
+            },
+          );
+        }
+        return {
+          html: html.replace('<title>Backup Sync</title>', `<title>${WEB_TITLE}</title>`),
+          tags,
+        };
+      },
+    },
+  };
 }
 
-/**
- * Summary: Choose a deterministic dev server port in the ephemeral range.
- *
- * Inputs: Reads `process.cwd()` to scope uniqueness to the working directory.
- *
- * Outputs: A port number in 49152–65535.
- *
- * Side effects: Reads process state (`cwd`).
- *
- * Error handling: None (falls back via arithmetic only).
- *
- * Ties to other methods: Used by `resolveDevPort`.
- *
- * Why this exists: Avoid collisions with other projects and well-known ports.
- */
-function stableDevPort(): number {
-  const base = 49152;
-  const range = 65535 - base + 1;
-  return base + (fnv1a32(process.cwd()) % range);
-}
+export default defineConfig(() => {
+  const webRuntime = process.env.VITE_APP_RUNTIME === 'web';
 
-/**
- * Summary: Resolve the dev server port from env vars with validation.
- *
- * Inputs: `BACKUP_SYNC_DEV_PORT` or `VITE_PORT` when set.
- *
- * Outputs: A validated port (0–65535) or a deterministic fallback.
- *
- * Side effects: Reads environment variables.
- *
- * Error handling: Invalid values fall back to `stableDevPort`.
- *
- * Ties to other methods: Used by Vite `server.port`.
- *
- * Why this exists: Allow overrides while keeping default behavior collision-resistant.
- */
-function resolveDevPort(): number {
-  const raw = process.env.BACKUP_SYNC_DEV_PORT ?? process.env.VITE_PORT;
-  if (!raw) return stableDevPort();
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-    return stableDevPort();
-  }
-  return parsed;
-}
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: "127.0.0.1",
-    port: resolveDevPort(),
-    strictPort: false,
-  },
+  return {
+    plugins: [react(), ...(webRuntime ? [webMetadata(), sites(), cloudflare()] : [])],
+    resolve: webRuntime
+      ? {
+          alias: {
+            '@tauri-apps/api/core': fileURLToPath(
+              new URL('./src/runtime/web/tauriCoreStub.ts', import.meta.url),
+            ),
+            '@tauri-apps/plugin-dialog': fileURLToPath(
+              new URL('./src/runtime/web/tauriDialogStub.ts', import.meta.url),
+            ),
+          },
+        }
+      : undefined,
+    server: {
+      host: '127.0.0.1',
+      port: 5173,
+      strictPort: true,
+    },
+  };
 });

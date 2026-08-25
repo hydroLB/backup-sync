@@ -28,21 +28,7 @@ type Result = {
   runRestore: (params: RunRestoreParams) => Promise<void>;
 };
 
-/**
- * Summary: Manage restore destination settings and execute restore operations.
- *
- * Inputs: Modal close callback and event callback.
- *
- * Outputs: Restore mode/scope state, target-folder picker, and restore runner.
- *
- * Side effects: Opens the native folder picker and invokes restore IPC endpoints.
- *
- * Error handling: Emits contextual restore failures through `onEvent`.
- *
- * Ties to other methods: Used by `RestoreModal` and `RestoreModalBody`.
- *
- * Why this exists: Keep restore execution rules and prompts out of the presentation layer.
- */
+/** Keep restore execution rules and prompts out of the presentation layer. */
 export function useRestoreExecution({ isOpen, onClose, onEvent }: Params): Result {
   const [mode, setMode] = useState<RestoreModeDto>('to_directory');
   const [scope, setScope] = useState<'folder' | 'files'>('folder');
@@ -58,21 +44,7 @@ export function useRestoreExecution({ isOpen, onClose, onEvent }: Params): Resul
     setTargetDir('');
   }, [isOpen]);
 
-  /**
-   * Summary: Open the native folder picker for choosing a restore destination.
-   *
-   * Inputs: None.
-   *
-   * Outputs: Updates the selected restore target directory.
-   *
-   * Side effects: Opens a native directory picker.
-   *
-   * Error handling: Emits contextual picker failures through `onEvent`.
-   *
-   * Ties to other methods: Used by `RestoreModalBody` when restore mode is `to_directory`.
-   *
-   * Why this exists: Restore-to-directory mode needs a safe explicit target path.
-   */
+  /** Restore-to-directory mode needs a safe explicit target path. */
   const pickTargetDir = useCallback(async () => {
     try {
       const selection = await openDialog({
@@ -89,21 +61,7 @@ export function useRestoreExecution({ isOpen, onClose, onEvent }: Params): Resul
     }
   }, [onEvent]);
 
-  /**
-   * Summary: Execute a restore using the current scope, mode, and target selection.
-   *
-   * Inputs: Selected source path, version id, and file-selection map.
-   *
-   * Outputs: Runs the restore request and closes the modal on success.
-   *
-   * Side effects: Invokes restore IPC calls, shows confirmation dialogs, and updates busy state.
-   *
-   * Error handling: Emits actionable validation and execution failures through `onEvent`.
-   *
-   * Ties to other methods: Triggered by the modal primary action button.
-   *
-   * Why this exists: The restore flow needs one place to enforce confirmation and input rules.
-   */
+  /** The restore flow needs one place to enforce confirmation and input rules. */
   const runRestore = useCallback(
     async ({ sourcePath, versionId, selected }: RunRestoreParams) => {
       try {

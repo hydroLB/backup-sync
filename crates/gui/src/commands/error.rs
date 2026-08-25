@@ -2,19 +2,7 @@ use anyhow::Error;
 use backup_core::logging::redact_text;
 use serde::Serialize;
 
-/// Summary: Typed GUI error codes used by Tauri command boundaries.
-///
-/// Inputs: mapped from canonical errors or legacy command code strings.
-///
-/// Outputs: typed GUI code variants.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `ErrorEnvelope` constructors and boundary mappers.
-///
-/// Why this exists: make GUI boundary error contracts explicit and consistent.
+/// Make GUI boundary error contracts explicit and consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuiErrorCode {
     ConfigLoad,
@@ -37,19 +25,7 @@ pub enum GuiErrorCode {
 }
 
 impl GuiErrorCode {
-    /// Summary: Returns default actionable hint for this GUI error class.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: concise operator-facing hint string.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `ErrorEnvelope` message normalization.
-    ///
-    /// Why this exists: ensure GUI command failures are actionable by default.
+    /// Ensure GUI command failures are actionable by default.
     fn hint(self) -> &'static str {
         match self {
             Self::ConfigLoad => "Fix config path or permissions, then reload settings.",
@@ -76,19 +52,7 @@ impl GuiErrorCode {
         }
     }
 
-    /// Summary: Maps legacy string codes to typed GUI boundary codes.
-    ///
-    /// Inputs: legacy response code string.
-    ///
-    /// Outputs: typed GUI code variant.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `ErrorEnvelope::new`.
-    ///
-    /// Why this exists: preserve backward compatibility while migrating to typed codes.
+    /// Preserve backward compatibility while migrating to typed codes.
     fn from_legacy_code(code: &str) -> Self {
         match code {
             "CONFIG_LOAD" => Self::ConfigLoad,
@@ -112,19 +76,7 @@ impl GuiErrorCode {
     }
 }
 
-/// Summary: Error payload returned by GUI commands.
-///
-/// Inputs: an error code and message.
-///
-/// Outputs: a serializable error envelope.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Tauri command error responses.
-///
-/// Why this exists: provide structured errors for the frontend.
+/// Provide structured errors for the frontend.
 #[derive(Serialize, Debug, Clone)]
 pub struct ErrorEnvelope {
     pub code: String,
@@ -132,19 +84,7 @@ pub struct ErrorEnvelope {
 }
 
 impl ErrorEnvelope {
-    /// Summary: Creates a typed error envelope from a legacy code string and message.
-    ///
-    /// Inputs: code string and message.
-    ///
-    /// Outputs: an `ErrorEnvelope`.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: GUI command error handling.
-    ///
-    /// Why this exists: preserve compatibility while normalizing actionable error messages.
+    /// Preserve compatibility while normalizing actionable error messages.
     pub fn new(code: impl AsRef<str>, message: impl Into<String>) -> Self {
         let code = code.as_ref().to_string();
         let kind = GuiErrorCode::from_legacy_code(&code);
@@ -154,19 +94,7 @@ impl ErrorEnvelope {
         }
     }
 
-    /// Summary: Maps an anyhow error into a GUI envelope while preserving an explicit legacy code.
-    ///
-    /// Inputs: legacy code string, context label, and source error.
-    ///
-    /// Outputs: normalized GUI error envelope using the provided response code.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: command handlers that keep compatibility-critical code values.
-    ///
-    /// Why this exists: allow centralized mapping without breaking existing frontend code contracts.
+    /// Allow centralized mapping without breaking existing frontend code contracts.
     pub fn from_anyhow_with_code(
         code: impl AsRef<str>,
         context: &'static str,
@@ -182,19 +110,7 @@ impl ErrorEnvelope {
     }
 }
 
-/// Summary: Appends a hint to an error message when one is not already present.
-///
-/// Inputs: message body and default hint text.
-///
-/// Outputs: message with a single hint suffix.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `ErrorEnvelope` constructors.
-///
-/// Why this exists: keep GUI boundary errors actionable without duplicating hint text.
+/// Keep GUI boundary errors actionable without duplicating hint text.
 fn ensure_hint(message: String, hint: &str) -> String {
     if message.contains("Hint:") {
         return message;
@@ -203,19 +119,7 @@ fn ensure_hint(message: String, hint: &str) -> String {
 }
 
 impl std::fmt::Display for ErrorEnvelope {
-    /// Summary: Formats the error envelope for display.
-    ///
-    /// Inputs: the formatter and the error envelope.
-    ///
-    /// Outputs: a formatted string.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: logging and debug output.
-    ///
-    /// Why this exists: provide readable error output when logged.
+    /// Provide readable error output when logged.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
     }

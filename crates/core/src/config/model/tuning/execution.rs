@@ -23,19 +23,7 @@ pub struct ExecutionTuning {
 }
 
 impl Default for ExecutionTuning {
-    /// Summary: Builds a baseline execution tuning profile for copy, safety, and retry behavior.
-    ///
-    /// Inputs: the default functions in `config::model::defaults`.
-    ///
-    /// Outputs: a fully populated tuning profile.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `BackupExecutor` for copy buffering, free space checks, and retry backoff.
-    ///
-    /// Why this exists: centralize execution knobs so defaults stay aligned across the codebase.
+    /// Centralize execution knobs so defaults stay aligned across the codebase.
     fn default() -> Self {
         Self {
             copy_buffer_bytes: crate::config::model::defaults::default_copy_buffer_bytes(),
@@ -52,19 +40,7 @@ impl Default for ExecutionTuning {
 }
 
 impl ExecutionTuning {
-    /// Summary: Converts configured millisecond delays into `Duration` values.
-    ///
-    /// Inputs: the configured list of delay milliseconds.
-    ///
-    /// Outputs: a vector of `Duration` values in the same order.
-    ///
-    /// Side effects: Reads system time for jitter entropy.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `BackupExecutor::execute` for retry scheduling.
-    ///
-    /// Why this exists: avoid duplicating conversion logic across execution paths.
+    /// Avoid duplicating conversion logic across execution paths.
     pub(crate) fn retry_delays(&self) -> Vec<Duration> {
         self.retry_delays_ms
             .iter()
@@ -76,19 +52,7 @@ impl ExecutionTuning {
     }
 }
 
-/// Summary: Applies jitter to a base duration using a percentage window.
-///
-/// Inputs: the base delay and jitter percentage.
-///
-/// Outputs: a jittered delay duration.
-///
-/// Side effects: Reads system time for jitter entropy.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `ExecutionTuning::retry_delays` for retry scheduling variance.
-///
-/// Why this exists: reduce coordinated retries while preserving average backoff.
+/// Reduce coordinated retries while preserving average backoff.
 fn jitter_duration(delay: Duration, jitter_pct: f64) -> Duration {
     if jitter_pct <= 0.0 {
         return delay;

@@ -9,19 +9,7 @@ pub struct HashingTuning {
 }
 
 impl Default for HashingTuning {
-    /// Summary: Builds a baseline hashing tuning profile for buffer sizing and timeouts.
-    ///
-    /// Inputs: the default functions in `config::model::defaults`.
-    ///
-    /// Outputs: a fully populated hashing tuning profile.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: hashing in planning, execution, and verification.
-    ///
-    /// Why this exists: centralize hashing knobs so defaults stay aligned across the codebase.
+    /// Centralize hashing knobs so defaults stay aligned across the codebase.
     fn default() -> Self {
         Self {
             buffer_bytes: crate::config::model::defaults::default_hash_buffer_bytes(),

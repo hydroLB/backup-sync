@@ -1,18 +1,4 @@
-/**
- * Summary: Generate a correlation id for client side tracing.
- *
- * Inputs: `prefix` as a string identifier for the call site.
- *
- * Outputs: A correlation id string.
- *
- * Side effects: Reads system time and consumes crypto randomness.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Service calls that pass correlation ids to the backend.
- *
- * Why this exists: Allows log aggregation across UI and backend actions.
- */
+/** Allows log aggregation across UI and backend actions. */
 export function correlationId(prefix: string): string {
   try {
     const rand = randomHex(2);
@@ -23,21 +9,7 @@ export function correlationId(prefix: string): string {
   }
 }
 
-/**
- * Summary: Generate a hex string using cryptographically secure randomness.
- *
- * Inputs: `bytes` as the number of random bytes to generate.
- *
- * Outputs: A hex encoded string.
- *
- * Side effects: Consumes entropy from Web Crypto.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `correlationId` for entropy generation.
- *
- * Why this exists: Avoids predictable correlation ids in logs.
- */
+/** Avoids predictable correlation ids in logs. */
 function randomHex(bytes: number): string {
   try {
     if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== 'function') {

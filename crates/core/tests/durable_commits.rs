@@ -7,19 +7,6 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
-/// Summary: build_cfg orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_cfg(source: &Path, dest: &Path) -> Config {
     Config {
         backup_root: dest.to_path_buf(),
@@ -54,19 +41,6 @@ fn build_cfg(source: &Path, dest: &Path) -> Config {
     }
 }
 
-/// Summary: assert_index_and_manifests_refer_to_existing_blobs orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn assert_index_and_manifests_refer_to_existing_blobs(dest: &Path) {
     let store_root = dest.join(".backup_sync").join("v1");
     let sources_root = store_root.join("sources");
@@ -120,19 +94,6 @@ fn assert_index_and_manifests_refer_to_existing_blobs(dest: &Path) {
     }
 }
 
-/// Summary: versioned_commit_is_structurally_durable orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn versioned_commit_is_structurally_durable() {
     let tmp = tempdir().expect("durable_commits::versioned_commit_is_structurally_durable tempdir");

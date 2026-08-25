@@ -31,21 +31,7 @@ type MinimalFeedbackState = {
   clearInline: () => void;
 };
 
-/**
- * Summary: Provide a unified feedback path for minimal mode events and toasts.
- *
- * Inputs: Parent `onEvent` callback for external activity logging.
- *
- * Outputs: Toast state and an `emitEvent` helper.
- *
- * Side effects: Starts/stops toast auto-dismiss timers.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `MinimalMain` and modal callbacks for consistent feedback.
- *
- * Why this exists: Ensure success/error/info messages are always visible in minimal mode.
- */
+/** Ensure success/error/info messages are always visible in minimal mode. */
 export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
   const [toast, setToast] = useState<ToastPayload>(null);
   const [inline, setInline] = useState<InlinePayload>(null);
@@ -62,21 +48,7 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
   // Intentionally short so deliberate repeated actions can retrigger the badge.
   const sameTagRetriggerMinMs = 90;
 
-  /**
-   * Summary: Show the Saved badge and (optionally) restart its animation.
-   *
-   * Inputs: A `tag` describing the trigger source.
-   *
-   * Outputs: None.
-   *
-   * Side effects: Updates React state and increments `savedBadgeNonce` to restart animations.
-   *
-   * Error handling: Best-effort; never throws.
-   *
-   * Ties to other methods: Used by `emitEvent` for all success confirmations.
-   *
-   * Why this exists: Prevent duplicate Saved flashes while still providing crisp feedback.
-   */
+  /** Prevent duplicate Saved flashes while still providing crisp feedback. */
   const triggerSavedBadge = useCallback((tag: string) => {
     try {
       const now = Date.now();

@@ -14,7 +14,7 @@
    - `cargo run -p cli -- status`
    - `cargo run -p cli -- doctor`
 2. Validate destination path currently configured.
-   - Check `backup_root` and `[[destinations]]` in `~/.config/backup_sync/config.toml`.
+   - Check `backup_root` and `[[destinations]]` in the OS-native `config.toml`; see [Configuration](../configuration.md#file-locations).
 3. Validate OS-level mount availability and permissions for each destination path.
 4. Review recent daemon logs for destination pause reason.
 5. Confirm free space is above configured minimum (`min_free_space_bytes` if set).

@@ -8,7 +8,7 @@ Allowed direction for runtime dependencies:
 
 1. `crates/core` is the domain and storage engine. It must not depend on app-specific UI/runtime layers.
 2. `crates/daemon`, `crates/cli`, and `crates/gui` may depend on `crates/core` only (no direct cross-dependencies).
-3. `crates/gui/frontend` talks to `crates/gui` IPC commands and should not contain backup engine logic.
+3. The desktop build of `crates/gui/frontend` talks to `crates/gui` IPC commands and should not duplicate Rust backup rules. The hosted build may select the isolated `src/runtime/web` adapter, whose scope is limited to browser-owned data and the existing frontend command contract.
 
 Do not introduce reverse dependencies from `core` into `daemon`, `cli`, `gui`, or frontend.
 Do not add direct `cli <-> daemon`, `gui <-> daemon`, or `cli <-> gui` imports/dependencies. Keep interactions at process or IPC boundaries.
@@ -36,7 +36,9 @@ Automated enforcement lives in `/scripts/check-boundaries.sh` and runs through `
 
 ### `crates/gui/frontend`
 - Owns React presentation, client-side interaction state, and IPC request wiring.
-- Should not implement backup engine rules that already exist in Rust crates.
+- Keeps native and hosted transports behind the same service boundary so the rendered application stays shared.
+- May implement browser-only storage behavior under `src/runtime/web`; it must not be imported by Rust crates or represented as the native engine.
+- Browser behavior that mirrors a native contract requires byte-level tests for hashing, versioning, integrity validation, and restore safety.
 
 ## Public API Ownership
 Code ownership is enforced by `.github/CODEOWNERS`. Treat these surfaces as public contracts:
@@ -67,7 +69,9 @@ Use this placement guide for future PRs:
    - Place in `crates/gui/src/...`
 5. UI rendering/state and IPC calls:
    - Place in `crates/gui/frontend/src/...`
-6. Cross-cutting process docs and architecture notes:
+6. Browser-local implementations of the frontend command contract:
+   - Place only in `crates/gui/frontend/src/runtime/web/...`
+7. Cross-cutting process docs and architecture notes:
    - Place in `docs/...`
 
 If a change touches more than one layer, keep domain logic in the lowest valid layer and keep upper layers as thin adapters.

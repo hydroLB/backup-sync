@@ -30,19 +30,7 @@ pub struct BackupExecutor {
 }
 
 impl BackupExecutor {
-    /// Summary: Builds an executor from the shared configuration model.
-    ///
-    /// Inputs: a reference to the shared config.
-    ///
-    /// Outputs: a ready to use `BackupExecutor` instance.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: config defaults and runtime execution setup.
-    ///
-    /// Why this exists: keep executor wiring consistent across CLI, daemon, and GUI callers.
+    /// Keep executor wiring consistent across CLI, daemon, and GUI callers.
     pub fn from_config(cfg: &crate::config::model::Config) -> Self {
         Self {
             max_parallel_copies: cfg.max_parallel_copies,
@@ -53,19 +41,7 @@ impl BackupExecutor {
         }
     }
 
-    /// Summary: Executes the backup plan and aggregates per item results into a summary.
-    ///
-    /// Inputs: the planned items and the mutable state store.
-    ///
-    /// Outputs: a `BackupResult` with counts for UI and logging.
-    ///
-    /// Side effects: Reads and writes filesystem data, mutates stored state, and emits logs.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `backup_one` for per file execution and into state updates for error surfacing.
-    ///
-    /// Why this exists: coordinate execution and keep state changes consistent across items.
+    /// Coordinate execution and keep state changes consistent across items.
     pub fn execute(
         &self,
         plan: &[crate::backup::planning::PlannedItem],
@@ -102,19 +78,7 @@ impl BackupExecutor {
         })
     }
 
-    /// Summary: Performs a single item backup from source to destination and updates state.
-    ///
-    /// Inputs: the planned item, mutable state, and retry delays.
-    ///
-    /// Outputs: `Ok(())` when the backup is durable and state is updated.
-    ///
-    /// Side effects: Reads and writes filesystem data and mutates stored state.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `copy_with_throttle`, `retry_with_backoff`, and retention enforcement.
-    ///
-    /// Why this exists: isolate per item work so failures do not break the entire cycle.
+    /// Isolate per item work so failures do not break the entire cycle.
     fn backup_one(
         &self,
         item: &crate::backup::planning::PlannedItem,
@@ -132,19 +96,7 @@ impl BackupExecutor {
         Ok(())
     }
 
-    /// Summary: Ensures the source path is present before attempting a backup.
-    ///
-    /// Inputs: the source path.
-    ///
-    /// Outputs: `Ok(())` when the source exists.
-    ///
-    /// Side effects: Reads filesystem metadata.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `backup_one` for upfront validation.
-    ///
-    /// Why this exists: fail early with a specific error before doing IO work.
+    /// Fail early with a specific error before doing IO work.
     fn ensure_source_exists(&self, src: &Path) -> Result<()> {
         if !src.exists() {
             anyhow::bail!(
@@ -155,19 +107,7 @@ impl BackupExecutor {
         Ok(())
     }
 
-    /// Summary: Computes the source hash, reusing a precomputed value when provided.
-    ///
-    /// Inputs: the source path, optional precomputed hash, and retry delays.
-    ///
-    /// Outputs: the resolved hash string.
-    ///
-    /// Side effects: Reads file contents and may sleep between retries.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `hash_file` and `retry_with_backoff` for resilience.
-    ///
-    /// Why this exists: ensure state records the exact content hash for verification and change detection.
+    /// Ensure state records the exact content hash for verification and change detection.
     fn compute_hash(
         &self,
         src: &Path,
@@ -184,19 +124,7 @@ impl BackupExecutor {
         }
     }
 
-    /// Summary: Builds destination paths and ensures the backup directory exists.
-    ///
-    /// Inputs: the planned item for destination root and source path.
-    ///
-    /// Outputs: the backup directory, final path, and temporary path.
-    ///
-    /// Side effects: Creates destination directories on disk.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: naming helpers and filesystem directory creation.
-    ///
-    /// Why this exists: keep file naming consistent and ensure a durable target path.
+    /// Keep file naming consistent and ensure a durable target path.
     fn prepare_paths(
         &self,
         item: &crate::backup::planning::PlannedItem,
@@ -222,19 +150,7 @@ impl BackupExecutor {
         Ok((dir, final_path, tmp_path))
     }
 
-    /// Summary: Checks destination free space against file size and configured thresholds.
-    ///
-    /// Inputs: the destination directory and source length.
-    ///
-    /// Outputs: `Ok(())` if free space is sufficient.
-    ///
-    /// Side effects: Reads filesystem free space metadata.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: filesystem free space checks and config tuning.
-    ///
-    /// Why this exists: avoid starting a copy that cannot complete.
+    /// Avoid starting a copy that cannot complete.
     fn ensure_free_space(&self, dir: &Path, len: u64) -> Result<()> {
         let free = fs2::free_space(dir).with_context(|| {
             format!(
@@ -264,19 +180,7 @@ impl BackupExecutor {
         Ok(())
     }
 
-    /// Summary: Copies the source file to a temporary path with retry and throttling.
-    ///
-    /// Inputs: the source path, temp path, retry delays, and timeout.
-    ///
-    /// Outputs: `Ok(())` once the temp file is fully written.
-    ///
-    /// Side effects: Removes any existing temp file and writes new temp file data.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `copy_with_throttle` and `retry_with_backoff`.
-    ///
-    /// Why this exists: stage writes to allow verification before the final atomic move.
+    /// Stage writes to allow verification before the final atomic move.
     fn write_temp_copy(
         &self,
         src: &Path,
@@ -325,19 +229,7 @@ impl BackupExecutor {
         })
     }
 
-    /// Summary: Verifies the temp file size matches the source before finalizing.
-    ///
-    /// Inputs: the source and temp paths.
-    ///
-    /// Outputs: `Ok(())` when sizes match.
-    ///
-    /// Side effects: Reads filesystem metadata and may delete the temp file on mismatch.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: filesystem metadata and temp copy staging.
-    ///
-    /// Why this exists: avoid committing a truncated or partial copy.
+    /// Avoid committing a truncated or partial copy.
     fn verify_temp_size(&self, src: &Path, tmp_path: &Path) -> Result<()> {
         let src_meta = fs::metadata(src).with_context(|| {
             format!(
@@ -385,19 +277,7 @@ impl BackupExecutor {
         Ok(())
     }
 
-    /// Summary: Atomically moves the temporary backup into its final location.
-    ///
-    /// Inputs: the temp path and final destination path.
-    ///
-    /// Outputs: `Ok(())` when the move succeeds.
-    ///
-    /// Side effects: Renames filesystem entries on disk.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: filesystem rename semantics after verification.
-    ///
-    /// Why this exists: ensure the final backup is a complete file with atomic visibility.
+    /// Ensure the final backup is a complete file with atomic visibility.
     fn finalize_copy(&self, tmp_path: &Path, final_path: &Path) -> Result<()> {
         fs::rename(tmp_path, final_path).with_context(|| {
             format!(
@@ -408,19 +288,7 @@ impl BackupExecutor {
         Ok(())
     }
 
-    /// Summary: Updates the stored state after a successful backup and applies retention.
-    ///
-    /// Inputs: the planned item, resolved hash, final path, and mutable state.
-    ///
-    /// Outputs: `Ok(())` after state has been updated.
-    ///
-    /// Side effects: Mutates stored state, deletes old backups per retention, and emits logs.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: retention enforcement and recent activity tracking.
-    ///
-    /// Why this exists: keep state, retention, and UI activity in sync with the filesystem.
+    /// Keep state, retention, and UI activity in sync with the filesystem.
     fn record_backup_state(
         &self,
         item: &crate::backup::planning::PlannedItem,

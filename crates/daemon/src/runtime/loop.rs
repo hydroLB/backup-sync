@@ -5,34 +5,35 @@ use backup_core::{
     fs::watching::{start_watcher, DirtySet},
     Config, IntervalScheduler, StateStore, StoredState,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::{error, info, span, Level};
 
-/// Summary: Runs the daemon main loop with watchers, IPC, and scheduled tasks.
-///
-/// Inputs: the config, initial state, and state store.
-///
-/// Outputs: `Ok(())` when the loop exits cleanly.
-///
-/// Side effects: Starts watchers, spawns background tasks, and writes state on shutdown.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon startup and shutdown handling.
-///
-/// Why this exists: centralize daemon orchestration in one entry point.
+fn enabled_watcher_paths(watched: &[backup_core::config::model::WatchedPath]) -> Vec<PathBuf> {
+    watched
+        .iter()
+        .filter(|watched| watched.enabled)
+        .map(|watched| watched.path.clone())
+        .collect()
+}
+
+fn verify_schedule(
+    now: tokio::time::Instant,
+    interval_seconds: u64,
+) -> (tokio::time::Instant, Duration) {
+    let period = Duration::from_secs(interval_seconds.max(1));
+    (now + period, period)
+}
+
+/// Centralize daemon orchestration in one entry point.
 pub(crate) async fn run(cfg: Config, mut state: StoredState, store: StateStore) -> Result<()> {
     state.safe_mode = cfg.safe_mode;
     let shared_state = Arc::new(Mutex::new(state));
     let dirty = DirtySet::default();
-    let watcher_paths = cfg
-        .watched
-        .iter()
-        .map(|w| w.path.clone())
-        .collect::<Vec<_>>();
+    let watcher_paths = enabled_watcher_paths(&cfg.watched);
     if watcher_paths.is_empty() {
         tracing::warn!("daemon::runtime::run no watched paths configured; daemon will idle");
     }
@@ -90,7 +91,9 @@ pub(crate) async fn run(cfg: Config, mut state: StoredState, store: StateStore) 
         let hashing = cfg.hashing.clone();
         let mut verify_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(verify_interval));
+            let (first_tick, period) =
+                verify_schedule(tokio::time::Instant::now(), verify_interval);
+            let mut interval = tokio::time::interval_at(first_tick, period);
             loop {
                 tokio::select! {
                     changed = verify_shutdown.changed() => {
@@ -126,19 +129,7 @@ pub(crate) async fn run(cfg: Config, mut state: StoredState, store: StateStore) 
     Ok(())
 }
 
-/// Summary: Awaits a spawned daemon task with a timeout and abort fallback.
-///
-/// Inputs: task label, join handle, and timeout duration.
-///
-/// Outputs: `()` after join completion or forced abort.
-///
-/// Side effects: May abort the task when graceful completion exceeds the timeout.
-///
-/// Error handling: Emits structured errors for join failures and forced aborts.
-///
-/// Ties to other methods: used by daemon shutdown coordination in `run`.
-///
-/// Why this exists: avoid hanging shutdown while preferring graceful task completion over immediate aborts.
+/// Avoid hanging shutdown while preferring graceful task completion over immediate aborts.
 async fn join_task_with_timeout(label: &str, mut handle: JoinHandle<()>, timeout: Duration) {
     match tokio::time::timeout(timeout, &mut handle).await {
         Ok(Ok(())) => {}
@@ -160,7 +151,9 @@ async fn join_task_with_timeout(label: &str, mut handle: JoinHandle<()>, timeout
 
 #[cfg(test)]
 mod tests {
-    use super::join_task_with_timeout;
+    use super::{enabled_watcher_paths, join_task_with_timeout, verify_schedule};
+    use backup_core::config::model::{WatchedKind, WatchedPath};
+    use std::path::PathBuf;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -177,39 +170,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn watcher_paths_exclude_disabled_entries() {
+        let watched = vec![
+            WatchedPath {
+                path: PathBuf::from("enabled"),
+                kind: WatchedKind::Directory,
+                enabled: true,
+                destination_id: "default".into(),
+                max_backups_per_file: None,
+            },
+            WatchedPath {
+                path: PathBuf::from("disabled"),
+                kind: WatchedKind::Directory,
+                enabled: false,
+                destination_id: "default".into(),
+                max_backups_per_file: None,
+            },
+        ];
+
+        assert_eq!(
+            enabled_watcher_paths(&watched),
+            vec![PathBuf::from("enabled")]
+        );
+    }
+
+    #[test]
+    fn verify_schedule_defers_the_first_tick_by_one_period() {
+        let now = tokio::time::Instant::now();
+        let (first_tick, period) = verify_schedule(now, 30);
+
+        assert_eq!(period, Duration::from_secs(30));
+        assert_eq!(first_tick, now + period);
+    }
+
     #[tokio::test]
-    /// Summary: Ensures graceful join returns immediately when task exits before timeout.
-    ///
-    /// Inputs: a completed task and a bounded timeout.
-    ///
-    /// Outputs: successful completion without panic.
-    ///
-    /// Side effects: Spawns and joins a tokio task.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `join_task_with_timeout`.
-    ///
-    /// Why this exists: verify shutdown coordination does not regress when tasks finish cleanly.
+    /// Verify shutdown coordination does not regress when tasks finish cleanly.
     async fn join_task_with_timeout_accepts_completed_task() {
         let handle = tokio::spawn(async {});
         join_task_with_timeout("test-complete", handle, Duration::from_millis(20)).await;
     }
 
     #[tokio::test]
-    /// Summary: Ensures shutdown fallback aborts tasks that exceed graceful join timeout.
-    ///
-    /// Inputs: a never-completing task and a short join timeout.
-    ///
-    /// Outputs: assertion that task cleanup ran via drop after abort.
-    ///
-    /// Side effects: Spawns and aborts a tokio task.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `join_task_with_timeout`.
-    ///
-    /// Why this exists: prove daemon shutdown enforces bounded exit even when tasks hang.
+    /// Prove daemon shutdown enforces bounded exit even when tasks hang.
     async fn join_task_with_timeout_aborts_hung_task() {
         let dropped = Arc::new(AtomicBool::new(false));
         let dropped_for_task = dropped.clone();

@@ -1,16 +1,4 @@
-/// Summary: Holds validation thresholds for config guardrails.
-///
-/// Inputs: set by defaults or tests.
-///
-/// Outputs: a collection of numeric thresholds.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: config validation and policy enforcement.
-///
-/// Why this exists: centralize limits to make tuning and audits straightforward.
+/// Centralize limits to make tuning and audits straightforward.
 #[derive(Debug, Clone)]
 pub struct ValidationLimits {
     pub min_interval_seconds: u64,
@@ -69,19 +57,7 @@ pub struct ValidationLimits {
 }
 
 impl Default for ValidationLimits {
-    /// Summary: Builds the default validation thresholds for config guardrails.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: a populated `ValidationLimits` instance.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: config validation and guardrail enforcement.
-    ///
-    /// Why this exists: centralize limits so tuning is consistent and discoverable.
+    /// Centralize limits so tuning is consistent and discoverable.
     fn default() -> Self {
         Self {
             min_interval_seconds: 5,

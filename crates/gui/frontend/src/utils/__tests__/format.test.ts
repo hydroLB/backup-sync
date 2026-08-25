@@ -1,20 +1,6 @@
 import { formatBytes, formatDuration, formatDateTime, formatSince } from '../format';
 
-/**
- * Summary: Verify null and undefined bytes format to a fallback.
- *
- * Inputs: None.
- *
- * Outputs: Asserts fallback strings.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatBytes` null handling.
- *
- * Why this exists: Keep missing values readable in the UI.
- */
+/** Keep missing values readable in the UI. */
 function assertFormatBytesHandlesNull(): void {
   try {
     expect(formatBytes(null)).toBe('n/a');
@@ -25,21 +11,7 @@ function assertFormatBytesHandlesNull(): void {
   }
 }
 
-/**
- * Summary: Verify byte formatting for small numbers.
- *
- * Inputs: None.
- *
- * Outputs: Asserts formatted byte label.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatBytes` small number formatting.
- *
- * Why this exists: Ensure small sizes display correctly.
- */
+/** Ensure small sizes display correctly. */
 function assertFormatBytesSmallNumbers(): void {
   try {
     expect(formatBytes(500)).toBe('500.00 B');
@@ -49,21 +21,7 @@ function assertFormatBytesSmallNumbers(): void {
   }
 }
 
-/**
- * Summary: Verify byte formatting for KB, MB, and GB.
- *
- * Inputs: None.
- *
- * Outputs: Asserts formatted unit labels.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatBytes` unit scaling.
- *
- * Why this exists: Keep consistent unit labels across UI.
- */
+/** Keep consistent unit labels across UI. */
 function assertFormatBytesUnits(): void {
   try {
     expect(formatBytes(1024)).toBe('1.00 KB');
@@ -75,21 +33,7 @@ function assertFormatBytesUnits(): void {
   }
 }
 
-/**
- * Summary: Verify duration formatting handles null and negative values.
- *
- * Inputs: None.
- *
- * Outputs: Asserts fallback strings.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatDuration` null handling.
- *
- * Why this exists: Prevent invalid durations from rendering as real values.
- */
+/** Prevent invalid durations from rendering as real values. */
 function assertFormatDurationHandlesNull(): void {
   try {
     expect(formatDuration(null)).toBe('n/a');
@@ -100,21 +44,7 @@ function assertFormatDurationHandlesNull(): void {
   }
 }
 
-/**
- * Summary: Verify duration formatting for minutes and hours.
- *
- * Inputs: None.
- *
- * Outputs: Asserts formatted duration strings.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatDuration` output formatting.
- *
- * Why this exists: Keep uptime displays consistent.
- */
+/** Keep uptime displays consistent. */
 function assertFormatDurationMinutesHours(): void {
   try {
     expect(formatDuration(60)).toBe('1m');
@@ -125,21 +55,7 @@ function assertFormatDurationMinutesHours(): void {
   }
 }
 
-/**
- * Summary: Verify missing timestamps render as "Never".
- *
- * Inputs: None.
- *
- * Outputs: Asserts the "Never" label.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatDateTime` null handling.
- *
- * Why this exists: Keep missing timestamps obvious in the UI.
- */
+/** Keep missing timestamps obvious in the UI. */
 function assertFormatDateTimeMissing(): void {
   try {
     expect(formatDateTime(null)).toBe('Never');
@@ -149,21 +65,7 @@ function assertFormatDateTimeMissing(): void {
   }
 }
 
-/**
- * Summary: Verify timestamps render human-readable dates.
- *
- * Inputs: None.
- *
- * Outputs: Asserts formatted date contains the expected year.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatDateTime` date formatting.
- *
- * Why this exists: Ensure audit timestamps are readable.
- */
+/** Ensure audit timestamps are readable. */
 function assertFormatDateTimeTimestamp(): void {
   try {
     const ts = 1_600_000_000; // epoch seconds
@@ -174,21 +76,7 @@ function assertFormatDateTimeTimestamp(): void {
   }
 }
 
-/**
- * Summary: Verify missing timestamps for "since" render as "never".
- *
- * Inputs: None.
- *
- * Outputs: Asserts the "never" label.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatSince` null handling.
- *
- * Why this exists: Keep stale timestamps obvious in the UI.
- */
+/** Keep stale timestamps obvious in the UI. */
 function assertFormatSinceMissing(): void {
   try {
     expect(formatSince(null)).toBe('never');
@@ -198,21 +86,7 @@ function assertFormatSinceMissing(): void {
   }
 }
 
-/**
- * Summary: Verify "since" formatting for minutes and hours.
- *
- * Inputs: None.
- *
- * Outputs: Asserts formatted relative time strings.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `formatSince` time delta formatting.
- *
- * Why this exists: Ensure relative timestamps are consistent.
- */
+/** Ensure relative timestamps are consistent. */
 function assertFormatSinceMinutesHours(): void {
   try {
     const now = Date.now() / 1000;

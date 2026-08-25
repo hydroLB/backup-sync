@@ -9,19 +9,7 @@ mod ignore_patterns;
 mod tuning;
 mod watched;
 
-/// Summary: Validates configuration using an explicit set of limits.
-///
-/// Inputs: the config and validation limits.
-///
-/// Outputs: `Ok(())` when all invariants are met, otherwise a descriptive error.
-///
-/// Side effects: Reads filesystem metadata and may create destination directories for validation.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `config::validate::validate_with_limits`.
-///
-/// Why this exists: keep the top-level validation readable by delegating checks to focused modules.
+/// Keep the top-level validation readable by delegating checks to focused modules.
 pub(crate) fn validate_with_limits(cfg: &Config, limits: &ValidationLimits) -> Result<()> {
     let label = "config::validate_with_limits";
     watched::validate_presence(cfg, label)?;
@@ -35,19 +23,7 @@ pub(crate) fn validate_with_limits(cfg: &Config, limits: &ValidationLimits) -> R
     Ok(())
 }
 
-/// Summary: Ensures a numeric value is set to a positive integer.
-///
-/// Inputs: the label, field name, and the value.
-///
-/// Outputs: `Ok(())` if the value is greater than zero.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: multiple per-field guardrails.
-///
-/// Why this exists: keep repetitive numeric validation consistent and readable.
+/// Keep repetitive numeric validation consistent and readable.
 fn ensure_nonzero_u64(label: &str, field: &str, value: u64) -> Result<()> {
     if value == 0 {
         bail!("{label} {field} must be > 0");
@@ -55,19 +31,7 @@ fn ensure_nonzero_u64(label: &str, field: &str, value: u64) -> Result<()> {
     Ok(())
 }
 
-/// Summary: Ensures a numeric value is set to a positive integer.
-///
-/// Inputs: the label, field name, and the value.
-///
-/// Outputs: `Ok(())` if the value is greater than zero.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: multiple per-field guardrails.
-///
-/// Why this exists: keep repetitive numeric validation consistent and readable.
+/// Keep repetitive numeric validation consistent and readable.
 fn ensure_nonzero_usize(label: &str, field: &str, value: usize) -> Result<()> {
     if value == 0 {
         bail!("{label} {field} must be > 0");

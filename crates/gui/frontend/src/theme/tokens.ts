@@ -221,78 +221,22 @@ const THEME_TOKENS: Record<ResolvedColorMode, Record<ThemeTokenName, string>> = 
   light: LIGHT_THEME_TOKENS,
 };
 
-/**
- * Summary: Build a CSS variable expression for a registered theme token.
- *
- * Inputs: `token` as the token key.
- *
- * Outputs: CSS variable expression (for example `var(--accent)`).
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by view helpers that need token-based inline styles.
- *
- * Why this exists: Keep token access centralized and typo-safe.
- */
+/** Keep token access centralized and typo-safe. */
 export function themeColorVar(token: ThemeTokenName): string {
   return `var(--${token})`;
 }
 
-/**
- * Summary: Resolve a token to its concrete color value for a mode.
- *
- * Inputs: `mode` as the resolved mode and `token` as the token key.
- *
- * Outputs: Token value for the selected mode.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by tests and theme-aware utility functions.
- *
- * Why this exists: Avoid direct object access in callers and preserve one lookup path.
- */
+/** Avoid direct object access in callers and preserve one lookup path. */
 export function resolveThemeToken(mode: ResolvedColorMode, token: ThemeTokenName): string {
   return THEME_TOKENS[mode][token];
 }
 
-/**
- * Summary: Return the full token map for a resolved color mode.
- *
- * Inputs: `mode` as the resolved color mode.
- *
- * Outputs: Immutable token map for the requested mode.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `applyThemeTokens` and theme tests.
- *
- * Why this exists: Keep mode specific token selection in one place.
- */
+/** Keep mode specific token selection in one place. */
 export function themeTokensForMode(mode: ResolvedColorMode): Record<ThemeTokenName, string> {
   return THEME_TOKENS[mode];
 }
 
-/**
- * Summary: Apply all resolved theme tokens to the document root.
- *
- * Inputs: `mode` as the active color mode and optional `root` element override.
- *
- * Outputs: None.
- *
- * Side effects: Writes CSS custom properties and `data-color-mode` on the root element.
- *
- * Error handling: No-op when DOM globals are unavailable.
- *
- * Ties to other methods: Called by color-mode lifecycle hooks during mode changes.
- *
- * Why this exists: Ensure every visual surface resolves through one token source.
- */
+/** Ensure every visual surface resolves through one token source. */
 export function applyThemeTokens(mode: ResolvedColorMode, root?: HTMLElement): void {
   const targetRoot =
     root ?? (typeof document !== 'undefined' ? document.documentElement : undefined);

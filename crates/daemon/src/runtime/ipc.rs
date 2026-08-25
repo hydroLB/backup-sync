@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use backup_core::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
 use backup_core::StoredState;
 use chrono::Utc;
 use fs2::free_space;
@@ -18,9 +17,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(windows)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(windows)]
-use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+use tokio::net::windows::named_pipe::ServerOptions;
 #[cfg(unix)]
-use tokio::net::UnixListener;
+use tokio::net::{UnixListener, UnixStream};
+
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
@@ -139,19 +141,7 @@ const METRIC_IPC_REQUEST_TOTAL: &str = "daemon_ipc_request_total";
 const METRIC_IPC_REQUEST_FAILURE_TOTAL: &str = "daemon_ipc_request_failure_total";
 const METRIC_IPC_REQUEST_LATENCY: &str = "daemon_ipc_request_latency_ms";
 
-/// Summary: Reads free space for a path, logging warnings when it fails.
-///
-/// Inputs: the path to check.
-///
-/// Outputs: an optional free space value.
-///
-/// Side effects: Reads filesystem free space and emits warnings on failure.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC status payload construction.
-///
-/// Why this exists: report free space when available without failing the IPC response.
+/// Report free space when available without failing the IPC response.
 fn free_space_or_warn(path: &Path) -> Option<u64> {
     match free_space(path) {
         Ok(bytes) => Some(bytes),
@@ -169,19 +159,7 @@ fn free_space_or_warn(path: &Path) -> Option<u64> {
     }
 }
 
-/// Summary: Builds normalized request context from a parsed IPC request.
-///
-/// Inputs: parsed request value.
-///
-/// Outputs: request context containing operation name, request id, and source.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC logging and response correlation.
-///
-/// Why this exists: keep request-level observability metadata consistent across IPC operations.
+/// Keep request-level observability metadata consistent across IPC operations.
 fn request_context(request: &Request) -> RequestContext {
     match request {
         Request::Status => RequestContext {
@@ -237,19 +215,7 @@ fn request_context(request: &Request) -> RequestContext {
     }
 }
 
-/// Summary: Builds an IPC status reply from stored state and destination metadata.
-///
-/// Inputs: the stored state, destination list, and activity limit.
-///
-/// Outputs: a `StatusReply` ready for serialization.
-///
-/// Side effects: Reads filesystem free space metadata for destinations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC request handling for status calls.
-///
-/// Why this exists: centralize status payload construction for the UI and CLI.
+/// Centralize status payload construction for the UI and CLI.
 fn build_status_reply(
     state: &StoredState,
     destinations: &[backup_core::config::model::Destination],
@@ -326,19 +292,7 @@ fn build_status_reply(
     }
 }
 
-/// Summary: Builds a liveness health payload for daemon operability probes.
-///
-/// Inputs: current stored state snapshot and request id.
-///
-/// Outputs: a `HealthReply` for IPC clients.
-///
-/// Side effects: Reads current timestamp.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon IPC request handling for health probes.
-///
-/// Why this exists: expose a stable machine-checkable liveness contract over daemon IPC.
+/// Expose a stable machine-checkable liveness contract over daemon IPC.
 fn build_health_reply(state: &StoredState, request_id: String) -> HealthReply {
     HealthReply {
         request_id,
@@ -350,19 +304,7 @@ fn build_health_reply(state: &StoredState, request_id: String) -> HealthReply {
     }
 }
 
-/// Summary: Builds a readiness payload indicating whether writes can proceed safely.
-///
-/// Inputs: current stored state snapshot and request id.
-///
-/// Outputs: a `ReadinessReply` for IPC clients.
-///
-/// Side effects: Reads current timestamp.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon IPC request handling for readiness probes.
-///
-/// Why this exists: provide a deterministic readiness contract for operability checks.
+/// Provide a deterministic readiness contract for operability checks.
 fn build_readiness_reply(state: &StoredState, request_id: String) -> ReadinessReply {
     let reason = if state.safe_mode {
         Some("safe_mode_enabled".to_string())
@@ -394,19 +336,7 @@ fn build_readiness_reply(state: &StoredState, request_id: String) -> ReadinessRe
     }
 }
 
-/// Summary: Writes a serialized status reply to the IPC stream and closes it.
-///
-/// Inputs: a writable stream and the status reply.
-///
-/// Outputs: `Ok(())` when the reply is written and the stream is closed.
-///
-/// Side effects: Writes to the IPC stream and shuts it down.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC status request handling.
-///
-/// Why this exists: ensure IPC responses complete cleanly for clients.
+/// Ensure IPC responses complete cleanly for clients.
 async fn write_status_reply<W>(writer: &mut W, reply: &StatusReply) -> Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -429,19 +359,7 @@ where
     Ok(())
 }
 
-/// Summary: Writes a serialized health reply to the IPC stream and closes it.
-///
-/// Inputs: writable stream and health reply payload.
-///
-/// Outputs: `Ok(())` when write and shutdown complete.
-///
-/// Side effects: Writes to the IPC stream and shuts it down.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon IPC health request handling.
-///
-/// Why this exists: keep health response writes explicit and testable.
+/// Keep health response writes explicit and testable.
 async fn write_health_reply<W>(writer: &mut W, reply: &HealthReply) -> Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -464,19 +382,7 @@ where
     Ok(())
 }
 
-/// Summary: Writes a serialized readiness reply to the IPC stream and closes it.
-///
-/// Inputs: writable stream and readiness reply payload.
-///
-/// Outputs: `Ok(())` when write and shutdown complete.
-///
-/// Side effects: Writes to the IPC stream and shuts it down.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon IPC readiness request handling.
-///
-/// Why this exists: keep readiness response writes explicit and testable.
+/// Keep readiness response writes explicit and testable.
 async fn write_readiness_reply<W>(writer: &mut W, reply: &ReadinessReply) -> Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -525,19 +431,7 @@ where
     Ok(())
 }
 
-/// Summary: Reads and parses a JSON IPC request without requiring the client to close the stream.
-///
-/// Inputs: a readable IPC stream, a timeout bound, and a max request size.
-///
-/// Outputs: a parsed `Request` value.
-///
-/// Side effects: Reads bytes from the IPC stream until a request is parsed or limits are exceeded.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: both Unix socket and Windows named pipe IPC servers.
-///
-/// Why this exists: Avoid deadlocks where both sides wait for EOF; allow small request/response exchanges.
+/// Avoid deadlocks where both sides wait for EOF; allow small request/response exchanges.
 async fn read_request<R>(
     reader: &mut R,
     ipc_timeout: Duration,
@@ -550,12 +444,6 @@ where
     let mut buf: Vec<u8> = Vec::new();
     let mut chunk = vec![0u8; read_chunk_bytes.max(1)];
     loop {
-        if buf.len() > max_request_bytes {
-            anyhow::bail!(
-                "daemon::runtime::ipc read_request exceeded max request size {} bytes",
-                max_request_bytes
-            );
-        }
         let n = match timeout(ipc_timeout, reader.read(&mut chunk)).await {
             Ok(Ok(n)) => n,
             Ok(Err(e)) => {
@@ -577,6 +465,12 @@ where
             // EOF after some bytes; attempt a final parse below.
         } else {
             buf.extend_from_slice(&chunk[..n]);
+            if buf.len() > max_request_bytes {
+                anyhow::bail!(
+                    "daemon::runtime::ipc read_request exceeded max request size {} bytes",
+                    max_request_bytes
+                );
+            }
         }
 
         match serde_json::from_slice::<Request>(&buf) {
@@ -593,19 +487,156 @@ where
 }
 
 #[cfg(unix)]
-/// Summary: Spawns a Unix socket based IPC server for status requests.
-///
-/// Inputs: shared state, destination list, IPC timeout, activity limit, and shutdown receiver.
-///
-/// Outputs: a join handle for the IPC task.
-///
-/// Side effects: Binds a Unix socket and performs IPC reads and writes.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon IPC handling for GUI and CLI clients.
-///
-/// Why this exists: expose status over a local IPC channel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EndpointIdentity {
+    device: u64,
+    inode: u64,
+    owner: u32,
+}
+
+#[cfg(unix)]
+fn effective_user_id() -> u32 {
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+
+    // SAFETY: `geteuid` has no arguments, cannot mutate Rust memory, and is
+    // available on every target covered by `cfg(unix)`.
+    unsafe { geteuid() }
+}
+
+#[cfg(unix)]
+fn endpoint_identity(path: &Path) -> Result<Option<EndpointIdentity>> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(anyhow::anyhow!(error).context(format!(
+                "daemon::runtime::ipc failed to inspect endpoint at {path:?}"
+            )));
+        }
+    };
+    if !metadata.file_type().is_socket() {
+        anyhow::bail!(
+            "daemon IPC endpoint conflict at {path:?}: existing path is not a Unix socket; refusing to remove it"
+        );
+    }
+    let owner = metadata.uid();
+    let expected_owner = effective_user_id();
+    if owner != expected_owner {
+        anyhow::bail!(
+            "daemon IPC endpoint conflict at {path:?}: socket is owned by uid {owner}, not current uid {expected_owner}; refusing to remove it"
+        );
+    }
+    Ok(Some(EndpointIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        owner,
+    }))
+}
+
+#[cfg(unix)]
+fn prepare_endpoint_directory(path: &Path) -> Result<()> {
+    let directory = path
+        .parent()
+        .with_context(|| format!("daemon IPC endpoint path has no parent directory: {path:?}"))?;
+    let injected = std::env::var_os("BACKUP_SYNC_IPC_SOCKET").is_some();
+    if !directory.exists() && injected {
+        anyhow::bail!(
+            "daemon IPC injected endpoint parent directory does not exist: {directory:?}"
+        );
+    }
+    if !injected {
+        match std::fs::DirBuilder::new().mode(0o700).create(directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(anyhow::anyhow!(error).context(format!(
+                    "daemon IPC failed to create private runtime directory {directory:?}"
+                )));
+            }
+        }
+    }
+    let metadata = std::fs::symlink_metadata(directory)
+        .with_context(|| format!("daemon IPC failed to inspect runtime directory {directory:?}"))?;
+    if !metadata.file_type().is_dir() {
+        anyhow::bail!("daemon IPC runtime path conflict at {directory:?}: expected a directory");
+    }
+    let expected_owner = effective_user_id();
+    if metadata.uid() != expected_owner {
+        anyhow::bail!(
+            "daemon IPC runtime directory {directory:?} is not owned by current uid {expected_owner}"
+        );
+    }
+    if !injected {
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).with_context(
+            || format!("daemon IPC failed to secure runtime directory {directory:?}"),
+        )?;
+    } else if metadata.permissions().mode() & 0o077 != 0 {
+        anyhow::bail!(
+            "daemon IPC injected endpoint directory {directory:?} must not be accessible by group or other users"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn remove_endpoint_if_unchanged(path: &Path, expected: EndpointIdentity) -> Result<bool> {
+    let Some(actual) = endpoint_identity(path)? else {
+        return Ok(false);
+    };
+    if actual != expected {
+        anyhow::bail!(
+            "daemon IPC endpoint at {path:?} changed while it was being checked; refusing to remove it"
+        );
+    }
+    std::fs::remove_file(path)
+        .with_context(|| format!("daemon IPC failed to remove verified socket at {path:?}"))?;
+    Ok(true)
+}
+
+#[cfg(unix)]
+async fn bind_unix_listener(
+    path: &Path,
+    probe_timeout: Duration,
+) -> Result<(UnixListener, EndpointIdentity)> {
+    prepare_endpoint_directory(path)?;
+    if let Some(stale_candidate) = endpoint_identity(path)? {
+        match timeout(probe_timeout, UnixStream::connect(path)).await {
+            Ok(Ok(_stream)) => {
+                anyhow::bail!("daemon already running: live IPC endpoint is listening at {path:?}");
+            }
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+                remove_endpoint_if_unchanged(path, stale_candidate).with_context(|| {
+                    format!("daemon IPC could not remove verified stale endpoint at {path:?}")
+                })?;
+            }
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(Err(error)) => {
+                return Err(anyhow::anyhow!(error).context(format!(
+                    "daemon IPC endpoint conflict at {path:?}; refusing to replace it"
+                )));
+            }
+            Err(_) => {
+                anyhow::bail!(
+                    "daemon IPC endpoint probe timed out at {path:?}; another daemon may be running, so the endpoint was not replaced"
+                );
+            }
+        }
+    }
+    let listener = UnixListener::bind(path).with_context(|| {
+        format!("daemon::runtime::ipc spawn_server failed to bind IPC socket at {path:?}")
+    })?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("daemon IPC failed to secure socket permissions at {path:?}"))?;
+    let identity = endpoint_identity(path)?.with_context(|| {
+        format!("daemon IPC endpoint disappeared immediately after bind at {path:?}")
+    })?;
+    Ok((listener, identity))
+}
+
+#[cfg(unix)]
+/// Expose status over a local IPC channel.
 pub async fn spawn_server(
     state: Arc<Mutex<StoredState>>,
     destinations: Vec<backup_core::config::model::Destination>,
@@ -616,35 +647,7 @@ pub async fn spawn_server(
     shutdown: watch::Receiver<bool>,
 ) -> Result<tokio::task::JoinHandle<()>> {
     let socket_path = socket_path()?;
-    let io_policy = BlockingIoPolicy::bootstrap_defaults();
-    if socket_path.exists() {
-        if let Err(e) = run_with_policy(
-            "daemon::runtime::ipc::spawn_server remove stale socket",
-            &io_policy,
-            CancellationFlag::none(),
-            || {
-                std::fs::remove_file(&socket_path).map_err(|error| {
-                    anyhow::anyhow!(error)
-                        .context("daemon::runtime::ipc::spawn_server failed remove stale socket")
-                })
-            },
-        ) {
-            warn!(
-                component = "daemon",
-                subsystem = "ipc",
-                action = "remove_stale_socket_failed",
-                socket_path = %backup_core::logging::redact_path(&socket_path),
-                error = %backup_core::logging::redact_text(&format!("{e:#}")),
-                "daemon IPC failed removing stale socket"
-            );
-        }
-    }
-    let listener = UnixListener::bind(&socket_path).with_context(|| {
-        format!(
-            "daemon::runtime::ipc spawn_server failed to bind IPC socket at {:?}",
-            socket_path
-        )
-    })?;
+    let (listener, endpoint_identity) = bind_unix_listener(&socket_path, ipc_timeout).await?;
     info!(
         component = "daemon",
         subsystem = "ipc",
@@ -977,49 +980,22 @@ pub async fn spawn_server(
                 }
             }
         }
-        if let Err(error) = run_with_policy(
-            "daemon::runtime::ipc::spawn_server cleanup socket path",
-            &BlockingIoPolicy::bootstrap_defaults(),
-            CancellationFlag::none(),
-            || {
-                std::fs::remove_file(&socket_path).map_err(|io_error| {
-                    anyhow::anyhow!(io_error).context(
-                        "daemon::runtime::ipc::spawn_server failed removing socket on shutdown",
-                    )
-                })
-            },
-        ) {
-            if error
-                .downcast_ref::<std::io::Error>()
-                .is_none_or(|io_error| io_error.kind() != std::io::ErrorKind::NotFound)
-            {
-                warn!(
-                    component = "daemon",
-                    subsystem = "ipc",
-                    action = "cleanup_socket_failed",
-                    socket_path = %backup_core::logging::redact_path(&socket_path),
-                    error = %backup_core::logging::redact_text(&format!("{error:#}")),
-                    "daemon IPC socket cleanup failed"
-                );
-            }
+        drop(listener);
+        if let Err(error) = remove_endpoint_if_unchanged(&socket_path, endpoint_identity) {
+            warn!(
+                component = "daemon",
+                subsystem = "ipc",
+                action = "cleanup_socket_failed",
+                socket_path = %backup_core::logging::redact_path(&socket_path),
+                error = %backup_core::logging::redact_text(&format!("{error:#}")),
+                "daemon IPC socket cleanup skipped because endpoint ownership could not be verified"
+            );
         }
     }))
 }
 
 #[cfg(windows)]
-/// Summary: Spawns a Windows named pipe IPC server for status requests.
-///
-/// Inputs: shared state, destination list, IPC timeout, activity limit, and shutdown receiver.
-///
-/// Outputs: a join handle for the IPC task.
-///
-/// Side effects: Creates a named pipe and performs IPC reads and writes.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon IPC handling for GUI and CLI clients.
-///
-/// Why this exists: expose status over a local IPC channel on Windows.
+/// Expose status over a local IPC channel on Windows.
 pub async fn spawn_server(
     _state: Arc<Mutex<StoredState>>,
     destinations: Vec<backup_core::config::model::Destination>,
@@ -1048,6 +1024,57 @@ pub async fn spawn_server(
                 .create(pipe_name)
             {
                 Ok(mut server) => {
+                    let connect_result = tokio::select! {
+                        changed = shutdown.changed() => {
+                            match changed {
+                                Ok(()) => {
+                                    if *shutdown.borrow() {
+                                        info!(
+                                            component = "daemon",
+                                            subsystem = "ipc",
+                                            action = "shutdown_signal_observed",
+                                            "daemon IPC shutdown signal observed"
+                                        );
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                Err(_) => {
+                                    info!(
+                                        component = "daemon",
+                                        subsystem = "ipc",
+                                        action = "shutdown_channel_closed",
+                                        "daemon IPC shutdown channel closed"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                        connected = timeout(ipc_timeout, server.connect()) => connected,
+                    };
+                    match connect_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            error!(
+                                component = "daemon",
+                                subsystem = "ipc",
+                                action = "pipe_connect_failed",
+                                error = %backup_core::logging::redact_text(&format!("{error:#}")),
+                                "daemon IPC named-pipe connection failed"
+                            );
+                            continue;
+                        }
+                        Err(_) => {
+                            warn!(
+                                component = "daemon",
+                                subsystem = "ipc",
+                                action = "pipe_connect_timeout",
+                                timeout_ms = ipc_timeout.as_millis() as u64,
+                                "daemon IPC named-pipe connection wait timed out"
+                            );
+                            continue;
+                        }
+                    }
                     let request_started = Instant::now();
                     let req_result = tokio::select! {
                         changed = shutdown.changed() => {
@@ -1355,23 +1382,9 @@ pub async fn spawn_server(
     }))
 }
 
-/// Summary: Builds the Unix socket path used for IPC.
-///
-/// Inputs: none.
-///
-/// Outputs: the filesystem path for the IPC socket.
-///
-/// Side effects: Reads the runtime directory or temp directory.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC server setup on Unix platforms.
-///
-/// Why this exists: centralize the IPC socket location in one helper.
+/// Centralize the IPC socket location in one helper.
 pub fn socket_path() -> Result<PathBuf> {
-    let mut p = dirs::runtime_dir().unwrap_or(std::env::temp_dir());
-    p.push("backup_sync_ipc.sock");
-    Ok(p)
+    Ok(backup_core::platform::paths::ipc_socket_path())
 }
 
 #[cfg(all(test, unix))]
@@ -1379,19 +1392,6 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    /// Summary: read_request_parses_without_client_shutdown orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[tokio::test]
     async fn read_request_parses_without_client_shutdown() {
         let (mut client, mut server) = tokio::net::UnixStream::pair().unwrap();
@@ -1471,6 +1471,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_request_rejects_valid_oversized_json_received_in_one_chunk() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let payload = format!(
+            r#"{{"type":"StatusWithContext","payload":{{"request_id":"req-oversized","source":"{}"}}}}"#,
+            "x".repeat(256)
+        );
+        let max_request_bytes = payload.len() - 1;
+        client.write_all(payload.as_bytes()).await.unwrap();
+
+        let result = read_request(
+            &mut server,
+            Duration::from_secs(1),
+            max_request_bytes,
+            payload.len() + 1,
+        )
+        .await;
+
+        let error = result.err().expect("oversized request must be rejected");
+        assert!(
+            format!("{error:#}").contains("exceeded max request size"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_request_rejects_valid_oversized_json_received_in_fragments() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let payload = format!(
+            r#"{{"type":"HealthWithContext","payload":{{"request_id":"health-oversized","source":"{}"}}}}"#,
+            "x".repeat(256)
+        );
+        let max_request_bytes = 96;
+        client.write_all(payload.as_bytes()).await.unwrap();
+
+        let result = read_request(&mut server, Duration::from_secs(1), max_request_bytes, 7).await;
+
+        let error = result.err().expect("oversized request must be rejected");
+        assert!(
+            format!("{error:#}").contains("exceeded max request size"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[tokio::test]
     async fn write_ack_reply_includes_request_id() {
         let (mut client, mut server) = tokio::io::duplex(256);
         let server_task = tokio::spawn(async move {
@@ -1495,5 +1539,86 @@ mod tests {
         assert_eq!(reply.status, "not_ready");
         assert_eq!(reply.reason.as_deref(), Some("safe_mode_enabled"));
         assert_eq!(reply.request_id, "req-ready-1");
+    }
+
+    #[tokio::test]
+    async fn live_endpoint_is_not_replaced_by_second_listener() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ipc.sock");
+        let (listener, identity) = bind_unix_listener(&path, Duration::from_secs(1))
+            .await
+            .unwrap();
+        let permissions = std::fs::symlink_metadata(&path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(permissions, 0o600);
+        let directory_permissions = std::fs::symlink_metadata(temp.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(directory_permissions, 0o700);
+
+        let error = bind_unix_listener(&path, Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("already running"),
+            "unexpected conflict error: {error:#}"
+        );
+        assert_eq!(endpoint_identity(&path).unwrap(), Some(identity));
+
+        drop(listener);
+        assert!(remove_endpoint_if_unchanged(&path, identity).unwrap());
+    }
+
+    #[tokio::test]
+    async fn non_socket_endpoint_is_never_deleted() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ipc.sock");
+        std::fs::write(&path, b"foreign data").unwrap();
+
+        let error = bind_unix_listener(&path, Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("not a Unix socket"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"foreign data");
+    }
+
+    #[tokio::test]
+    async fn verified_stale_socket_is_replaced() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ipc.sock");
+        let stale_listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        drop(stale_listener);
+
+        let (listener, active_identity) = bind_unix_listener(&path, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(endpoint_identity(&path).unwrap(), Some(active_identity));
+
+        drop(listener);
+        assert!(remove_endpoint_if_unchanged(&path, active_identity).unwrap());
+    }
+
+    #[tokio::test]
+    async fn cleanup_refuses_to_remove_replacement_socket() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ipc.sock");
+        let (listener, original_identity) = bind_unix_listener(&path, Duration::from_secs(1))
+            .await
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let replacement = std::os::unix::net::UnixListener::bind(&path).unwrap();
+
+        let error = remove_endpoint_if_unchanged(&path, original_identity).unwrap_err();
+        assert!(format!("{error:#}").contains("changed while it was being checked"));
+        assert!(path.exists());
+
+        drop(listener);
+        drop(replacement);
+        std::fs::remove_file(path).unwrap();
     }
 }

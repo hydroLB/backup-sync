@@ -15,10 +15,24 @@ error() { echo "Error: $1" >&2; exit 1; }
 
 assert_live_mode_config() {
   local conf_path="$1"
-  rg -q '"beforeDevCommand"[[:space:]]*:[[:space:]]*"cd \.\./frontend && npm run dev"' "$conf_path" \
-    || error "Live mode requires beforeDevCommand to run the Vite dev server in $conf_path"
-  rg -q '"devPath"[[:space:]]*:[[:space:]]*"http://localhost:5173"' "$conf_path" \
-    || error "Live mode requires devPath to point at http://localhost:5173 in $conf_path"
+  python3 - "$conf_path" <<'PY' || error "Invalid canonical Tauri development config at $conf_path"
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config_file:
+    config = json.load(config_file)
+
+build = config.get("build", {})
+expected = {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "frontend/dist",
+}
+for key, value in expected.items():
+    if build.get(key) != value:
+        raise SystemExit(f"build.{key} must be {value!r}")
+PY
 }
 
 command -v npm >/dev/null 2>&1 || error "npm is not installed or not on PATH."
@@ -29,9 +43,13 @@ command -v python3 >/dev/null 2>&1 || error "python3 is not installed or not on 
 [ -f "$FRONTEND/package.json" ] || error "Missing frontend/package.json (are you in the repo root?)."
 [ -f "$TAURI_CONF" ] || error "Missing Tauri config at $TAURI_CONF"
 
-if [ "${BACKUP_SYNC_FORCE_LIVE_MODE:-0}" = "1" ]; then
-  assert_live_mode_config "$TAURI_CONF"
-fi
+assert_live_mode_config "$TAURI_CONF"
+
+for port_override in "${BACKUP_SYNC_DEV_PORT:-}" "${VITE_PORT:-}"; do
+  if [ -n "$port_override" ] && [ "$port_override" != "$DEFAULT_TAURI_DEV_PORT" ]; then
+    error "The Tauri development URL is fixed at port $DEFAULT_TAURI_DEV_PORT; remove the custom port override ($port_override)."
+  fi
+done
 
 # Use a repo-local npm cache so dev workflows are resilient to global cache permission issues.
 mkdir -p "$NPM_CACHE_DIR" || error "Failed to create npm cache directory at $NPM_CACHE_DIR"
@@ -72,8 +90,12 @@ data_dir() {
 }
 
 ipc_socket_path() {
+  if [ -n "${BACKUP_SYNC_IPC_SOCKET:-}" ]; then
+    echo "$BACKUP_SYNC_IPC_SOCKET"
+    return 0
+  fi
   local runtime="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
-  echo "${runtime%/}/backup_sync_ipc.sock"
+  echo "${runtime%/}/backup-sync-$(id -u)/backup_sync_ipc.sock"
 }
 
 daemon_reachable() {
@@ -112,7 +134,7 @@ start_daemon_in_background() {
   fi
 
   local cfg
-  cfg="$(config_dir)/backup_sync/config.toml"
+  cfg="${BACKUP_SYNC_CONFIG:-$(config_dir)/backup_sync/config.toml}"
   local log
   log="$(data_dir)/backup_sync/logs/daemon.log"
 
@@ -134,8 +156,7 @@ start_daemon_in_background() {
   mkdir -p "$(dirname "$log")" || true
 
   echo "Starting daemon in background..."
-  BACKUP_SYNC_CONFIG="$cfg" BACKUP_SYNC_LOG="$log" "$DAEMON_BIN" >/dev/null 2>&1 &
-  DAEMON_PID="$!"
+  exec env BACKUP_SYNC_CONFIG="$cfg" BACKUP_SYNC_LOG="$log" "$DAEMON_BIN"
 }
 
 cleanup() {
@@ -145,7 +166,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-start_daemon_in_background &
+start_daemon_in_background >/dev/null 2>&1 &
+DAEMON_PID="$!"
 
 cd "$GUI_ROOT"
 
@@ -157,14 +179,7 @@ TAURI_BIN="$FRONTEND/node_modules/.bin/tauri"
 [ -x "$TAURI_BIN" ] || error "Tauri CLI not found at $TAURI_BIN. Run npm install again."
 
 echo "Starting Tauri app..."
-# Run Tauri from the gui crate (so Cargo.toml/src-tauri are discoverable)
+# Run Tauri from the GUI crate so its canonical config and Cargo project are discoverable.
 cd "$GUI_ROOT"
-
-# Keep Tauri devPath and Vite dev server port aligned by default.
-if [ "${BACKUP_SYNC_FORCE_LIVE_MODE:-0}" = "1" ]; then
-  export BACKUP_SYNC_DEV_PORT="$DEFAULT_TAURI_DEV_PORT"
-else
-  export BACKUP_SYNC_DEV_PORT="${BACKUP_SYNC_DEV_PORT:-$DEFAULT_TAURI_DEV_PORT}"
-fi
 
 "$TAURI_BIN" dev --config "$TAURI_CONF" || error "Tauri failed to start"

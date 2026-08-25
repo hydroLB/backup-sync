@@ -1,36 +1,20 @@
 use super::model::{Manifest, ManifestEntryKind, VersionIndex};
+use super::operation_lock::acquire_store_leases;
 use super::store::{blob_path, blobs_root, sources_root, store_root};
 use crate::config::model::{Config, Destination, HashingTuning};
 use crate::encryption::blobs::BlobCodec;
 use crate::hashing;
+use crate::io::BlockingIoPolicy;
 use anyhow::{Context, Result};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ScrubMode {
+    #[default]
     Sampled,
     Full,
-}
-
-impl Default for ScrubMode {
-    /// Summary: default orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
-    fn default() -> Self {
-        Self::Sampled
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -44,19 +28,7 @@ pub struct ScrubResult {
     pub hash_mismatches: usize,
 }
 
-/// Summary: scrub_versioned_store orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/// Walk committed manifests and verify that referenced blobs still exist and decode correctly.
 pub fn scrub_versioned_store(
     cfg: &Config,
     hashing: &HashingTuning,
@@ -65,13 +37,31 @@ pub fn scrub_versioned_store(
     sample_versions_per_source: usize,
     seed: u64,
 ) -> Result<ScrubResult> {
-    let blob_codec = BlobCodec::from_config(cfg)
-        .context("versioned::scrub_versioned_store failed to initialize blob codec")?;
     let destinations_by_id: HashMap<&str, &Destination> = cfg
         .destinations
         .iter()
         .map(|d| (d.id.as_str(), d))
         .collect();
+
+    let mut enabled_destinations = Vec::new();
+    for watched in cfg.watched.iter().filter(|watched| watched.enabled) {
+        let destination = destinations_by_id
+            .get(watched.destination_id.as_str())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "versioned::scrub_versioned_store missing destination id {} for {:?}",
+                    watched.destination_id,
+                    watched.path
+                )
+            })?;
+        enabled_destinations.push(destination.path.as_path());
+    }
+    let lock_policy = BlockingIoPolicy::from_config(cfg);
+    let _operation_leases = acquire_store_leases(enabled_destinations, &lock_policy)
+        .context("versioned::scrub_versioned_store could not serialize destination stores")?;
+
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::scrub_versioned_store failed to initialize blob codec")?;
 
     let mut referenced_by_dest: HashMap<PathBuf, BTreeSet<String>> = HashMap::new();
     let mut manifests_checked = 0usize;
@@ -187,19 +177,7 @@ pub fn scrub_versioned_store(
     })
 }
 
-/// Summary: select_hashes_for_mode orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/// Select which referenced blob hashes to verify in sampled scrub mode.
 fn select_hashes_for_mode(
     hashes: &[String],
     sample_blobs: usize,
@@ -214,17 +192,73 @@ fn select_hashes_for_mode(
         return Ok(hashes.to_vec());
     }
     let mut out: Vec<String> = Vec::with_capacity(max);
-    let start = (seed as usize) % hashes.len();
-    let step = 97usize;
-    let mut idx = start;
-    let mut seen: HashSet<usize> = HashSet::new();
-    while out.len() < max && seen.len() < hashes.len() {
-        if seen.insert(idx) {
-            out.push(hashes[idx].clone());
+    let start = (seed % hashes.len() as u64) as usize;
+    let mut step = 97usize % hashes.len();
+    if step == 0 {
+        step = 1;
+    }
+    while greatest_common_divisor(step, hashes.len()) != 1 {
+        step = (step + 1) % hashes.len();
+        if step == 0 {
+            step = 1;
         }
+    }
+    let mut idx = start;
+    while out.len() < max {
+        out.push(hashes[idx].clone());
         idx = (idx + step) % hashes.len();
     }
     Ok(out)
+}
+
+fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{select_hashes_for_mode, ScrubMode};
+    use std::collections::HashSet;
+
+    fn hashes(len: usize) -> Vec<String> {
+        (0..len).map(|index| format!("hash-{index}")).collect()
+    }
+
+    #[test]
+    fn sampled_selection_terminates_with_unique_requested_cardinality() {
+        let hashes = hashes(194);
+        let selected = select_hashes_for_mode(&hashes, 193, ScrubMode::Sampled, 42).unwrap();
+
+        assert_eq!(selected.len(), 193);
+        assert_eq!(selected.iter().collect::<HashSet<_>>().len(), 193);
+        assert_eq!(
+            selected,
+            select_hashes_for_mode(&hashes, 193, ScrubMode::Sampled, 42).unwrap()
+        );
+    }
+
+    #[test]
+    fn sampled_selection_caps_at_input_length() {
+        let hashes = hashes(194);
+        let selected = select_hashes_for_mode(&hashes, 200, ScrubMode::Sampled, 42).unwrap();
+
+        assert_eq!(selected, hashes);
+    }
+
+    #[test]
+    fn zero_sample_and_full_mode_select_no_hashes() {
+        let hashes = hashes(194);
+
+        assert!(select_hashes_for_mode(&hashes, 0, ScrubMode::Sampled, 42)
+            .unwrap()
+            .is_empty());
+        assert!(select_hashes_for_mode(&hashes, 193, ScrubMode::Full, 42)
+            .unwrap()
+            .is_empty());
+    }
 }
 
 // Plainfile hashing is handled by `BlobCodec`, which also supports decoding compressed and or encrypted blobs.

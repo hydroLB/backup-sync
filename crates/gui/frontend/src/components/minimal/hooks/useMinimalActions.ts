@@ -46,78 +46,22 @@ type MinimalActions = {
   ) => Promise<void>;
 };
 
-/**
- * Summary: Format a user-facing label for the number of affected destinations.
- *
- * Inputs: `count` as the number of configured destinations touched by an action.
- *
- * Outputs: Singular or plural destination label text.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by add-path success feedback.
- *
- * Why this exists: Keep minimal success messages concise and grammatically correct.
- */
+/** Keep minimal success messages concise and grammatically correct. */
 function destinationCountLabel(count: number): string {
   return `${count} destination${count === 1 ? '' : 's'}`;
 }
 
-/**
- * Summary: Resolve watched destination id with a safe fallback.
- *
- * Inputs: Watched entry and fallback destination id.
- *
- * Outputs: Destination id that should be used for matching.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by add, remove, and update handlers for exact row targeting.
- *
- * Why this exists: Older configs can omit destination ids and still need deterministic behavior.
- */
+/** Older configs can omit destination ids and still need deterministic behavior. */
 function resolveWatchedDestinationId(watched: WatchedPath, fallbackDestinationId: string): string {
   return watched.destination_id ?? fallbackDestinationId;
 }
 
-/**
- * Summary: Build a stable source key for watched entries ignoring destination assignment.
- *
- * Inputs: Source path and watched kind.
- *
- * Outputs: Source key string.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used when cloning watched items across destinations.
- *
- * Why this exists: A source path should be uniquely tracked per kind when expanding to all destinations.
- */
+/** A source path should be uniquely tracked per kind when expanding to all destinations. */
 function sourceKey(path: string, kind: 'File' | 'Directory'): string {
   return `${kind}:${path}`;
 }
 
-/**
- * Summary: Build a unique destination id for newly added destinations.
- *
- * Inputs: Config containing the existing destination list.
- *
- * Outputs: Collision-safe destination id.
- *
- * Side effects: None.
- *
- * Error handling: Falls back to a timestamp suffix if deterministic ids are exhausted.
- *
- * Ties to other methods: Used by `addDestination`.
- *
- * Why this exists: Keep destination creation deterministic and avoid id conflicts.
- */
+/** Keep destination creation deterministic and avoid id conflicts. */
 function nextDestinationId(cfg: Config): string {
   const base = 'dest';
   const used = new Set((cfg.destinations || []).map((destination) => destination.id));
@@ -129,21 +73,7 @@ function nextDestinationId(cfg: Config): string {
   return `${base}-${Date.now()}`;
 }
 
-/**
- * Summary: Build minimal-mode action handlers that mutate config.
- *
- * Inputs: Current config, primary destination id, persist function, picker service, and event handler.
- *
- * Outputs: A set of stable async handlers for destination selection and watched folder management.
- *
- * Side effects: Opens native pickers and persists config updates via IPC services.
- *
- * Error handling: Emits user-visible errors via `onEvent`.
- *
- * Ties to other methods: Used by `MinimalMain` to wire section components without inline handler bodies.
- *
- * Why this exists: Centralize config mutation logic so UI components remain presentational.
- */
+/** Centralize config mutation logic so UI components remain presentational. */
 export function useMinimalActions({
   cfg,
   primaryId,
@@ -396,22 +326,6 @@ export function useMinimalActions({
       destinationId: string,
     ) => {
       if (!cfg || !primaryId) return;
-      /**
-       * Summary: hasDestination orchestrates this method's core behavior.
-       *
-       * Inputs: Method parameters and required receiver state.
-       *
-       * Outputs: Return value and observable result for callers.
-       *
-       * Side effects: None beyond this method's explicit operations.
-       *
-       * Error handling: Propagates contextual errors to the caller when operations fail.
-       *
-       * Ties to other methods: Invoked by and composes with adjacent module methods.
-       *
-       * Why this exists: Keeps this behavior isolated, testable, and reusable.
-       */
-
       const hasDestination = (cfg.destinations || []).some(
         (destination) => destination.id === destinationId,
       );

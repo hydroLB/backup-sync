@@ -1,75 +1,57 @@
 # Security Runbook
 
-## Purpose
-Operational guidance for running security checks locally and triaging failures before opening a PR.
+Last updated: 2026-08-23
 
-## Local Security Commands
-Run these from repository root:
+## Local commands
 
-1. Secret scans (working tree + git history)
-   - `make secrets`
-2. Lockfile hygiene validation
-   - `make lockfile-check`
-3. Rust/Node dependency advisories
-   - `make audit`
-4. Rust supply-chain policy (licenses/sources/advisories/bans)
-   - `make deny`
-5. Full security gate bundle
-   - `make security-check`
+Run from the repository root:
 
-## CI Security Gates
-The `ci-security` job runs:
-1. `gitleaks` action for repository secret scanning.
-2. `make lockfile-check`.
-3. `make deny`.
-4. `make audit`.
+```bash
+make secrets
+make lockfile-check
+make deny
+make audit
+make security-check
+```
 
-## Secret Scan Triage
-When a secret scan fails:
+`make security-check` combines the working-tree/history secret scan, lockfile validation, Rust supply-chain policy, RustSec audit, and full npm audit at high severity.
 
-1. Confirm whether the finding is a real credential.
-2. If real:
-   - Revoke and rotate the credential immediately.
-   - Remove the credential from current files.
-   - Remove from history if needed.
-   - Document the incident and follow-up PR.
-3. If false positive:
-   - Add a narrow allowlist entry in `.gitleaks.toml` (or equivalent policy file).
-   - Include rationale and example in PR description.
-   - Do not blanket-ignore entire directories without justification.
+## Secret finding
 
-## Lockfile Hygiene Triage
-If `make lockfile-check` fails:
+1. Determine whether the value is a real credential.
+2. If real, revoke/rotate it first, remove it from files and history as appropriate, and document the incident privately.
+3. If false positive, add the narrowest justified `.gitleaks.toml` rule; never blanket-ignore broad source directories.
+4. Re-run both working-tree and history scans.
 
-1. Regenerate Rust lockfile via normal dependency command path.
-2. Regenerate frontend lockfile with `npm --prefix crates/gui/frontend install --package-lock-only`.
-3. Re-run `make lockfile-check` and commit lockfile updates.
+## Lockfile finding
 
-## Dependency Policy Triage
-If `make deny` fails:
+Regenerate through the normal dependency manager, review the resolved diff, then run:
 
-1. Advisory issue:
-   - Upgrade affected crates, or
-   - add a temporary justified ignore in `deny.toml` with linked tracking issue.
-2. License/source issue:
-   - replace dependency with compliant source/license, or
-   - explicitly approve in policy with legal/security signoff.
-3. Ban/wildcard issue:
-   - pin explicit version in `Cargo.toml` and regenerate `Cargo.lock`.
+```bash
+make lockfile-check
+make audit
+make deny
+```
 
-## Current Rust Advisory Exceptions
-The Rust advisory allowlist is currently limited to upstream Tauri desktop-stack warnings that remain unresolved in published dependencies:
+Do not edit checksums by hand or accept an unexpected source URL.
 
-1. GTK3 and related Linux webview or tray crates pulled by `tauri`, `wry`, and tray or dialog support.
-2. `urlpattern` unicode helper crates pulled transitively by `tauri-utils`.
+## Advisory or policy finding
 
-Re-check these exceptions whenever Tauri, WRY, or the dialog or tray plugins are upgraded. Do not add unrelated advisory IDs to the allowlist.
+1. Upgrade or replace the dependency when possible.
+2. Trace whether the vulnerable code is reachable in the compiled feature graph.
+3. Treat an ignore as temporary exceptional policy requiring a linked owner, rationale, scope, and removal condition.
+4. Update the threat model/risk register if the dependency cannot be removed promptly.
 
-## Incident Notes Template
-For security-impacting PRs, include:
+There is currently no `[advisories].ignore` inventory in `deny.toml`. Current scans report zero vulnerabilities. The 19 `cargo deny` messages from the Tauri/Linux GTK3 and HTML dependency graph are informational warnings; do not describe them as ignored advisories or resolved maintenance risk.
 
-1. Trigger (what failed and where).
-2. Impacted surface.
-3. Mitigation implemented.
-4. Residual risk.
-5. Follow-up owner and due date.
+## Suspected store tampering or corruption
+
+1. Stop backup/replication writes and preserve the destination.
+2. Capture redacted diagnostics without moving or deleting store metadata.
+3. Follow [Corruption suspicion](runbooks/corruption-suspicion.md) and [Verify failure](runbooks/verify-failure.md).
+4. Restore to a new directory first; do not overwrite the only source of evidence.
+5. Record affected manifests, hashes, encryption key ID, and software commit without including key material.
+
+## Security-impacting change record
+
+Include trigger, affected boundary, exploit/failure condition, tests, mitigation, residual risk, and follow-up owner. Private reports follow [SECURITY.md](../SECURITY.md).

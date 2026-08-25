@@ -3,19 +3,7 @@ use backup_core::{
     load_validated_config, platform::paths, state::index::BackupIndex, state::store::StateStore,
 };
 
-/// Summary: Prints a snapshot of the current state and config summary.
-///
-/// Inputs: none.
-///
-/// Outputs: `Ok(())` after printing summary lines.
-///
-/// Side effects: Reads config/state from disk and writes to stdout.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI status command output.
-///
-/// Why this exists: provide a quick operational snapshot for users.
+/// Provide a quick operational snapshot for users.
 pub fn status() -> Result<()> {
     let cfg = load_validated_config().context("cli::status failed to load config")?;
     let state_path =

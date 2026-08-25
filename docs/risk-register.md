@@ -1,32 +1,39 @@
-# Risk Register (Top 15)
+# Risk Register
 
-Last updated: 2026-02-20  
-Scope: production correctness, security, performance, availability, maintainability, and developer experience.
+Last updated: 2026-08-23
 
-## Priority scale
-- `P0`: high likelihood + high blast radius, should be addressed in the next delivery window.
-- `P1`: significant risk that should be reduced in near-term roadmap.
-- `P2`: meaningful risk, lower urgency or narrower blast radius.
+Priority: `P0` can cause unrecoverable loss or invalidate a release; `P1` is a significant pre-1.0 reliability/security risk; `P2` is bounded maturation work.
 
-## Risks and Fix Paths
+## Active risks
 
-| ID | Pri | Risk | Impact | Fix approach | Mapped PR IDs |
-|---|---|---|---|---|---|
-| R-01 | P0 | Layer violations can slip in without an automated boundary checker. | Domain logic can leak into app/UI layers, increasing coupling and regression risk. | Add import/dependency boundary checks in CI and local gate. | PR-10 |
-| R-02 | P0 | Config loading and validation behavior can diverge across entrypoints. | Bad config may fail late or inconsistently across CLI/daemon/GUI. | Unify config loading/validation path with explicit fail-fast startup contract. | PR-12 |
-| R-03 | P0 | Error model is not fully standardized at all process boundaries. | Operators and users receive inconsistent error shapes and recovery guidance. | Introduce typed error codes and centralized boundary mapping. | PR-13 |
-| R-04 | P0 | Observability baseline is partial and not fully correlated end-to-end. | Harder incident triage and slower root-cause analysis under production pressure. | Standardize structured logs, correlation IDs, and redaction policy across boundaries. | PR-14 |
-| R-05 | P0 | Coverage gates are still near minimum viable thresholds. | Subtle regressions may pass CI, especially in boundary and error paths. | Add contract-focused tests and raise thresholds incrementally with repeatability checks. | PR-17, PR-18 |
-| R-06 | P1 | CI topology is mostly monolithic and provides slower/fuzzier failure isolation. | Longer feedback cycles and harder diagnosis of failures in PRs. | Split CI jobs by gate type with parallelization and artifact upload. | PR-8 |
-| R-07 | P1 | Required-check policy is not codified as an explicit branch-protection contract document. | Merge policy can drift from intended safety bar. | Define and maintain required checks policy with exact check names. | PR-9 |
-| R-08 | P1 | Public API surface ownership is not yet formalized for all crate boundaries. | Contract drift and accidental breaking changes across IPC/CLI/GUI surfaces. | Explicit API ownership list + minimal public exports + compatibility checks. | PR-11 |
-| R-09 | P1 | Health/readiness semantics and graceful shutdown assertions need stronger test-backed guarantees. | Availability incidents can be harder to detect and recover from safely. | Implement health/readiness contracts and shutdown behavior tests/runbook hooks. | PR-15 |
-| R-10 | P1 | Security automation covers scans but policy control is still incomplete. | Advisory ignores and dependency policy exceptions can drift over time. | Add policy-driven dependency/security checks and threat-model notes. | PR-16 |
-| R-11 | P1 | Incident runbooks and rollback procedures are incomplete. | Longer MTTR and higher operator error during critical events. | Add focused runbooks for common failure modes and rollback steps. | PR-19 |
-| R-12 | P2 | Architecture and design-decision narrative is still fragmented. | Slower onboarding and weaker long-term design consistency. | Add architecture one-pager, ADR set, and design-principles doc set. | PR-20 |
-| R-13 | P2 | Release workflow still relies on partial manual process. | Inconsistent release quality and weaker auditability of shipped changes. | Automate release notes/changelog and enforce version/tag strategy. | PR-21 |
-| R-14 | P2 | Perf and resilience checks focus on a narrow subset of paths. | Regressions in non-benchmarked hot paths may escape early detection. | Expand microbench/load tests and document resource tuning baselines. | PR-22 |
-| R-15 | P2 | Legacy/duplicate logic pockets and global-state seams increase maintenance cost. | Harder reasoning, larger diffs, and elevated bug risk during refactors. | Execute targeted hygiene/refactor tranche with strict behavior-preserving tests. | PR-23 |
+| ID | Pri | Residual risk | Current control | Next mitigation |
+|---|---|---|---|---|
+| R-01 | P0 | Losing an encryption key makes encrypted blobs unrecoverable. | Explicit key generation, restrictive key-file permissions, key-ID validation, and documented warnings. | Require a verified recovery copy before GUI enablement. |
+| R-02 | P0 | No packaged, signed, notarized, or clean-machine-tested artifacts exist. | Source builds, tag/changelog validation, and Linux full-gate CI. | Add reproducible artifacts, provenance, platform signing, and install/restore/uninstall tests. |
+| R-03 | P1 | Windows named-pipe ACL policy and runtime singleton behavior are not verified. | Pipe connection ordering is correct and Windows all-target/all-feature compilation runs in CI. | Define explicit per-user ACLs and test on clean Windows hosts. |
+| R-04 | P1 | Atomic state replacement does not make cross-process read-modify-write updates transactional. | Same-directory temp, fsync, atomic replace, and daemon-local commit serialization/owned-field merges. | Add a state lease or transactional compare-and-swap protocol shared by every process. |
+| R-05 | P1 | In-flight blocking filesystem work is not cooperatively cancellable. | Work leaves the async runtime and shutdown joins are bounded. | Add cancellation checkpoints to scan, restore, scrub, and replication primitives. |
+| R-06 | P1 | Two backup engines remain public maintenance surfaces. | Production adapters use the versioned engine and the legacy exports are documented. | Migrate remaining consumers/tests and remove only under deprecation policy. |
+| R-07 | P1 | Plaintext manifests expose source paths and metadata even with blob encryption. | Blob-only encryption scope is explicit in storage/security docs. | Design authenticated optional metadata encryption with migration/recovery semantics. |
+| R-08 | P1 | Local malicious metadata replacement is detectable but not remotely attestable. | Strict manifest/index/path/hash validation, decoded-blob hashing, scrub, replication, and staged restore. | Add authenticated or signed manifest/index metadata. |
+| R-09 | P1 | Tauri/Linux transitives emit 19 informational unmaintained/advisory warnings. | Current vulnerability scans report zero vulnerabilities and no Rust advisory ignore list exists. | Track GTK3/Wry/Tauri upgrades and reassess each warning on dependency changes. |
+| R-10 | P2 | macOS/Windows compilation does not prove native service, IPC, dialog, or recovery behavior. | Hosted all-target/all-feature workspace compile jobs catch cfg/build drift. | Add platform runtime and clean-machine recovery suites. |
+| R-11 | P2 | Coverage leaves destructive rollback, timeout, and platform branches lightly exercised. | Backend/frontend unit, integration, E2E, coverage, and performance gates. | Add interruption/property tests and raise thresholds based on stable coverage. |
+| R-12 | P2 | Snapshot providers may require privileges and can fall back to live reads. | Snapshots are opt-in and timeout-bounded; fallback is reported and blob hashing rejects inconsistent reads. | Add platform capability checks and clearer preflight diagnostics. |
+| R-13 | P2 | Fixed 30-minute GUI scheduling can overwrite an externally edited interval. | UI and configuration docs describe normalization. | Separate basic and advanced schedule ownership. |
 
-## Mapping note
-Every risk in this register maps directly to at least one planned PR ID (`PR-8` through `PR-23`) so execution can be tracked with measurable closure criteria.
+## Established controls
+
+- Live source mutation cannot publish bytes under a stale digest.
+- Restore rejects hostile metadata, verifies decoded content, and stages before target replacement.
+- Store-mutating operations use deterministic, bounded cross-process leases.
+- Sampled scrub terminates and replication repairs incomplete indexed versions before index publication.
+- Unix IPC uses private per-user endpoints and refuses unsafe live/stale endpoint replacement.
+- State writes are atomic and GUI/daemon blocking work does not occupy async executor threads.
+- The canonical quality gate includes tests, builds, coverage, performance, secret scans, and supply-chain audits.
+- macOS and Windows compilation jobs cover conditional workspace code; CodeQL covers Rust and frontend code.
+- npm/Rust vulnerability scans currently report zero vulnerabilities; stale Rust advisory suppressions were removed.
+
+## Review triggers
+
+Review this register when storage/encryption/restore semantics, platform support, public contracts, coverage thresholds, dependencies, or release packaging change. Roadmap work should reference the risks it reduces.

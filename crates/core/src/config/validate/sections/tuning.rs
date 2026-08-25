@@ -4,19 +4,7 @@ use anyhow::{bail, Result};
 
 use super::{ensure_nonzero_u64, ensure_nonzero_usize};
 
-/// Summary: Validates non-path configuration fields and tuning blocks.
-///
-/// Inputs: the config, validation limits, and a label prefix.
-///
-/// Outputs: `Ok(())` when all numeric and tuning invariants hold.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: config loading and backup runtime behavior.
-///
-/// Why this exists: keep the top-level validation function readable by grouping numeric checks.
+/// Keep the top-level validation function readable by grouping numeric checks.
 pub(crate) fn validate_tuning(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     validate_backup_root(cfg, label)?;
     validate_interval(cfg, limits, label)?;
@@ -27,19 +15,7 @@ pub(crate) fn validate_tuning(cfg: &Config, limits: &ValidationLimits, label: &s
     Ok(())
 }
 
-/// Summary: Validates required path settings that are structurally invalid when empty.
-///
-/// Inputs: the config and label prefix.
-///
-/// Outputs: `Ok(())` when required paths are present.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: destination and state file layout.
-///
-/// Why this exists: avoid running a cycle when basic config paths are missing.
+/// Avoid running a cycle when basic config paths are missing.
 fn validate_backup_root(cfg: &Config, label: &str) -> Result<()> {
     if cfg.backup_root.as_os_str().is_empty() {
         bail!("{label} backup_root is missing");
@@ -47,19 +23,7 @@ fn validate_backup_root(cfg: &Config, label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Summary: Validates scheduling-related fields.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when intervals are within guardrails.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon cycle scheduling.
-///
-/// Why this exists: prevent accidental busy loops or multi-month stalls.
+/// Prevent accidental busy loops or multi-month stalls.
 fn validate_interval(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     if cfg.interval_seconds < limits.min_interval_seconds {
         bail!(
@@ -76,19 +40,7 @@ fn validate_interval(cfg: &Config, limits: &ValidationLimits, label: &str) -> Re
     Ok(())
 }
 
-/// Summary: Validates top-level and execution tuning fields.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when execution tuning is within limits.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `BackupExecutor` copy buffering, retry behavior, and state updates.
-///
-/// Why this exists: cap memory usage and enforce sane retry policies.
+/// Cap memory usage and enforce sane retry policies.
 fn validate_execution_limits(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     ensure_nonzero_usize(label, "max_backups_per_file", cfg.max_backups_per_file)?;
     if cfg.max_backups_per_file > limits.max_backups_per_file {
@@ -208,19 +160,7 @@ fn validate_execution_limits(cfg: &Config, limits: &ValidationLimits, label: &st
     Ok(())
 }
 
-/// Summary: Validates hashing tuning fields.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when hashing tuning is within limits.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: hashing in planning, execution, and verification.
-///
-/// Why this exists: bound hashing timeouts and memory usage.
+/// Bound hashing timeouts and memory usage.
 fn validate_hashing_limits(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     ensure_nonzero_usize(label, "hashing.buffer_bytes", cfg.hashing.buffer_bytes)?;
     if cfg.hashing.buffer_bytes > limits.max_hash_buffer_bytes {
@@ -243,19 +183,7 @@ fn validate_hashing_limits(cfg: &Config, limits: &ValidationLimits, label: &str)
     Ok(())
 }
 
-/// Summary: Validates planning tuning fields.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when planning tuning is within limits.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: scan planning and guardrail enforcement.
-///
-/// Why this exists: prevent runaway planning or hung scans.
+/// Prevent runaway planning or hung scans.
 fn validate_planning_limits(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     if cfg.planning.hash_check_interval == 0 {
         bail!("{label} planning.hash_check_interval must be > 0");
@@ -290,19 +218,7 @@ fn validate_planning_limits(cfg: &Config, limits: &ValidationLimits, label: &str
     Ok(())
 }
 
-/// Summary: Validates runtime tuning fields.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when runtime tuning is within limits.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon loop cadence and IPC behavior.
-///
-/// Why this exists: bound timeouts and keep daemon responsiveness predictable.
+/// Bound timeouts and keep daemon responsiveness predictable.
 fn validate_runtime_limits(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     ensure_nonzero_u64(
         label,

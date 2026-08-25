@@ -7,19 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
-/// Summary: build_cfg orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_cfg(source: &Path, dest: &Path) -> Config {
     Config {
         backup_root: dest.to_path_buf(),
@@ -54,19 +41,6 @@ fn build_cfg(source: &Path, dest: &Path) -> Config {
     }
 }
 
-/// Summary: locate_one_blob orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn locate_one_blob(dest: &Path) -> PathBuf {
     let store_root = dest.join(".backup_sync").join("v1");
     let sources_root = store_root.join("sources");
@@ -113,19 +87,6 @@ fn locate_one_blob(dest: &Path) -> PathBuf {
     panic!("versioned_scrub::locate_one_blob no file entry found");
 }
 
-/// Summary: scrub_detects_blob_hash_mismatch orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn scrub_detects_blob_hash_mismatch() {
     let tmp = tempdir().expect("versioned_scrub::scrub_detects_blob_hash_mismatch tempdir");
@@ -160,19 +121,6 @@ fn scrub_detects_blob_hash_mismatch() {
     );
 }
 
-/// Summary: scrub_detects_missing_blob orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn scrub_detects_missing_blob() {
     let tmp = tempdir().expect("versioned_scrub::scrub_detects_missing_blob tempdir");

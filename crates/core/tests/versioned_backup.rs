@@ -11,19 +11,6 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
-/// Summary: sha256_hex orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -35,19 +22,6 @@ fn sha256_hex(data: &[u8]) -> String {
     out
 }
 
-/// Summary: build_cfg orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
     Config {
         backup_root: dest.to_path_buf(),
@@ -82,19 +56,6 @@ fn build_cfg(source: &Path, dest: &Path, keep_versions: usize) -> Config {
     }
 }
 
-/// Summary: versions_for orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn versions_for(cfg: &Config, source: &Path) -> Vec<String> {
     let listed =
         list_versions(cfg).expect("versioned_backup::versions_for failed to list versions");
@@ -105,19 +66,6 @@ fn versions_for(cfg: &Config, source: &Path) -> Vec<String> {
     versions.into_iter().map(|v| v.id).collect()
 }
 
-/// Summary: versioned_creates_version_only_on_change orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn versioned_creates_version_only_on_change() {
     let tmp = tempdir()
@@ -162,19 +110,6 @@ fn versioned_creates_version_only_on_change() {
     assert_eq!(versions_for(&cfg, &source).len(), 3);
 }
 
-/// Summary: versioned_enforces_retention_limit orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn versioned_enforces_retention_limit() {
     let tmp = tempdir()
@@ -206,19 +141,6 @@ fn versioned_enforces_retention_limit() {
     assert_eq!(versions_for(&cfg, &source).len(), 2);
 }
 
-/// Summary: large_deletion_pins_extra_version_beyond_retention orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn large_deletion_pins_extra_version_beyond_retention() {
     let tmp = tempdir().expect(
@@ -341,19 +263,6 @@ fn large_deletion_pins_extra_version_beyond_retention() {
     );
 }
 
-/// Summary: versioned_restore_to_directory_and_in_place orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn versioned_restore_to_directory_and_in_place() {
     let tmp = tempdir()
@@ -423,19 +332,6 @@ fn versioned_restore_to_directory_and_in_place() {
     assert_eq!(restored_in_place, "v1");
 }
 
-/// Summary: restore_preflight_missing_blob_does_not_mutate_in_place_target orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn restore_preflight_missing_blob_does_not_mutate_in_place_target() {
     let tmp = tempdir().expect(
@@ -507,19 +403,6 @@ fn restore_preflight_missing_blob_does_not_mutate_in_place_target() {
     assert_eq!(still, "v2");
 }
 
-/// Summary: restore_preflight_space_check_does_not_mutate_to_directory_target orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 #[test]
 fn restore_preflight_space_check_does_not_mutate_to_directory_target() {
     let tmp = tempdir().expect(

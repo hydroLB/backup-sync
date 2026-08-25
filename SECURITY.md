@@ -1,28 +1,39 @@
 # Security Policy
 
-## Supported Versions
-Security fixes are applied to the latest `main` branch and the latest release line.
+## Supported versions
 
-## Reporting a Vulnerability
-1. Do not disclose vulnerability details in public issues or PRs.
-2. Use GitHub Security Advisories (`Security` tab, `Report a vulnerability`) for private disclosure.
-3. If Security Advisories are unavailable, open a minimal issue requesting a private contact channel without technical details.
+Security fixes currently target `main`. No tagged release line exists yet; this section will identify supported release branches after the first published version.
 
-## Response Targets
-- Initial triage response: within 3 business days
-- Remediation plan or mitigation guidance: within 7 business days for validated reports
+## Reporting a vulnerability
 
-## Disclosure Process
-1. Reproduce and validate the report.
-2. Prepare a fix and tests in a private branch.
-3. Coordinate release timing with reporters when possible.
-4. Publish a changelog entry after patch release.
+1. Do not disclose vulnerability details in public issues or pull requests.
+2. Use GitHub Security Advisories (`Security` → `Report a vulnerability`) for private disclosure.
+3. If private advisories are unavailable, open a minimal issue requesting a private contact channel without technical details.
 
-## Scope Notes
-- This project handles local filesystem backup data.
-- Reports about unsafe defaults, data leakage, privilege escalation, or integrity bypass are in scope.
+## Response targets
 
-## Security Checks and Local Guidance
-- Local security runbook: [`docs/security-runbook.md`](docs/security-runbook.md)
-- Threat model notes for critical surfaces: [`docs/threat-model.md`](docs/threat-model.md)
-- Combined local security gate: `make security-check`
+- Initial triage: within three business days
+- Remediation plan or mitigation guidance: within seven business days for a validated report
+
+Targets are project goals, not a paid support agreement.
+
+## In-scope examples
+
+- Backup, replication, scrub, or restore behavior that can publish corrupt state or destroy unrelated data
+- Path traversal, symlink attacks, store-lock bypass, IPC impersonation, or unsafe service definitions
+- Leakage of local paths, keys, backup contents, or unredacted diagnostics
+- Dependency or build-chain vulnerabilities that affect shipped behavior
+
+## Disclosure process
+
+1. Reproduce and assess impact privately.
+2. Prepare the fix and regression tests on a private branch.
+3. Coordinate disclosure timing with the reporter when possible.
+4. Publish an appropriate changelog entry when a release is available.
+
+## Local security checks
+
+- Combined gate: `make security-check`
+- Operational guidance: [Security runbook](docs/security-runbook.md)
+- System assumptions and residuals: [Threat model](docs/threat-model.md)
+- Known project risks: [Risk register](docs/risk-register.md)

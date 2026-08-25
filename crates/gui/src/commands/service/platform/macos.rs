@@ -11,19 +11,7 @@ use tracing::warn;
 
 const LAUNCHD_LABEL: &str = "com.backup_sync.daemon";
 
-/// Summary: Resolve the launchctl target identifier for the current user session.
-///
-/// Inputs: none.
-///
-/// Outputs: a `launchctl` domain-qualified service identifier.
-///
-/// Side effects: Executes `id -u` to determine the numeric UID.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `restart_daemon` and best-effort daemon kickstarts after install.
-///
-/// Why this exists: `launchctl kickstart` requires an explicit domain on modern macOS.
+/// `launchctl kickstart` requires an explicit domain on modern macOS.
 fn launchctl_target() -> Result<String, ErrorEnvelope> {
     let out = run_command("id", &["-u"], "SERVICE_UID", "id -u")?;
     let uid = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -36,19 +24,7 @@ fn launchctl_target() -> Result<String, ErrorEnvelope> {
     Ok(format!("gui/{}/{}", uid, LAUNCHD_LABEL))
 }
 
-/// Summary: Writes the launchd plist to disk.
-///
-/// Inputs: the executable path and optional log path.
-///
-/// Outputs: the destination plist path.
-///
-/// Side effects: Writes the launchd plist file to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation on macOS.
-///
-/// Why this exists: install the daemon to start on login.
+/// Install the daemon to start on login.
 pub fn write_plist(exec: &Path, log_path: Option<&Path>) -> Result<PathBuf, ErrorEnvelope> {
     let dest = launchd::default_plist_path().map_err(|e| {
         ErrorEnvelope::new(
@@ -72,19 +48,7 @@ pub fn write_plist(exec: &Path, log_path: Option<&Path>) -> Result<PathBuf, Erro
     Ok(dest)
 }
 
-/// Summary: Enables the launchd service using launchctl.
-///
-/// Inputs: the plist path.
-///
-/// Outputs: `Ok(())` when launchctl load succeeds.
-///
-/// Side effects: Runs launchctl to load the plist.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation on macOS.
-///
-/// Why this exists: register the daemon with launchd for startup.
+/// Register the daemon with launchd for startup.
 pub fn enable_launchd(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
     let dest_str = dest.to_str().ok_or_else(|| {
         ErrorEnvelope::new(
@@ -119,19 +83,7 @@ pub fn enable_launchd(dest: &PathBuf) -> Result<(), ErrorEnvelope> {
     Ok(())
 }
 
-/// Summary: Builds the service status payload for macOS.
-///
-/// Inputs: daemon reachability and runtime metadata.
-///
-/// Outputs: a populated `ServiceStatus`.
-///
-/// Side effects: Reads filesystem metadata to check plist presence.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status reporting.
-///
-/// Why this exists: surface service health and fixes in the UI.
+/// Surface service health and fixes in the UI.
 pub fn status_macos(
     reachable: bool,
     uptime_secs: Option<i64>,
@@ -175,19 +127,7 @@ pub fn status_macos(
     })
 }
 
-/// Summary: Restarts the daemon using launchctl.
-///
-/// Inputs: none.
-///
-/// Outputs: a success message string.
-///
-/// Side effects: Runs launchctl to restart the daemon.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI restart actions on macOS.
-///
-/// Why this exists: allow users to recover a stuck daemon.
+/// Allow users to recover a stuck daemon.
 pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
     let target = match launchctl_target() {
         Ok(target) => target,
@@ -216,19 +156,7 @@ pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
     }
 }
 
-/// Summary: Stops matching daemon processes and spawns a fresh daemon directly.
-///
-/// Inputs: None.
-///
-/// Outputs: A success message describing the direct restart path.
-///
-/// Side effects: Terminates matching daemon processes, spawns a detached daemon process, and sets process environment variables.
-///
-/// Error handling: Returns contextual errors when process discovery, termination, or spawn steps fail.
-///
-/// Ties to other methods: Fallback path from `restart_daemon`.
-///
-/// Why this exists: Development launches and non-launchd sessions still need a reliable daemon refresh path after config changes.
+/// Development launches and non-launchd sessions still need a reliable daemon refresh path after config changes.
 fn restart_daemon_direct() -> Result<String, ErrorEnvelope> {
     let (exec, log_path) = crate::commands::service::common::load_exec_and_log()?;
     terminate_matching_daemons(&exec)?;
@@ -236,19 +164,7 @@ fn restart_daemon_direct() -> Result<String, ErrorEnvelope> {
     Ok(format!("Daemon restarted directly via {:?}.", exec))
 }
 
-/// Summary: Terminates running daemon processes that match the resolved executable path.
-///
-/// Inputs: Canonical daemon executable path.
-///
-/// Outputs: `Ok(())` after termination attempts complete.
-///
-/// Side effects: Executes `pgrep` and `kill`, and sleeps briefly to let the old daemon exit cleanly.
-///
-/// Error handling: Returns contextual errors when process enumeration or signaling fails unexpectedly.
-///
-/// Ties to other methods: Used by `restart_daemon_direct`.
-///
-/// Why this exists: Prevent duplicate daemons from racing for the same IPC socket or state files.
+/// Prevent duplicate daemons from racing for the same IPC socket or state files.
 fn terminate_matching_daemons(exec: &Path) -> Result<(), ErrorEnvelope> {
     let exec_str = exec.to_str().ok_or_else(|| {
         ErrorEnvelope::new(
@@ -308,19 +224,8 @@ fn terminate_matching_daemons(exec: &Path) -> Result<(), ErrorEnvelope> {
     Ok(())
 }
 
-/// Summary: Waits for daemon processes to exit, escalating to SIGKILL if they ignore SIGTERM.
-///
-/// Inputs: Executable path for context, process ids, and an overall wait timeout.
-///
-/// Outputs: `Ok(())` when all target processes have exited.
-///
-/// Side effects: Polls process liveness with `kill -0`, may send `SIGKILL`, and sleeps between polls.
-///
-/// Error handling: Returns contextual errors when a process remains alive after escalation or when signal commands fail.
-///
-/// Ties to other methods: Used by `terminate_matching_daemons`.
-///
-/// Why this exists: The dev daemon can keep the IPC socket open briefly; waiting and escalating prevents the replacement daemon from losing the bind race.
+/// The dev daemon can keep the IPC socket open briefly; waiting and escalating prevents the
+/// replacement daemon from losing the bind race.
 fn wait_for_process_exit(
     exec: &Path,
     pids: &[String],
@@ -376,19 +281,7 @@ fn wait_for_process_exit(
     }
 }
 
-/// Summary: Returns the subset of process ids that are still alive.
-///
-/// Inputs: Candidate daemon process ids.
-///
-/// Outputs: Vector containing the ids that still respond to `kill -0`.
-///
-/// Side effects: Executes lightweight liveness probes against each process id.
-///
-/// Error handling: Propagates contextual errors from `process_is_alive`.
-///
-/// Ties to other methods: Used by `wait_for_process_exit`.
-///
-/// Why this exists: Keep the restart wait loop readable and avoid duplicating liveness probe collection logic.
+/// Keep the restart wait loop readable and avoid duplicating liveness probe collection logic.
 fn alive_process_ids(pids: &[String]) -> Result<Vec<String>, ErrorEnvelope> {
     let mut alive = Vec::new();
     for pid in pids {
@@ -399,19 +292,8 @@ fn alive_process_ids(pids: &[String]) -> Result<Vec<String>, ErrorEnvelope> {
     Ok(alive)
 }
 
-/// Summary: Checks whether a process id is still alive without sending a terminating signal.
-///
-/// Inputs: Process id string.
-///
-/// Outputs: `Ok(Some(pid))` when the process is alive, `Ok(None)` when it has exited.
-///
-/// Side effects: Executes `ps` and `kill -0` as liveness probes.
-///
-/// Error handling: Returns contextual errors when the probe command itself fails unexpectedly.
-///
-/// Ties to other methods: Used by `wait_for_process_exit`.
-///
-/// Why this exists: Direct daemon restarts need a portable way to confirm the old process released the IPC socket before spawning the replacement.
+/// Direct daemon restarts need a portable way to confirm the old process released the IPC socket
+/// before spawning the replacement.
 fn process_is_alive(pid: &str) -> Result<Option<&str>, ErrorEnvelope> {
     let stat_output = Command::new("ps")
         .args(["-p", pid, "-o", "stat="])
@@ -456,19 +338,7 @@ fn process_is_alive(pid: &str) -> Result<Option<&str>, ErrorEnvelope> {
     }
 }
 
-/// Summary: Spawns the daemon process with explicit config and log environment variables.
-///
-/// Inputs: Canonical daemon executable path and optional log file path.
-///
-/// Outputs: `Ok(())` after the daemon is launched successfully.
-///
-/// Side effects: Starts a detached daemon process with stdio redirected away from the GUI process.
-///
-/// Error handling: Returns contextual errors when config resolution or process spawn fails.
-///
-/// Ties to other methods: Used by `restart_daemon_direct`.
-///
-/// Why this exists: Config saves must take effect immediately even when the daemon was started manually during development.
+/// Config saves must take effect immediately even when the daemon was started manually during development.
 fn spawn_daemon_process(exec: &Path, log_path: Option<&Path>) -> Result<(), ErrorEnvelope> {
     let config_path = backup_core::platform::paths::config_file_path().map_err(|error| {
         ErrorEnvelope::new(

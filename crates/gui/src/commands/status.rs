@@ -4,19 +4,7 @@ use backup_core::ActivityItem;
 use serde::Serialize;
 
 #[derive(Serialize)]
-/// Summary: Serializable status payload for the GUI.
-///
-/// Inputs: derived from IPC status responses.
-///
-/// Outputs: a frontend friendly status object.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status panels and IPC status translation.
-///
-/// Why this exists: decouple GUI payloads from IPC structs.
+/// Decouple GUI payloads from IPC structs.
 pub struct StatusDto {
     pub last_run_ts: Option<i64>,
     pub last_files_backed_up: usize,
@@ -50,19 +38,7 @@ pub struct StatusDto {
 }
 
 #[derive(Serialize)]
-/// Summary: Serializable destination status payload for the GUI.
-///
-/// Inputs: derived from IPC destination status responses.
-///
-/// Outputs: a frontend friendly destination object.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status panels.
-///
-/// Why this exists: provide a stable schema for UI rendering.
+/// Provide a stable schema for UI rendering.
 pub struct DestinationDto {
     pub id: String,
     pub label: Option<String>,
@@ -74,19 +50,7 @@ pub struct DestinationDto {
 }
 
 impl From<status_api::Status> for StatusDto {
-    /// Summary: Converts IPC status into GUI status payloads.
-    ///
-    /// Inputs: a `status_api::Status` value.
-    ///
-    /// Outputs: a `StatusDto` value.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: IPC response handling for GUI commands.
-    ///
-    /// Why this exists: keep IPC structs separate from GUI payloads.
+    /// Keep IPC structs separate from GUI payloads.
     fn from(s: status_api::Status) -> Self {
         Self {
             last_run_ts: s.last_run_ts,
@@ -136,19 +100,7 @@ impl From<status_api::Status> for StatusDto {
 
 use crate::commands::error::ErrorEnvelope;
 #[tauri::command]
-/// Summary: Fetches the current daemon status over IPC.
-///
-/// Inputs: none.
-///
-/// Outputs: a `StatusDto` or an error envelope.
-///
-/// Side effects: Performs an IPC request to the daemon.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status refresh actions.
-///
-/// Why this exists: provide the UI with up to date daemon health information.
+/// Provide the UI with up to date daemon health information.
 pub async fn get_status() -> Result<StatusDto, ErrorEnvelope> {
     let cid = correlation::cid("status", None);
     match status_api::fetch_status_with_correlation(Some(cid.as_str())).await {

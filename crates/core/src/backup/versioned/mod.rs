@@ -1,8 +1,10 @@
 pub mod model;
+pub(crate) mod operation_lock;
 pub mod replication;
 pub mod restore;
 pub mod scrub;
 pub mod store;
+pub(crate) mod validation;
 
 pub use model::{Manifest, ManifestEntry, ManifestEntryKind, VersionIndex, VersionInfo};
 pub use replication::{replicate_configured_stores, ReplicationSummary};
@@ -17,19 +19,7 @@ pub use store::{
     FolderDescriptor, SimulationSummary,
 };
 
-/// Summary: Return the filesystem path to the versioned store root under a destination directory.
-///
-/// Inputs: `destination_root` path from config.
-///
-/// Outputs: A path like `<destination>/.backup_sync/v1`.
-///
-/// Side effects: None.
-///
-/// Error handling: Never fails; returns a derived path.
-///
-/// Ties to other methods: Used by diagnostics, hardening checks, and store management routines.
-///
-/// Why this exists: Callers outside the core store implementation should not re-encode store layout rules.
+/// Callers outside the core store implementation should not re-encode store layout rules.
 pub fn store_root_path(destination_root: &std::path::Path) -> std::path::PathBuf {
     store::store_root(destination_root)
 }

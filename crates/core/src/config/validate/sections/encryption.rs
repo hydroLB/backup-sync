@@ -4,19 +4,7 @@ use crate::encryption::keyfile;
 use crate::logging::redact_path;
 use anyhow::{bail, Context, Result};
 
-/// Summary: Validates encryption configuration and key material prerequisites.
-///
-/// Inputs: the config, validation limits, and a label prefix.
-///
-/// Outputs: `Ok(())` when encryption is disabled or when enabled prerequisites are satisfied.
-///
-/// Side effects: Reads key files from disk when encryption is enabled.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: versioned blob encryption for write/restore/scrub.
-///
-/// Why this exists: fail fast with actionable errors before starting daemon cycles.
+/// Fail fast with actionable errors before starting daemon cycles.
 pub(crate) fn validate_encryption(
     cfg: &Config,
     limits: &ValidationLimits,

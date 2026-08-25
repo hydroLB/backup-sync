@@ -26,19 +26,7 @@ fn histograms() -> &'static Mutex<BTreeMap<&'static str, HistogramState>> {
     HISTOGRAMS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-/// Summary: Increments a process-local counter metric.
-///
-/// Inputs: metric name and increment value.
-///
-/// Outputs: none.
-///
-/// Side effects: Mutates in-memory metric state.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon and GUI observability hooks.
-///
-/// Why this exists: provide a zero-dependency metric hook surface for production wiring.
+/// Provide a zero-dependency metric hook surface for production wiring.
 pub fn counter_inc(name: &'static str, by: u64) {
     if by == 0 {
         return;
@@ -47,19 +35,7 @@ pub fn counter_inc(name: &'static str, by: u64) {
     *guard.entry(name).or_insert(0) = guard.get(name).copied().unwrap_or(0).saturating_add(by);
 }
 
-/// Summary: Observes a latency/duration metric in milliseconds.
-///
-/// Inputs: metric name and elapsed duration.
-///
-/// Outputs: none.
-///
-/// Side effects: Mutates in-memory histogram state.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: IPC client/server latency hooks.
-///
-/// Why this exists: keep time-series hooks available without requiring an external metrics backend.
+/// Keep time-series hooks available without requiring an external metrics backend.
 pub fn observe_duration(name: &'static str, elapsed: Duration) {
     let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
     let mut guard = histograms()
@@ -72,19 +48,7 @@ pub fn observe_duration(name: &'static str, elapsed: Duration) {
     state.last_ms = elapsed_ms;
 }
 
-/// Summary: Captures a snapshot of current process-local metrics.
-///
-/// Inputs: none.
-///
-/// Outputs: cloned snapshot of counter and histogram values.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: test assertions and future metric exporters.
-///
-/// Why this exists: expose stable metric hook output for validation and plumbing.
+/// Expose stable metric hook output for validation and plumbing.
 pub fn snapshot() -> MetricsSnapshot {
     let counters = counters()
         .lock()

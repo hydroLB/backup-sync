@@ -5,19 +5,7 @@ use crate::commands::service::common::{
 use backup_core::service::systemd;
 use std::path::{Path, PathBuf};
 
-/// Summary: Writes the systemd unit file to disk.
-///
-/// Inputs: the executable path and optional log path.
-///
-/// Outputs: the destination unit path.
-///
-/// Side effects: Writes the systemd unit file to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation on Linux.
-///
-/// Why this exists: install the daemon for user level startup.
+/// Install the daemon for user level startup.
 pub fn write_unit(exec: &PathBuf, log_path: Option<&Path>) -> Result<PathBuf, ErrorEnvelope> {
     let dest = systemd::default_unit_path(true).map_err(|e| {
         ErrorEnvelope::new(
@@ -42,19 +30,7 @@ pub fn write_unit(exec: &PathBuf, log_path: Option<&Path>) -> Result<PathBuf, Er
     Ok(dest)
 }
 
-/// Summary: Enables the systemd user service.
-///
-/// Inputs: none.
-///
-/// Outputs: `Ok(())` when systemctl enable succeeds.
-///
-/// Side effects: Runs systemctl commands to reload and enable services.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation on Linux.
-///
-/// Why this exists: start the daemon automatically for the current user.
+/// Start the daemon automatically for the current user.
 pub fn enable_systemd() -> Result<(), ErrorEnvelope> {
     run_command_with_retry(
         "systemctl",
@@ -71,19 +47,7 @@ pub fn enable_systemd() -> Result<(), ErrorEnvelope> {
     Ok(())
 }
 
-/// Summary: Builds the service status payload for Linux.
-///
-/// Inputs: daemon reachability and runtime metadata.
-///
-/// Outputs: a populated `ServiceStatus`.
-///
-/// Side effects: Reads filesystem metadata to check unit presence.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status reporting.
-///
-/// Why this exists: surface service health and fixes in the UI.
+/// Surface service health and fixes in the UI.
 pub fn status_linux(
     reachable: bool,
     uptime_secs: Option<i64>,
@@ -125,19 +89,7 @@ pub fn status_linux(
     })
 }
 
-/// Summary: Restarts the daemon using systemd.
-///
-/// Inputs: none.
-///
-/// Outputs: a success message string.
-///
-/// Side effects: Runs systemctl restart to restart the daemon.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI restart actions on Linux.
-///
-/// Why this exists: allow users to recover a stuck daemon.
+/// Allow users to recover a stuck daemon.
 pub fn restart_daemon() -> Result<String, ErrorEnvelope> {
     run_command(
         "systemctl",

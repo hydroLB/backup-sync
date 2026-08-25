@@ -9,19 +9,7 @@ use std::path::PathBuf;
 use tauri::async_runtime;
 use tracing::warn;
 
-/// Summary: Resolve a watched path entry from a user-provided path string.
-///
-/// Inputs: Loaded config and the user-provided watched path string.
-///
-/// Outputs: The matched watched path index within `cfg.watched`.
-///
-/// Side effects: Best-effort canonicalization of paths.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Safety baseline removal flows for large deletion events.
-///
-/// Why this exists: UI warnings carry paths as strings; matching must be tolerant and deterministic.
+/// UI warnings carry paths as strings; matching must be tolerant and deterministic.
 fn locate_watched_index(cfg: &backup_core::Config, watched_path: &str, cid: &str) -> Option<usize> {
     let requested = PathBuf::from(watched_path);
     let requested_canon = match requested.canonicalize() {
@@ -50,19 +38,7 @@ fn locate_watched_index(cfg: &backup_core::Config, watched_path: &str, cid: &str
 }
 
 #[tauri::command]
-/// Summary: Removes the extra safety baseline version kept after large deletions.
-///
-/// Inputs: The watched path string and optional correlation id.
-///
-/// Outputs: `Ok(())` when the baseline was removed or an error envelope.
-///
-/// Side effects: Updates the versioned store, clears the daemon safety warning over IPC, and persists state best-effort.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Minimal UI safety warning banner and tray warning states.
-///
-/// Why this exists: When a shrink is expected, the user should be able to drop the extra kept version explicitly.
+/// When a shrink is expected, the user should be able to drop the extra kept version explicitly.
 pub async fn remove_kept_extra_version_cmd(
     watched_path: String,
     correlation_id: Option<String>,

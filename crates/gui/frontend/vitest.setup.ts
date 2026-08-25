@@ -1,25 +1,11 @@
-import "@testing-library/jest-dom";
+import '@testing-library/jest-dom/vitest';
 
-/**
- * Summary: Install a deterministic in-memory `localStorage` shim when the test runtime lacks one.
- *
- * Inputs: None.
- *
- * Outputs: None.
- *
- * Side effects: Defines `window.localStorage` and `globalThis.localStorage` for Vitest when needed.
- *
- * Error handling: None.
- *
- * Ties to other methods: Supports color-mode, hardening, and onboarding tests that rely on browser storage.
- *
- * Why this exists: Some local Node test environments start without a complete `localStorage` implementation.
- */
+/** Some local Node test environments start without a complete `localStorage` implementation. */
 function ensureLocalStorage(): void {
   if (
-    typeof window.localStorage?.getItem === "function" &&
-    typeof window.localStorage?.setItem === "function" &&
-    typeof window.localStorage?.removeItem === "function"
+    typeof window.localStorage?.getItem === 'function' &&
+    typeof window.localStorage?.setItem === 'function' &&
+    typeof window.localStorage?.removeItem === 'function'
   ) {
     return;
   }
@@ -46,11 +32,11 @@ function ensureLocalStorage(): void {
     },
   };
 
-  Object.defineProperty(window, "localStorage", {
+  Object.defineProperty(window, 'localStorage', {
     configurable: true,
     value: storage,
   });
-  Object.defineProperty(globalThis, "localStorage", {
+  Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: storage,
   });

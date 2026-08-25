@@ -11,28 +11,17 @@ type Params = {
 
 type MinimalStatusState = {
   status: StatusDto | null;
+  liveSafeMode: boolean | null;
+  setLiveSafeMode: (safeMode: boolean | null) => void;
   destinationWarning: string | null;
   replicationWarning: string | null;
   safetyWarning: StatusDto['last_safety_warning'] | null;
 };
 
-/**
- * Summary: Poll daemon status and emit transition feedback for minimal mode.
- *
- * Inputs: Event callback for transition notifications.
- *
- * Outputs: Latest status plus derived destination and replication warning strings.
- *
- * Side effects: Starts/stops polling interval timers and reads daemon status via IPC.
- *
- * Error handling: Ignores polling failures so minimal mode remains usable offline.
- *
- * Ties to other methods: Used by `MinimalMain` to render warning banners and toasts.
- *
- * Why this exists: Keep status polling and transition-notification logic out of screen rendering code.
- */
+/** Keep status polling and transition-notification logic out of screen rendering code. */
 export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
   const [status, setStatus] = useState<StatusDto | null>(null);
+  const [liveSafeMode, setLiveSafeMode] = useState<boolean | null>(null);
   const prevRef = useRef<{ destinationPaused: boolean; replicationFailed: boolean } | null>(null);
 
   useEffect(() => {
@@ -43,6 +32,7 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
         .then((nextStatus) => {
           if (cancelled) return;
           setStatus(nextStatus);
+          setLiveSafeMode(nextStatus.safe_mode ?? null);
 
           const previous = prevRef.current;
           const nextDestinationPaused = !!nextStatus.destination_paused;
@@ -74,6 +64,10 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
           };
         })
         .catch((error) => {
+          if (cancelled) return;
+          setStatus(null);
+          setLiveSafeMode(null);
+          prevRef.current = null;
           const reason = error instanceof Error ? error.message : String(error);
           console.warn(`[useMinimalStatus::refresh] Status polling failed: ${reason}`);
         });
@@ -99,5 +93,12 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
 
   const safetyWarning = useMemo(() => status?.last_safety_warning ?? null, [status]);
 
-  return { status, destinationWarning, replicationWarning, safetyWarning };
+  return {
+    status,
+    liveSafeMode,
+    setLiveSafeMode,
+    destinationWarning,
+    replicationWarning,
+    safetyWarning,
+  };
 }

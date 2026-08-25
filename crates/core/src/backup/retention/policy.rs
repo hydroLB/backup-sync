@@ -4,37 +4,13 @@ use chrono::NaiveDateTime;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Summary: Enforces retention by pruning oldest backup entries beyond the max.
-///
-/// Inputs: the maximum copies to keep and the existing backup paths.
-///
-/// Outputs: the retained list of backup paths.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: backup execution state updates and retention scheduling.
-///
-/// Why this exists: keep per file history bounded while preserving the newest copies without requiring IO.
+/// Keep per file history bounded while preserving the newest copies without requiring IO.
 pub fn enforce(max: usize, mut existing: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     let (_pruned, retained) = partition(max, &mut existing)?;
     Ok(retained)
 }
 
-/// Summary: Enforces retention and deletes pruned backups from disk.
-///
-/// Inputs: the maximum copies to keep and the existing backup paths.
-///
-/// Outputs: the retained list of backup paths.
-///
-/// Side effects: Deletes old backup files on disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `enforce` for ordering and `BackupExecutor` retention enforcement.
-///
-/// Why this exists: provide a durable retention boundary after new backups are recorded.
+/// Provide a durable retention boundary after new backups are recorded.
 pub fn enforce_on_disk(max: usize, existing: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     let io_policy = BlockingIoPolicy::bootstrap_defaults();
     let mut ordered = existing;
@@ -70,19 +46,7 @@ pub fn enforce_on_disk(max: usize, existing: Vec<PathBuf>) -> Result<Vec<PathBuf
     Ok(retained)
 }
 
-/// Summary: Parses a timestamp prefix from a backup filename for ordering.
-///
-/// Inputs: the path to a backup file.
-///
-/// Outputs: an optional Unix timestamp parsed from the filename prefix.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: retention sorting.
-///
-/// Why this exists: use timestamp ordering to drop the oldest backups first.
+/// Use timestamp ordering to drop the oldest backups first.
 fn parse_timestamp(p: &Path) -> Option<i64> {
     let name = p.file_name()?.to_string_lossy();
     let ts = name.split("__").next()?;
@@ -92,19 +56,7 @@ fn parse_timestamp(p: &Path) -> Option<i64> {
     }
 }
 
-/// Summary: Sorts backups by timestamp prefix and partitions into pruned and retained sets.
-///
-/// Inputs: max copies to keep and a mutable list of existing backup paths.
-///
-/// Outputs: `(pruned, retained)` where `retained.len() <= max`.
-///
-/// Side effects: Reorders the provided vector in place.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `enforce` and `enforce_on_disk`.
-///
-/// Why this exists: keep ordering and selection logic shared while keeping `enforce` IO-free.
+/// Keep ordering and selection logic shared while keeping `enforce` IO-free.
 fn partition(max: usize, existing: &mut Vec<PathBuf>) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     if max == 0 {
         anyhow::bail!("retention::partition max must be > 0");

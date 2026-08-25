@@ -8,19 +8,7 @@ use backup_core::{
 };
 use std::path::PathBuf;
 
-/// Summary: Runs an interactive setup wizard for initial configuration.
-///
-/// Inputs: none, relies on user prompts.
-///
-/// Outputs: `Ok(())` after saving config and optionally running a backup.
-///
-/// Side effects: Prompts the user and writes the config file to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI initialization flow and config persistence.
-///
-/// Why this exists: guide first time setup for backup configuration.
+/// Guide first time setup for backup configuration.
 pub async fn init_wizard() -> Result<()> {
     println!("Backup Sync setup - just answer a couple quick questions.");
     let mut cfg =

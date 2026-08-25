@@ -11,19 +11,7 @@ use tempfile::tempdir;
 mod support;
 
 #[test]
-/// Summary: Ensures backups occur and retention caps are enforced across multiple edits.
-///
-/// Inputs: a file updated several times and a small retention limit.
-///
-/// Outputs: a state entry with backups not exceeding the limit.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: planning, execution, and retention enforcement.
-///
-/// Why this exists: verify retention policies cap backup histories.
+/// Verify retention policies cap backup histories.
 fn backs_up_and_respects_retention() {
     let dir = tempdir()
         .expect("backup_scenarios::backs_up_and_respects_retention failed to create temp dir");

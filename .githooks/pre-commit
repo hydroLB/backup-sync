@@ -9,6 +9,7 @@ make clippy
 make frontend-lint
 make frontend-typecheck
 make hygiene-check
+make docs-check
 make secrets-working-tree
 make test
 make frontend-test

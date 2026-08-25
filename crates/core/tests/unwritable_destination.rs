@@ -10,19 +10,7 @@ use backup_core::{
 use std::{fs, path::PathBuf};
 use tempfile::tempdir;
 
-/// Summary: Builds a config with a single destination and watched path.
-///
-/// Inputs: the destination path and watched file path.
-///
-/// Outputs: a fully populated config with defaults.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: validation and execution tests.
-///
-/// Why this exists: centralize test config creation for reuse.
+/// Centralize test config creation for reuse.
 fn config_with_dest(dest: PathBuf, watched: PathBuf) -> Config {
     Config {
         backup_root: dest.clone(),
@@ -58,19 +46,7 @@ fn config_with_dest(dest: PathBuf, watched: PathBuf) -> Config {
 }
 
 #[test]
-/// Summary: Ensures validation fails when destination is not a directory.
-///
-/// Inputs: a file path used as destination.
-///
-/// Outputs: a validation error.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: destination path validation.
-///
-/// Why this exists: prevent backups from targeting files instead of directories.
+/// Prevent backups from targeting files instead of directories.
 fn fails_when_destination_unwritable() {
     let dir = tempdir().expect(
         "unwritable_destination::fails_when_destination_unwritable failed to create temp dir",
@@ -93,19 +69,7 @@ fn fails_when_destination_unwritable() {
 }
 
 #[test]
-/// Summary: Ensures execution reports an error when free space is below the minimum.
-///
-/// Inputs: a plan and a min_free_space_bytes larger than available.
-///
-/// Outputs: an execution result with errors recorded.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: executor free space guard logic.
-///
-/// Why this exists: avoid starting backups that cannot complete.
+/// Avoid starting backups that cannot complete.
 fn min_free_space_stops_run() {
     let dir = tempdir()
         .expect("unwritable_destination::min_free_space_stops_run failed to create temp dir");

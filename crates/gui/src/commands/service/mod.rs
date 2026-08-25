@@ -8,19 +8,7 @@ mod platform;
 
 pub use common::ServiceStatus;
 
-/// Summary: Installs the platform service for start on login.
-///
-/// Inputs: an optional correlation id and session auth state.
-///
-/// Outputs: a status message or an error envelope.
-///
-/// Side effects: Writes service manifests and runs platform enable commands.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI service installation actions.
-///
-/// Why this exists: enable background execution without manual terminal steps.
+/// Enable background execution without manual terminal steps.
 #[tauri::command]
 pub async fn install_service_cmd(_correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
     // Installing a service that immediately crash-loops due to missing/invalid config is noisy
@@ -65,19 +53,7 @@ pub async fn install_service_cmd(_correlation_id: Option<String>) -> Result<Stri
     Ok(message)
 }
 
-/// Summary: Checks the service status and daemon reachability.
-///
-/// Inputs: none.
-///
-/// Outputs: a `ServiceStatus` payload or an error envelope.
-///
-/// Side effects: Performs IPC to the daemon and reads service metadata.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI status panels.
-///
-/// Why this exists: surface service health and potential fixes in the UI.
+/// Surface service health and potential fixes in the UI.
 #[tauri::command]
 pub async fn check_service_cmd() -> Result<ServiceStatus, ErrorEnvelope> {
     let status = match get_status().await {
@@ -108,19 +84,7 @@ pub async fn check_service_cmd() -> Result<ServiceStatus, ErrorEnvelope> {
     status
 }
 
-/// Summary: Restarts the daemon using platform specific tools.
-///
-/// Inputs: an optional correlation id and session auth state.
-///
-/// Outputs: a status message or an error envelope.
-///
-/// Side effects: Runs platform restart commands for the daemon.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI restart actions.
-///
-/// Why this exists: allow users to recover the daemon without leaving the UI.
+/// Allow users to recover the daemon without leaving the UI.
 #[tauri::command]
 pub fn restart_daemon_cmd(_correlation_id: Option<String>) -> Result<String, ErrorEnvelope> {
     #[cfg(target_os = "macos")]

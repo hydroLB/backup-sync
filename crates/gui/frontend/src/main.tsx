@@ -5,21 +5,7 @@ import './styles.css';
 import { readColorModePreference, resolveColorMode, systemPrefersDark } from './theme/colorMode';
 import { applyThemeTokens } from './theme/tokens';
 
-/**
- * Summary: Mount the React application into the DOM root element.
- *
- * Inputs: None.
- *
- * Outputs: Renders `<App />` into the `#root` container.
- *
- * Side effects: Mounts React into the DOM and triggers initial render.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: `App` for the UI shell and `styles.css` for global styling.
- *
- * Why this exists: Keeps startup wiring in one function for safer initialization and error context.
- */
+/** Keeps startup wiring in one function for safer initialization and error context. */
 function mountApp(): void {
   try {
     const initialPreference = readColorModePreference();

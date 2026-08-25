@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { loadConfig, saveConfig } from '../../../services/config';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ConfigSaveResult, loadConfig, saveConfig } from '../../../services/config';
 import { Config, Destination, WatchedPath } from '../../../domain/config';
 import {
   enforceFixedAutomaticInterval,
@@ -20,35 +20,35 @@ type MinimalConfigState = {
   watchedDirs: WatchedPath[];
   watchedItems: WatchedPath[];
   loading: boolean;
+  loadError: string | null;
   busy: boolean;
   setBusy: (busy: boolean) => void;
   setCfg: (cfg: Config | null) => void;
+  reload: () => void;
   persist: (next: Config, successMessage?: string) => Promise<void>;
 };
 
-/**
- * Summary: Load, normalize, and persist config for the minimal UI.
- *
- * Inputs: `onEvent` handler for user-visible status and error messages.
- *
- * Outputs: Config state plus derived primary destination and watched directory list.
- *
- * Side effects: Reads and writes config via IPC-backed services.
- *
- * Error handling: Emits actionable error messages via `onEvent`.
- *
- * Ties to other methods: Used by `MinimalMain` and action hooks to centralize config handling.
- *
- * Why this exists: Keep the minimal screen orchestration small and ensure config normalization is consistent.
- */
+/** Keep the minimal screen orchestration small and ensure config normalization is consistent. */
 export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadNonce, setLoadNonce] = useState(0);
   const [busy, setBusy] = useState(false);
+
+  const reportSaveOutcome = useCallback(
+    (result: ConfigSaveResult) => {
+      if (result.daemon_restart_warning) {
+        onEvent(result.daemon_restart_warning, 'error');
+      }
+    },
+    [onEvent],
+  );
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     loadConfig()
       .then(async (loaded) => {
         if (cancelled) return;
@@ -57,7 +57,8 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
         setCfg(next);
         if (next.interval_seconds === loaded.interval_seconds) return;
         try {
-          await saveConfig(next);
+          const result = await saveConfig(next);
+          reportSaveOutcome(result);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           onEvent(`[useMinimalConfig] Failed to enforce automatic schedule: ${reason}`, 'error');
@@ -65,6 +66,7 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
       })
       .catch((error) => {
         const reason = error instanceof Error ? error.message : String(error);
+        if (!cancelled) setLoadError(`Failed to load configuration: ${reason}`);
         onEvent(`[useMinimalConfig] Failed to load config: ${reason}`, 'error');
       })
       .finally(() => {
@@ -73,7 +75,11 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
     return () => {
       cancelled = true;
     };
-  }, [onEvent]);
+  }, [loadNonce, onEvent, reportSaveOutcome]);
+
+  const reload = useCallback(() => {
+    setLoadNonce((previous) => previous + 1);
+  }, []);
 
   useEffect(() => {
     if (!cfg) return;
@@ -104,28 +110,15 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
     return cfg.watched.map((w) => normalizeWatched(w, primary.id, cfg.max_backups_per_file));
   }, [cfg, primary]);
 
-  /**
-   * Summary: Persist a full config object and update local state.
-   *
-   * Inputs: `next` config to write.
-   *
-   * Outputs: None.
-   *
-   * Side effects: Writes config to disk via IPC and updates local React state.
-   *
-   * Error handling: Emits a user-facing save error via `onEvent`.
-   *
-   * Ties to other methods: Called by schedule, destination, folder, and running handlers.
-   *
-   * Why this exists: Keep save behavior uniform and ensure busy state is applied consistently.
-   */
+  /** Keep save behavior uniform and ensure busy state is applied consistently. */
   const persist = async (next: Config, successMessage = 'Saved.') => {
     try {
       setBusy(true);
       const normalized = enforceFixedAutomaticInterval(next);
-      await saveConfig(normalized);
+      const result = await saveConfig(normalized);
       setCfg(normalized);
       onEvent(successMessage, 'ok');
+      reportSaveOutcome(result);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`Save failed: ${reason}`, 'error');
@@ -141,9 +134,11 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
     watchedDirs,
     watchedItems,
     loading,
+    loadError,
     busy,
     setBusy,
     setCfg,
+    reload,
     persist,
   };
 }

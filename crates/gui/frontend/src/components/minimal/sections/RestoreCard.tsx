@@ -8,30 +8,29 @@ type Props = {
   onOpenRestore: () => void;
 };
 
-/**
- * Summary: Render a dedicated restore entry card with clear restore capabilities.
- *
- * Inputs: Busy and disabled flags, watched folder count, and modal open handler.
- *
- * Outputs: A restore card element tree.
- *
- * Side effects: Calls `onOpenRestore` when the user starts restore.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `MinimalMain` and opens `RestoreModal`.
- *
- * Why this exists: Keep restore as a first-class workflow instead of hiding it in header actions.
- */
+/** Keep restore as a first-class workflow instead of hiding it in header actions. */
 export function RestoreCard({ busy, disabled, watchedCount, onOpenRestore }: Props) {
   return (
-    <div className="card restore-card">
+    <section className="card restore-card" aria-labelledby="restore-card-title">
       <div className="section-title restore-card-head">
-        <h2 className="section-heading">Restore Backup Version</h2>
+        <div className="section-identity">
+          <span className="section-step-badge" aria-hidden="true">
+            03
+          </span>
+          <div>
+            <span className="section-eyebrow">Recovery</span>
+            <h2 className="section-heading" id="restore-card-title">
+              Go back to any saved version
+            </h2>
+          </div>
+        </div>
         <span className="pill restore-count-pill">
           {watchedCount} watched folder{watchedCount === 1 ? '' : 's'}
         </span>
       </div>
+      <p className="section-subtitle section-subtitle--roomy">
+        Browse history by date, recover one file, or rebuild an entire folder somewhere safe.
+      </p>
       <div className="restore-capabilities">
         <span className="restore-capability">Folder restore</span>
         <span className="restore-capability">Single-file restore</span>
@@ -54,11 +53,11 @@ export function RestoreCard({ busy, disabled, watchedCount, onOpenRestore }: Pro
               disabled={busy}
               title="Open restore flow and choose what to restore."
             >
-              Restore Backup Version
+              Browse saved versions
             </Button>
           </div>
         </>
       )}
-    </div>
+    </section>
   );
 }

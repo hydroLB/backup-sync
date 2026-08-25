@@ -24,21 +24,7 @@ import { StateBlock } from '../ui/StateBlock';
 
 type EventKind = 'ok' | 'error' | 'info';
 
-/**
- * Summary: Render the spec-minimal main screen for the backup app.
- *
- * Inputs: `onEvent` callback for user-visible event messages.
- *
- * Outputs: React element tree for the minimal main screen.
- *
- * Side effects: Invokes IPC-backed config, status, and log operations through focused hooks.
- *
- * Error handling: Emits actionable messages via toast and event callback.
- *
- * Ties to other methods: Composes minimal hooks, section components, and modal flows.
- *
- * Why this exists: Keep the primary UX compact while preserving operational controls.
- */
+/** Keep the primary UX compact while preserving operational controls. */
 export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKind) => void }) {
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
@@ -108,16 +94,13 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     watchedDirs,
     watchedItems,
     loading,
+    loadError,
     busy,
     setBusy,
     setCfg,
+    reload,
     persist,
   } = useMinimalConfig({ onEvent: emitEvent });
-  const { runningBusy, setRunning: applyRunningState } = useMinimalRunning({
-    cfg,
-    setCfg,
-    onEvent: emitEvent,
-  });
   const {
     chooseDestination,
     addDestination,
@@ -137,8 +120,13 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     onEvent: emitEvent,
     setBusy,
   });
-  const { destinationWarning, replicationWarning, safetyWarning } = useMinimalStatus({
+  const { liveSafeMode, setLiveSafeMode, destinationWarning, replicationWarning, safetyWarning } =
+    useMinimalStatus({ onEvent: emitEvent });
+  const { runningBusy, setRunning: applyRunningState } = useMinimalRunning({
+    cfg,
+    setCfg,
     onEvent: emitEvent,
+    onLiveSafeModeConfirmed: setLiveSafeMode,
   });
   const { destinationHealthWarning, watchedHealthWarning } = useMinimalLiveHealth({
     cfg,
@@ -215,21 +203,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     })();
   }, [applyRunningState, cfg, emitEvent, hardeningNonce]);
 
-  /**
-   * Summary: Change running state while enforcing hardening preconditions.
-   *
-   * Inputs: Desired running state.
-   *
-   * Outputs: None.
-   *
-   * Side effects: May block enablement while background hardening runs and toggles backend safe mode.
-   *
-   * Error handling: Delegated to running hook and event callback.
-   *
-   * Ties to other methods: Used by `MinimalHeader` running toggle and background hardening checks.
-   *
-   * Why this exists: Keep precondition gating in one place while preserving optimistic UI behavior.
-   */
+  /** Keep precondition gating in one place while preserving optimistic UI behavior. */
   const setRunning = useCallback(
     async (running: boolean) => {
       if (!cfg) return;
@@ -271,11 +245,11 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     ],
   );
 
-  if (loading || !cfg || !primary) {
+  if (loading) {
     return (
       <div className="app" aria-busy="true">
         <div className="hero">
-          <h1>Local Backup Manager</h1>
+          <h1>Backup Sync</h1>
           <p>Preparing your backup workspace…</p>
         </div>
         <StateBlock
@@ -287,16 +261,39 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     );
   }
 
+  if (loadError || !cfg || !primary) {
+    return (
+      <div className="app">
+        <div className="hero">
+          <h1>Backup Sync</h1>
+          <p>Your backup workspace could not be prepared.</p>
+        </div>
+        <StateBlock
+          tone="error"
+          title="Could not load configuration"
+          message={loadError ?? 'The configuration was unavailable.'}
+          action={
+            <Button type="button" tone="secondary" size="sm" onClick={reload}>
+              Retry
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={`app ${savePulseActive ? `pulse-${savePulseScope}` : ''} ${pausePulseActive ? 'is-paused' : ''}`}
       aria-busy={busy || runningBusy}
     >
       <MinimalHeader
-        cfg={cfg}
+        liveSafeMode={liveSafeMode}
         busy={busy}
         runningBusy={runningBusy}
         showLog={showLog}
+        destinationCount={configuredDestinationCount}
+        watchedCount={folderItems.length}
         onRunningChange={(running) => {
           void setRunning(running);
         }}
@@ -341,6 +338,9 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
                       await removeKeptExtraVersion(watchedPath);
                       setDismissedSafetyWarningTs(safetyWarning.ts);
                       emitEvent('Saved.', 'ok');
+                    } catch (error) {
+                      const reason = error instanceof Error ? error.message : String(error);
+                      emitEvent(`Could not remove extra version: ${reason}`, 'error');
                     } finally {
                       setSafetyRemoveBusy(false);
                     }

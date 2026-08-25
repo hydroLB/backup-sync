@@ -40,17 +40,16 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-format-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-format-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-format-
+            ${{ runner.os }}-${{ runner.arch }}-format-rust-1.93.0-
 
       - name: Install frontend dependencies
         run: make frontend-install
@@ -71,6 +70,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Tauri Linux prerequisites
+        run: ./scripts/ci/install-tauri-linux-deps.sh
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
         with:
@@ -82,17 +84,16 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-lint-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-lint-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-lint-
+            ${{ runner.os }}-${{ runner.arch }}-lint-rust-1.93.0-
 
       - name: Install frontend dependencies
         run: make frontend-install
@@ -112,6 +113,9 @@ jobs:
       - name: Hygiene check
         run: make hygiene-check
 
+      - name: Documentation check
+        run: make docs-check
+
   typecheck:
     name: ci-typecheck
     runs-on: ubuntu-latest
@@ -121,6 +125,9 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+
+      - name: Install Tauri Linux prerequisites
+        run: ./scripts/ci/install-tauri-linux-deps.sh
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
@@ -133,20 +140,22 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-typecheck-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-typecheck-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-typecheck-
+            ${{ runner.os }}-${{ runner.arch }}-typecheck-rust-1.93.0-
 
       - name: Rust typecheck
         run: cargo check --workspace --all-targets
+
+      - name: Rust API documentation check
+        run: make rustdoc-check
 
       - name: Install frontend dependencies
         run: make frontend-install
@@ -164,6 +173,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Tauri Linux prerequisites
+        run: ./scripts/ci/install-tauri-linux-deps.sh
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
         with:
@@ -175,34 +187,40 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-tests-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-tests-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-tests-
+            ${{ runner.os }}-${{ runner.arch }}-tests-rust-1.93.0-
 
       - name: Install frontend dependencies
         run: make frontend-install
 
-      - name: Run backend and frontend tests
+      - name: Prepare test reports
+        run: mkdir -p .reports/tests
+
+      - name: Run backend tests
         run: |
-          mkdir -p .reports/tests
           set -o pipefail
           make test 2>&1 | tee .reports/tests/backend-tests.log
+
+      - name: Run frontend tests
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
           make frontend-test 2>&1 | tee .reports/tests/frontend-tests.log
 
       - name: Upload test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-tests-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
           path: |
             .reports/tests/backend-tests.log
@@ -230,17 +248,16 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-coverage-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-coverage-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-coverage-
+            ${{ runner.os }}-${{ runner.arch }}-coverage-rust-1.93.0-
 
       - name: Install frontend dependencies
         run: make frontend-install
@@ -253,7 +270,7 @@ jobs:
 
       - name: Upload coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -261,6 +278,47 @@ jobs:
           path: |
             .reports/coverage/coverage.log
             crates/gui/frontend/coverage
+
+  perf:
+    name: ci-perf
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Cache Cargo inputs and perf outputs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-perf-rust-1.93.0-${{ hashFiles('Cargo.lock') }}-v2
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-perf-rust-1.93.0-
+
+      - name: Run perf guard
+        run: |
+          mkdir -p .reports/perf
+          set -o pipefail
+          make perf-check 2>&1 | tee .reports/perf/perf.log
+
+      - name: Upload perf artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-perf-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: .reports/perf/perf.log
 
   build:
     name: ci-build
@@ -271,6 +329,9 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+
+      - name: Install Tauri Linux prerequisites
+        run: ./scripts/ci/install-tauri-linux-deps.sh
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
@@ -283,20 +344,54 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-build-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-build-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-build-
+            ${{ runner.os }}-${{ runner.arch }}-build-rust-1.93.0-
 
       - name: Build workspace and frontend bundle
         run: make build
+
+  platform-compile:
+    name: ci-platform-compile-${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-14
+          - platform: windows
+            os: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable branch tip
+        with:
+          toolchain: 1.93.0
+
+      - name: Cache Cargo inputs and compile outputs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-platform-rust-1.93.0-${{ hashFiles('Cargo.lock') }}-v2
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-platform-rust-1.93.0-
+
+      - name: Compile-check complete workspace (no packaging)
+        run: cargo check --workspace --all-targets --all-features --locked
 
   security:
     name: ci-security
@@ -326,17 +421,16 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Cache cargo + npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
             .npm-cache
-            crates/gui/frontend/node_modules
-          key: ${{ runner.os }}-security-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-security-rust-1.93.0-${{ hashFiles('Cargo.lock', 'crates/gui/frontend/package-lock.json') }}-v2
           restore-keys: |
-            ${{ runner.os }}-security-
+            ${{ runner.os }}-${{ runner.arch }}-security-rust-1.93.0-
 
       - name: Install frontend dependencies
         run: make frontend-install
@@ -360,7 +454,9 @@ jobs:
       - typecheck
       - tests
       - coverage
+      - perf
       - build
+      - platform-compile
       - security
     steps:
       - name: Checkout
@@ -369,13 +465,13 @@ jobs:
           fetch-depth: 0
 
       - name: Validate canonical command contract
-        run: |
-          mkdir -p .reports/ci
-          make -n ci > .reports/ci/ci-contract.txt
-          grep -E "fmt-check|clippy|boundaries-check|operability-check|frontend-lint|frontend-format-check|frontend-typecheck|hygiene-check|lockfile-check|perf-check|coverage|security-check|deny|audit|secrets|check-repo-hygiene" .reports/ci/ci-contract.txt
+        run: ./scripts/tests/ci-contract-smoke.sh .reports/ci/ci-contract.txt
+
+      - name: Validate release permission contract
+        run: ./scripts/tests/release-permissions-smoke.sh
 
       - name: Upload CI contract artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-contract-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error

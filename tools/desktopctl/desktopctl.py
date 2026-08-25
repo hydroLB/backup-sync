@@ -59,8 +59,16 @@ def _resolve_tool(name: str, fallback: str | None = None) -> str:
     )
 
 
-CLICLICK_BIN = _resolve_tool("cliclick", "/opt/homebrew/bin/cliclick")
-TESSERACT_BIN = _resolve_tool("tesseract", "/opt/homebrew/bin/tesseract")
+def _cliclick_bin() -> str:
+    """Resolve the optional click helper only when an input command needs it."""
+
+    return _resolve_tool("cliclick", "/opt/homebrew/bin/cliclick")
+
+
+def _tesseract_bin() -> str:
+    """Resolve the optional OCR helper only when an OCR command needs it."""
+
+    return _resolve_tool("tesseract", "/opt/homebrew/bin/tesseract")
 
 
 def _ensure_capture_dir() -> Path:
@@ -415,7 +423,7 @@ def click_command(args: argparse.Namespace) -> int:
     Some apps expose poor accessibility metadata and still need raw pointer interaction.
     """
 
-    _run_checked([CLICLICK_BIN, f"c:{args.x},{args.y}"])
+    _run_checked([_cliclick_bin(), f"c:{args.x},{args.y}"])
     return 0
 
 
@@ -443,7 +451,7 @@ def right_click_command(args: argparse.Namespace) -> int:
     Many desktop workflows rely on context menus rather than visible buttons.
     """
 
-    _run_checked([CLICLICK_BIN, f"rc:{args.x},{args.y}"])
+    _run_checked([_cliclick_bin(), f"rc:{args.x},{args.y}"])
     return 0
 
 
@@ -471,7 +479,7 @@ def double_click_command(args: argparse.Namespace) -> int:
     File open and row activation flows often require a true double-click.
     """
 
-    _run_checked([CLICLICK_BIN, f"dc:{args.x},{args.y}"])
+    _run_checked([_cliclick_bin(), f"dc:{args.x},{args.y}"])
     return 0
 
 
@@ -501,7 +509,7 @@ def drag_command(args: argparse.Namespace) -> int:
 
     _run_checked(
         [
-            CLICLICK_BIN,
+            _cliclick_bin(),
             f"dd:{args.x1},{args.y1}",
             f"dm:{args.x2},{args.y2}",
             f"du:{args.x2},{args.y2}",
@@ -534,7 +542,7 @@ def move_command(args: argparse.Namespace) -> int:
     Pointer positioning should be available independently from click actions.
     """
 
-    _run_checked([CLICLICK_BIN, f"m:{args.x},{args.y}"])
+    _run_checked([_cliclick_bin(), f"m:{args.x},{args.y}"])
     return 0
 
 
@@ -562,7 +570,7 @@ def cursor_command(args: argparse.Namespace) -> int:
     Coordinate-based automation needs a stable way to inspect the current pointer location.
     """
 
-    result = _run_checked([CLICLICK_BIN, "p"])
+    result = _run_checked([_cliclick_bin(), "p"])
     print(result.stdout.strip())
     return 0
 
@@ -591,7 +599,7 @@ def type_command(args: argparse.Namespace) -> int:
     Fast text entry is essential for realistic end-user GUI testing.
     """
 
-    _run_checked([CLICLICK_BIN, f"t:{args.text}"])
+    _run_checked([_cliclick_bin(), f"t:{args.text}"])
     return 0
 
 
@@ -619,7 +627,7 @@ def key_command(args: argparse.Namespace) -> int:
     GUI automation needs more than plain text typing.
     """
 
-    _run_checked([CLICLICK_BIN, f"kp:{args.key}"])
+    _run_checked([_cliclick_bin(), f"kp:{args.key}"])
     return 0
 
 
@@ -647,7 +655,7 @@ def color_command(args: argparse.Namespace) -> int:
     Poorly exposed apps can still be probed visually through pixel state.
     """
 
-    result = _run_checked([CLICLICK_BIN, f"cp:{args.x},{args.y}"])
+    result = _run_checked([_cliclick_bin(), f"cp:{args.x},{args.y}"])
     print(result.stdout.strip())
     return 0
 
@@ -720,7 +728,7 @@ def ocr_command(args: argparse.Namespace) -> int:
             f"[desktopctl.py::ocr_command] Image path does not exist: {image_path}"
         )
     if args.json:
-        tsv_result = _run_checked([TESSERACT_BIN, str(image_path), "stdout", "tsv"])
+        tsv_result = _run_checked([_tesseract_bin(), str(image_path), "stdout", "tsv"])
         region = None
         if args.x is not None and args.y is not None and args.width is not None and args.height is not None:
             region = {
@@ -745,7 +753,7 @@ def ocr_command(args: argparse.Namespace) -> int:
         )
         _print_json(payload)
         return 0
-    result = _run_checked([TESSERACT_BIN, str(image_path), "stdout"])
+    result = _run_checked([_tesseract_bin(), str(image_path), "stdout"])
     print(result.stdout.rstrip())
     return 0
 

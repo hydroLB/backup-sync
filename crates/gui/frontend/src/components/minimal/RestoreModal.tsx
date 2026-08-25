@@ -11,21 +11,7 @@ type Props = {
   onEvent: (msg: string, kind?: 'ok' | 'error' | 'info') => void;
 };
 
-/**
- * Summary: Provide a minimal restore flow for a watched folder version.
- *
- * Inputs: open state, close handler, and a callback for user-visible events.
- *
- * Outputs: A modal dialog element when open.
- *
- * Side effects: Invokes IPC calls to list versions and perform restore operations.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Minimal main screen restore action.
- *
- * Why this exists: Implements the product spec restore UX without exposing advanced settings.
- */
+/** Implements the product spec restore UX without exposing advanced settings. */
 export function RestoreModal({ open: isOpen, onClose, onEvent }: Props) {
   const catalog = useRestoreCatalog({ isOpen, onEvent });
   const execution = useRestoreExecution({ isOpen, onClose, onEvent });

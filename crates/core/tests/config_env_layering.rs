@@ -1,5 +1,5 @@
 use backup_core::config::registry::config_defaults;
-use backup_core::load_validated_config;
+use backup_core::{load_config, load_validated_config, save_config};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -9,55 +9,19 @@ const ENV_CONFIG_PATH: &str = "BACKUP_SYNC_CONFIG";
 const ENV_INTERVAL_SECONDS: &str = "BACKUP_SYNC_INTERVAL_SECONDS";
 const ENV_SAFE_MODE: &str = "BACKUP_SYNC_SAFE_MODE";
 
-/// Summary: Provides a process-wide lock for env var mutation in tests.
-///
-/// Inputs: none.
-///
-/// Outputs: a static mutex guarding env changes.
-///
-/// Side effects: Initializes a static lock once.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: env override tests in this module.
-///
-/// Why this exists: env vars are process-global and these tests must not run concurrently.
+/// Env vars are process-global and these tests must not run concurrently.
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-/// Summary: RAII guard that restores mutated env vars after a test.
-///
-/// Inputs: list of env variable names captured before mutation.
-///
-/// Outputs: a guard restoring prior values on drop.
-///
-/// Side effects: Mutates process environment during the test lifetime.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: all env layering tests in this file.
-///
-/// Why this exists: keep tests deterministic and isolated despite process-global env state.
+/// Keep tests deterministic and isolated despite process-global env state.
 struct EnvGuard {
     saved: Vec<(&'static str, Option<OsString>)>,
 }
 
 impl EnvGuard {
-    /// Summary: Applies env overrides and captures prior values for restoration.
-    ///
-    /// Inputs: env overrides where `None` removes a variable.
-    ///
-    /// Outputs: an `EnvGuard` restoring previous values on drop.
-    ///
-    /// Side effects: Mutates process environment variables.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: env layering tests that require temporary overrides.
-    ///
-    /// Why this exists: reduce duplicated env mutation and cleanup code in tests.
+    /// Reduce duplicated env mutation and cleanup code in tests.
     fn apply(overrides: &[(&'static str, Option<&str>)]) -> Self {
         let mut saved = Vec::with_capacity(overrides.len());
         for (name, value) in overrides {
@@ -72,19 +36,7 @@ impl EnvGuard {
 }
 
 impl Drop for EnvGuard {
-    /// Summary: Restores previously captured env vars.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: none.
-    ///
-    /// Side effects: Mutates process environment variables.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: `EnvGuard::apply`.
-    ///
-    /// Why this exists: guarantee env isolation across tests even on assertion failures.
+    /// Guarantee env isolation across tests even on assertion failures.
     fn drop(&mut self) {
         for (name, prior) in &self.saved {
             match prior {
@@ -95,19 +47,7 @@ impl Drop for EnvGuard {
     }
 }
 
-/// Summary: Writes a baseline valid config file at the provided path.
-///
-/// Inputs: target config file path.
-///
-/// Outputs: none.
-///
-/// Side effects: Writes TOML config content to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: env layering tests that load config from explicit paths.
-///
-/// Why this exists: keep test setup deterministic and focused on env-layering behavior.
+/// Keep test setup deterministic and focused on env-layering behavior.
 fn write_valid_config(path: &Path) {
     let mut cfg = config_defaults().expect("config_env_layering::write_valid_config defaults");
     let backup_root = path
@@ -125,19 +65,7 @@ fn write_valid_config(path: &Path) {
 }
 
 #[test]
-/// Summary: Ensures env-layered interval overrides are applied during validated startup load.
-///
-/// Inputs: a valid config file plus interval env override.
-///
-/// Outputs: config with overridden interval.
-///
-/// Side effects: Writes temp config and mutates env variables for the test scope.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `load_validated_config` env layering.
-///
-/// Why this exists: verify startup behavior is deterministic when env overrides are present.
+/// Verify startup behavior is deterministic when env overrides are present.
 fn load_validated_config_applies_env_interval_override() {
     let _env_guard_lock = env_lock().lock().expect(
         "config_env_layering::load_validated_config_applies_env_interval_override env lock",
@@ -159,19 +87,7 @@ fn load_validated_config_applies_env_interval_override() {
 }
 
 #[test]
-/// Summary: Ensures invalid env-layered interval values fail fast with consistent startup context.
-///
-/// Inputs: a valid config file plus an invalid interval env override.
-///
-/// Outputs: load failure containing standardized invalid-config context.
-///
-/// Side effects: Writes temp config and mutates env variables for the test scope.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `load_validated_config` validation context formatting.
-///
-/// Why this exists: keep invalid config errors consistent across CLI, daemon, and GUI startup.
+/// Keep invalid config errors consistent across CLI, daemon, and GUI startup.
 fn load_validated_config_reports_consistent_invalid_config_context() {
     let _env_guard_lock = env_lock().lock().expect(
         "config_env_layering::load_validated_config_reports_consistent_invalid_config_context env lock",
@@ -205,19 +121,7 @@ fn load_validated_config_reports_consistent_invalid_config_context() {
 }
 
 #[test]
-/// Summary: Ensures malformed boolean env overrides fail with clear parse errors.
-///
-/// Inputs: a valid config file plus malformed safe-mode env override.
-///
-/// Outputs: load failure containing env variable parse context.
-///
-/// Side effects: Writes temp config and mutates env variables for the test scope.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `parse_env_bool` and `load_validated_config`.
-///
-/// Why this exists: malformed env values should fail fast with actionable diagnostics.
+/// Malformed env values should fail fast with actionable diagnostics.
 fn load_validated_config_rejects_malformed_safe_mode_env() {
     let _env_guard_lock = env_lock().lock().expect(
         "config_env_layering::load_validated_config_rejects_malformed_safe_mode_env env lock",
@@ -243,4 +147,36 @@ fn load_validated_config_rejects_malformed_safe_mode_env() {
         "expected env parse context, got: {}",
         msg
     );
+}
+
+#[test]
+/// Saving must honor the same explicit env path that subsequent loads resolve.
+fn save_config_persists_to_env_override_and_round_trips() {
+    let _env_guard_lock = env_lock().lock().expect(
+        "config_env_layering::save_config_persists_to_env_override_and_round_trips env lock",
+    );
+    let dir = tempfile::tempdir().expect(
+        "config_env_layering::save_config_persists_to_env_override_and_round_trips tempdir",
+    );
+    let cfg_path = dir.path().join("nested").join("config.toml");
+    let _env_guard = EnvGuard::apply(&[
+        (ENV_CONFIG_PATH, Some(cfg_path.to_string_lossy().as_ref())),
+        (ENV_INTERVAL_SECONDS, None),
+        (ENV_SAFE_MODE, None),
+    ]);
+
+    let mut cfg = config_defaults().expect(
+        "config_env_layering::save_config_persists_to_env_override_and_round_trips defaults",
+    );
+    cfg.interval_seconds = 777;
+    save_config(&cfg)
+        .expect("config_env_layering::save_config_persists_to_env_override_and_round_trips save");
+
+    assert!(
+        cfg_path.is_file(),
+        "expected config to be saved at BACKUP_SYNC_CONFIG"
+    );
+    let loaded = load_config()
+        .expect("config_env_layering::save_config_persists_to_env_override_and_round_trips load");
+    assert_eq!(loaded.interval_seconds, 777);
 }

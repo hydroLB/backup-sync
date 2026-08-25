@@ -39,21 +39,7 @@ type Props = {
   ) => void;
 };
 
-/**
- * Summary: Render the watched folders section for minimal mode.
- *
- * Inputs: Folder list, busy flag, defaults, and action handlers.
- *
- * Outputs: Card React element tree with folder rows.
- *
- * Side effects: Calls provided handlers for add/remove/update actions.
- *
- * Error handling: Delegated to parent via handlers.
- *
- * Ties to other methods: Used by `MinimalMain` watch management flow.
- *
- * Why this exists: Encapsulate folder rendering and keep `MinimalMain` focused on orchestration.
- */
+/** Encapsulate folder rendering and keep `MinimalMain` focused on orchestration. */
 export function FoldersCard({
   busy,
   items,
@@ -69,15 +55,18 @@ export function FoldersCard({
   const hasItems = items.length > 0;
 
   return (
-    <div className="card folders-card">
+    <section className="card folders-card" aria-labelledby="folders-card-title">
       <div className="section-title paths-head">
-        <div>
-          <h2 className="section-heading">Protected Paths</h2>
-          <p className="section-subtitle">
-            {destinationReady
-              ? 'Each protected path is assigned to every configured destination by default.'
-              : 'Choose a destination first so new protected paths have somewhere to write.'}
-          </p>
+        <div className="section-identity">
+          <span className="section-step-badge" aria-hidden="true">
+            02
+          </span>
+          <div>
+            <span className="section-eyebrow">Protection</span>
+            <h2 className="section-heading" id="folders-card-title">
+              What should stay protected?
+            </h2>
+          </div>
         </div>
         <div className="btn-ring">
           <Button
@@ -90,6 +79,11 @@ export function FoldersCard({
           </Button>
         </div>
       </div>
+      <p className="section-subtitle section-subtitle--roomy">
+        {destinationReady
+          ? 'Add the folders and files that matter. Backup Sync stores only new or changed content.'
+          : 'Choose a storage location first so protected content has somewhere safe to go.'}
+      </p>
       {watchedWarning && (
         <InlineAlert kind="error" className="mt-3">
           {watchedWarning}
@@ -142,7 +136,7 @@ export function FoldersCard({
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -158,21 +152,7 @@ type RowProps = {
   onUpdateDestination: (destinationId: string) => void;
 };
 
-/**
- * Summary: Render a single watched folder row with retention stepper.
- *
- * Inputs: Path, current keep value, busy state, and handlers.
- *
- * Outputs: A row element suitable for the folder list.
- *
- * Side effects: Calls the provided handlers for update/remove operations.
- *
- * Error handling: Ignores invalid numeric input to avoid throwing during typing.
- *
- * Ties to other methods: Used by `FoldersCard` and ultimately persisted by `MinimalMain`.
- *
- * Why this exists: Keep folder list rendering small and reuse consistent markup.
- */
+/** Keep folder list rendering small and reuse consistent markup. */
 function FolderRow({
   busy,
   path,
@@ -257,21 +237,7 @@ function FolderRow({
   );
 }
 
-/**
- * Summary: Convert a watched entry to the minimal list item shape.
- *
- * Inputs: A watched entry.
- *
- * Outputs: Item containing the path and keep override.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by callers that want to reuse `FoldersCard` with config data.
- *
- * Why this exists: Keep adapter logic centralized and testable.
- */
+/** Keep adapter logic centralized and testable. */
 export function watchedToItem(w: WatchedPath): Item {
   return {
     path: w.path,

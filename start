@@ -2,5 +2,4 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-export BACKUP_SYNC_FORCE_LIVE_MODE=1
 exec "$ROOT/launch.sh"

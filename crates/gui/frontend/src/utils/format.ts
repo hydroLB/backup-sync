@@ -3,21 +3,7 @@ const BYTE_BASE = 1024;
 const BYTE_SMALL_UNIT_DECIMALS = 2;
 const BYTE_LARGE_UNIT_DECIMALS = 1;
 
-/**
- * Summary: Convert a byte count into a human readable storage string.
- *
- * Inputs: `n` as a byte count or null/undefined.
- *
- * Outputs: A formatted size string for UI display.
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Status cards and storage indicators that surface capacity data.
- *
- * Why this exists: Keeps size values consistent and readable across the UI.
- */
+/** Keeps size values consistent and readable across the UI. */
 export function formatBytes(n?: number | null): string {
   try {
     if (n === undefined || n === null) {
@@ -46,21 +32,7 @@ const SECONDS_PER_HOUR = 3600;
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_HOUR = 60;
 
-/**
- * Summary: Convert a duration in seconds into a compact display string.
- *
- * Inputs: `secs` as a number of seconds or null/undefined.
- *
- * Outputs: A short duration string such as "2h 5m".
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Status panels that display last run duration and uptime.
- *
- * Why this exists: Keeps timing output compact and readable in tight UI areas.
- */
+/** Keeps timing output compact and readable in tight UI areas. */
 export function formatDuration(secs?: number | null): string {
   try {
     if (!secs || secs < 0) {
@@ -78,21 +50,7 @@ export function formatDuration(secs?: number | null): string {
   }
 }
 
-/**
- * Summary: Convert a Unix timestamp into a localized datetime string.
- *
- * Inputs: `ts` as seconds since epoch or null/undefined.
- *
- * Outputs: A localized datetime string such as "2/14/2025, 3:22:10 PM".
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Status summaries and log entries with point-in-time labels.
- *
- * Why this exists: Presents timestamps in a human friendly format for operators.
- */
+/** Presents timestamps in a human friendly format for operators. */
 export function formatDateTime(ts?: number | null): string {
   try {
     if (!ts) {
@@ -105,21 +63,7 @@ export function formatDateTime(ts?: number | null): string {
   }
 }
 
-/**
- * Summary: Convert a Unix timestamp into a relative time string.
- *
- * Inputs: `ts` as seconds since epoch or null/undefined.
- *
- * Outputs: A relative time string like "5m ago" or "2h 1m ago".
- *
- * Side effects: None.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Recency indicators in status cards and activity feeds.
- *
- * Why this exists: Helps operators judge freshness without reading exact timestamps.
- */
+/** Helps operators judge freshness without reading exact timestamps. */
 export function formatSince(ts?: number | null): string {
   try {
     if (!ts) {

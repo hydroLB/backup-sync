@@ -8,21 +8,7 @@ import {
 } from '../../theme/colorMode';
 import { UI_TUNING } from '../../config/uiTuning';
 
-/**
- * Summary: Reset DOM color-mode side effects between tests.
- *
- * Inputs: None.
- *
- * Outputs: None.
- *
- * Side effects: Clears local storage keys and root element attributes/styles.
- *
- * Error handling: None.
- *
- * Ties to other methods: Runs in test hooks for color-mode utilities.
- *
- * Why this exists: Keep tests deterministic and isolated.
- */
+/** Keep tests deterministic and isolated. */
 function resetThemeState(): void {
   window.localStorage.removeItem(UI_TUNING.colorModeStorageKey);
   document.documentElement.removeAttribute('data-color-mode');

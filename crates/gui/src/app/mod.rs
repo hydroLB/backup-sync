@@ -8,19 +8,7 @@ mod tray_menu;
 mod tray_tooltip;
 mod tuning;
 
-/// Summary: Builds and runs the Tauri application with tray and command wiring.
-///
-/// Inputs: none.
-///
-/// Outputs: `Ok(())` when the Tauri runtime exits cleanly.
-///
-/// Side effects: Registers panic hooks, spawns background tasks, and starts the GUI runtime.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI startup and lifecycle hooks.
-///
-/// Why this exists: centralize GUI wiring in one launch routine that is shared by all binaries.
+/// Centralize GUI wiring in one launch routine that is shared by all binaries.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Log panics with correlation metadata so crash reports can be grouped.
     let panic_cid = crate::commands::correlation::cid("gui-panic", None);
@@ -87,7 +75,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else {
-                actions::show_main_window(&app.app_handle());
+                actions::show_main_window(app.app_handle());
             }
             Ok(())
         })

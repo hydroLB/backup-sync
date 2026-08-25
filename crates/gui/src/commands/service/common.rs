@@ -10,19 +10,7 @@ use tracing::warn;
 
 const DAEMON_EXEC_ENV: &str = "BACKUP_SYNC_DAEMON_EXEC";
 
-/// Summary: Loads runtime tuning for service command execution.
-///
-/// Inputs: none.
-///
-/// Outputs: runtime tuning from config or defaults.
-///
-/// Side effects: Reads config from disk and logs warnings on fallback.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service command timeouts and retries.
-///
-/// Why this exists: keep service command behavior configurable without hardcoded constants.
+/// Keep service command behavior configurable without hardcoded constants.
 fn resolve_runtime_tuning() -> RuntimeTuning {
     match load_validated_config() {
         Ok(cfg) => cfg.runtime,
@@ -36,19 +24,7 @@ fn resolve_runtime_tuning() -> RuntimeTuning {
     }
 }
 
-/// Summary: Loads blocking I/O policy for service file operations.
-///
-/// Inputs: none.
-///
-/// Outputs: I/O policy from config or bootstrap defaults.
-///
-/// Side effects: Reads config from disk and logs warnings on fallback.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service manifest writes.
-///
-/// Why this exists: keep timeout and retry behavior for local file writes centralized and configurable.
+/// Keep timeout and retry behavior for local file writes centralized and configurable.
 fn resolve_io_policy() -> BlockingIoPolicy {
     match load_validated_config() {
         Ok(cfg) => BlockingIoPolicy::from_config(&cfg),
@@ -62,19 +38,7 @@ fn resolve_io_policy() -> BlockingIoPolicy {
     }
 }
 
-/// Summary: Resolve the daemon executable path for service installation.
-///
-/// Inputs: the current executable location and optional override environment variable.
-///
-/// Outputs: the canonical daemon executable path.
-///
-/// Side effects: Reads environment variables and filesystem metadata.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `load_exec_and_log` and service manifest generation.
-///
-/// Why this exists: Services must execute the daemon binary, not the GUI or CLI wrapper.
+/// Services must execute the daemon binary, not the GUI or CLI wrapper.
 fn resolve_daemon_exec() -> Result<PathBuf, ErrorEnvelope> {
     if let Ok(v) = std::env::var(DAEMON_EXEC_ENV) {
         let trimmed = v.trim();
@@ -150,19 +114,7 @@ fn resolve_daemon_exec() -> Result<PathBuf, ErrorEnvelope> {
     ))
 }
 
-/// Summary: Loads the current executable path and optional log path.
-///
-/// Inputs: the current process environment and platform log path resolver.
-///
-/// Outputs: the resolved executable path and optional log path.
-///
-/// Side effects: Reads environment and filesystem metadata for executable resolution.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service installation workflows.
-///
-/// Why this exists: ensure service manifests reference the correct binary.
+/// Ensure service manifests reference the correct binary.
 pub fn load_exec_and_log() -> Result<(PathBuf, Option<PathBuf>), ErrorEnvelope> {
     let exec = resolve_daemon_exec()?;
     let log_path = match backup_core::platform::paths::log_file_path() {
@@ -178,19 +130,7 @@ pub fn load_exec_and_log() -> Result<(PathBuf, Option<PathBuf>), ErrorEnvelope> 
     Ok((exec, log_path))
 }
 
-/// Summary: Runs a command and returns its output on success.
-///
-/// Inputs: the command, arguments, error code, and context string.
-///
-/// Outputs: the command output on success.
-///
-/// Side effects: Spawns system commands, waits for completion, and may sleep while polling.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service enable and restart operations.
-///
-/// Why this exists: centralize command execution and error mapping.
+/// Centralize command execution and error mapping.
 pub fn run_command(
     cmd: &str,
     args: &[&str],
@@ -262,19 +202,7 @@ pub fn run_command(
     }
 }
 
-/// Summary: Runs a command with a single retry on failure.
-///
-/// Inputs: the command, arguments, error code, and context string.
-///
-/// Outputs: `Ok(())` when the command succeeds.
-///
-/// Side effects: Spawns commands and sleeps between retry attempts.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service enable workflows that sometimes race system daemons.
-///
-/// Why this exists: improve reliability when system tools need a brief delay.
+/// Improve reliability when system tools need a brief delay.
 pub fn run_command_with_retry(
     cmd: &str,
     args: &[&str],
@@ -290,19 +218,7 @@ pub fn run_command_with_retry(
     })
 }
 
-/// Summary: Writes text content to a destination file.
-///
-/// Inputs: the destination path, content, and error context string.
-///
-/// Outputs: `Ok(())` when the file is written.
-///
-/// Side effects: Writes manifest files to disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service manifest generation.
-///
-/// Why this exists: keep manifest writing consistent across platforms.
+/// Keep manifest writing consistent across platforms.
 pub fn write_text_file(dest: &Path, content: &str, context: &str) -> Result<(), ErrorEnvelope> {
     let io_policy = resolve_io_policy();
     run_with_policy(
@@ -326,19 +242,7 @@ pub fn write_text_file(dest: &Path, content: &str, context: &str) -> Result<(), 
     })
 }
 
-/// Summary: Service status payload returned to the GUI.
-///
-/// Inputs: derived from system checks and daemon IPC reachability.
-///
-/// Outputs: a serializable status structure.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: service status queries in the UI.
-///
-/// Why this exists: provide a consistent status schema for the frontend.
+/// Provide a consistent status schema for the frontend.
 #[derive(Serialize)]
 pub struct ServiceStatus {
     pub installed: bool,

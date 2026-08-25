@@ -9,19 +9,7 @@ use std::path::PathBuf;
 use std::path::{Component, Path};
 
 #[derive(Serialize)]
-/// Summary: Result payload describing destination validation status.
-///
-/// Inputs: derived from filesystem checks.
-///
-/// Outputs: a serializable status structure.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI destination pickers.
-///
-/// Why this exists: communicate validation feedback to the frontend.
+/// Communicate validation feedback to the frontend.
 pub struct DestinationCheck {
     pub writable: bool,
     pub free_bytes: Option<u64>,
@@ -29,19 +17,7 @@ pub struct DestinationCheck {
 }
 
 #[cfg(target_os = "macos")]
-/// Summary: Detect whether a destination is inside a missing `/Volumes/<name>` mount root on macOS.
-///
-/// Inputs: `path` destination path to validate.
-///
-/// Outputs: Missing mount-root path when the volume root is not present, otherwise `None`.
-///
-/// Side effects: None.
-///
-/// Error handling: Returns `None` when the destination is not under `/Volumes` or path parsing fails.
-///
-/// Ties to other methods: Used by `check_destination_cmd` before attempting auto-create behavior.
-///
-/// Why this exists: Prevent auto-creating fake mount folders when an external drive is disconnected.
+/// Prevent auto-creating fake mount folders when an external drive is disconnected.
 fn missing_macos_mount_root(path: &Path) -> Option<PathBuf> {
     let volumes_root = Path::new("/Volumes");
     let relative = match path.strip_prefix(volumes_root) {
@@ -62,19 +38,7 @@ fn missing_macos_mount_root(path: &Path) -> Option<PathBuf> {
 }
 
 #[tauri::command]
-/// Summary: Validates a destination path without writing to disk.
-///
-/// Inputs: the destination path string.
-///
-/// Outputs: a `DestinationCheck` payload.
-///
-/// Side effects: Reads filesystem metadata and free space statistics.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: GUI destination validation flows.
-///
-/// Why this exists: preflight destination settings before saving config.
+/// Preflight destination settings before saving config.
 pub fn check_destination_cmd(path: String) -> Result<DestinationCheck, ErrorEnvelope> {
     if path.trim().is_empty() {
         return Ok(DestinationCheck {
@@ -159,19 +123,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    /// Summary: Generate a unique temporary path for test filesystem operations.
-    ///
-    /// Inputs: `label` path segment for test readability.
-    ///
-    /// Outputs: Unique path under the process temp directory.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Falls back to timestamp `0` when system clock is before epoch.
-    ///
-    /// Ties to other methods: Used by destination command tests.
-    ///
-    /// Why this exists: Keep tests deterministic without adding external dependencies.
+    /// Keep tests deterministic without adding external dependencies.
     fn unique_temp_path(label: &str) -> PathBuf {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -180,19 +132,6 @@ mod tests {
         std::env::temp_dir().join(format!("backup-sync-gui-{label}-{timestamp}"))
     }
 
-    /// Summary: creates_missing_destination_folder_automatically orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
     #[test]
     fn creates_missing_destination_folder_automatically() {
         let destination = unique_temp_path("destination-create")

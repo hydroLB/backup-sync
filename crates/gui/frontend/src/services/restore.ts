@@ -7,23 +7,9 @@ import {
   RestoreFilesArgs,
   RestoreResultDto,
 } from './types';
-import { safeInvoke, wrapError } from './ipc';
+import { safeInvoke, safeInvokeWithTimeout, wrapError } from './ipc';
 
-/**
- * Summary: List available restore versions for each watched folder.
- *
- * Inputs: None.
- *
- * Outputs: A list of watched folders and their known versions.
- *
- * Side effects: Invokes IPC calls to the backend.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: The Restore UI flow.
- *
- * Why this exists: Enables selecting a restore version from the GUI.
- */
+/** Enables selecting a restore version from the GUI. */
 export async function listVersions(): Promise<FolderVersionsDto[]> {
   try {
     return await safeInvoke<FolderVersionsDto[]>('list_versions_cmd', {
@@ -34,47 +20,20 @@ export async function listVersions(): Promise<FolderVersionsDto[]> {
   }
 }
 
-/**
- * Summary: Restore a selected version for a watched folder.
- *
- * Inputs: Restore args (source folder, version id, mode, optional target dir).
- *
- * Outputs: A restore result summary.
- *
- * Side effects: Writes files to disk and may delete files during in-place restores.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: The Restore UI flow.
- *
- * Why this exists: Provides the end user restore behavior for versioned backups.
- */
+/** Provides the end user restore behavior for versioned backups. */
 export async function restoreVersion(args: RestoreArgs): Promise<RestoreResultDto> {
   try {
-    return await safeInvoke<RestoreResultDto>('restore_version_cmd', {
-      args,
-      correlationId: correlationId('restore'),
-    });
+    return await safeInvokeWithTimeout<RestoreResultDto>(
+      'restore_version_cmd',
+      { args, correlationId: correlationId('restore') },
+      0,
+    );
   } catch (error) {
     throw wrapError('[restoreVersion] Failed to restore selected version', error);
   }
 }
 
-/**
- * Summary: List files within a specific version for file-level restore flows.
- *
- * Inputs: Source folder, version id, optional query, and optional limit.
- *
- * Outputs: A list of matching file entries and a total file count.
- *
- * Side effects: Invokes IPC calls to the backend.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: File-level Restore UI flow.
- *
- * Why this exists: Enables searching within a version manifest without loading everything client-side.
- */
+/** Enables searching within a version manifest without loading everything client-side. */
 export async function listVersionFiles(
   args: ListVersionFilesArgs,
 ): Promise<ListVersionFilesResultDto> {
@@ -88,27 +47,14 @@ export async function listVersionFiles(
   }
 }
 
-/**
- * Summary: Restore individual files from a selected version.
- *
- * Inputs: Source folder, version id, rel paths, mode, and optional target dir.
- *
- * Outputs: A restore result summary.
- *
- * Side effects: Writes selected files to disk; does not delete extraneous files.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: File-level Restore UI flow.
- *
- * Why this exists: Provide a safer restore option when only a few files are needed.
- */
+/** Provide a safer restore option when only a few files are needed. */
 export async function restoreFiles(args: RestoreFilesArgs): Promise<RestoreResultDto> {
   try {
-    return await safeInvoke<RestoreResultDto>('restore_files_cmd', {
-      args,
-      correlationId: correlationId('restore_files'),
-    });
+    return await safeInvokeWithTimeout<RestoreResultDto>(
+      'restore_files_cmd',
+      { args, correlationId: correlationId('restore_files') },
+      0,
+    );
   } catch (error) {
     throw wrapError('[restoreFiles] Failed to restore selected files', error);
   }

@@ -10,21 +10,7 @@ type Props = {
   className?: string;
 };
 
-/**
- * Summary: Render a reusable content-state surface for loading, empty, error, and info feedback.
- *
- * Inputs: State tone, title text, optional message, optional action content, and optional class overrides.
- *
- * Outputs: A state block element with optional spinner and action row.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by minimal, settings, and modal screens for consistent non-happy-path UI.
- *
- * Why this exists: Standardize feedback states and remove one-off loading and empty placeholders.
- */
+/** Standardize feedback states and remove one-off loading and empty placeholders. */
 export function StateBlock({ tone, title, message, action, className }: Props) {
   const classes = ['state-block', `state-${tone}`, className ?? ''].filter(Boolean).join(' ');
   const role = tone === 'error' ? 'alert' : 'status';

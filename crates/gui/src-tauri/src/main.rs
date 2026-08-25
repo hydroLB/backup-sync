@@ -1,18 +1,6 @@
 use tracing::error;
 
-/// Summary: Starts the Tauri GUI runtime and handles startup failures.
-///
-/// Inputs: none.
-///
-/// Outputs: `()` after launching the GUI or exiting on failure.
-///
-/// Side effects: Starts the GUI process and may terminate the process on error.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: desktop app entrypoint handling.
-///
-/// Why this exists: provide a thin entrypoint with explicit failure handling.
+/// Provide a thin entrypoint with explicit failure handling.
 fn main() {
     if let Err(err) = gui::run() {
         let cid = gui::observability::cid("gui-main", None);

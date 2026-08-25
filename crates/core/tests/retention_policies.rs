@@ -11,19 +11,7 @@ use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[test]
-/// Summary: Ensures unchanged files are not backed up repeatedly.
-///
-/// Inputs: an unchanged file across two planning cycles.
-///
-/// Outputs: identical backup counts across cycles.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: change detection and stored state stability.
-///
-/// Why this exists: avoid duplicating backups when content is stable.
+/// Avoid duplicating backups when content is stable.
 fn unchanged_files_not_backed_up_twice() {
     let dir = tempdir().expect(
         "retention_policies::unchanged_files_not_backed_up_twice failed to create temp dir",
@@ -102,19 +90,7 @@ fn unchanged_files_not_backed_up_twice() {
 }
 
 #[test]
-/// Summary: Ensures retention ordering uses timestamp prefix semantics.
-///
-/// Inputs: timestamped filenames with mixed ordering.
-///
-/// Outputs: a list that keeps the newest entry.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: retention policy ordering logic.
-///
-/// Why this exists: preserve expected newest backup when enforcing retention.
+/// Preserve expected newest backup when enforcing retention.
 fn retention_sorts_by_timestamp_prefix() {
     let files = vec![
         PathBuf::from("20240102-010000__a.txt"),
@@ -128,19 +104,7 @@ fn retention_sorts_by_timestamp_prefix() {
 }
 
 #[test]
-/// Summary: Ensures retention does not delete the last remaining copy when max is one.
-///
-/// Inputs: a single backup path and a max of one.
-///
-/// Outputs: a retained list of length one.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: retention guardrails to avoid empty histories.
-///
-/// Why this exists: keep at least one copy per file.
+/// Keep at least one copy per file.
 fn retention_never_deletes_last_when_max_one() {
     let files = vec![PathBuf::from("20240101-010000__a.txt")];
     let kept = enforce(1, files.clone())

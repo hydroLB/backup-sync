@@ -95,19 +95,7 @@ pub struct RuntimeTuning {
 }
 
 impl Default for RuntimeTuning {
-    /// Summary: Builds a baseline runtime tuning profile for daemon scheduling.
-    ///
-    /// Inputs: the default functions in `config::model::defaults`.
-    ///
-    /// Outputs: a fully populated runtime tuning profile.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: daemon cycle pruning, verification, and watcher debounce.
-    ///
-    /// Why this exists: centralize runtime knobs so defaults stay aligned across the codebase.
+    /// Centralize runtime knobs so defaults stay aligned across the codebase.
     fn default() -> Self {
         Self {
             prune_interval_cycles: crate::config::model::defaults::default_prune_interval_cycles(),

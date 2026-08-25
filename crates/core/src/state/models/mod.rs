@@ -30,19 +30,7 @@ pub struct SafetyWarning {
 }
 
 impl Default for ActivityItem {
-    /// Summary: Builds a default activity item with a current timestamp.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: a default `ActivityItem`.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: state initialization and UI activity feeds.
-    ///
-    /// Why this exists: ensure new entries have a consistent timestamp baseline.
+    /// Ensure new entries have a consistent timestamp baseline.
     fn default() -> Self {
         Self {
             path: String::new(),

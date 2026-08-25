@@ -1,57 +1,25 @@
 use crate::state::models::StoredState;
 use crate::{io::run_with_policy, io::BlockingIoPolicy, io::CancellationFlag};
 use anyhow::{Context, Result};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
-/// Summary: Persists and loads backup state to a JSON file.
-///
-/// Inputs: a filesystem path to the state file.
-///
-/// Outputs: a load or save operation for `StoredState`.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon, CLI, and GUI state management.
-///
-/// Why this exists: keep state durable across runs.
+/// Keep state durable across runs.
 #[derive(Clone)]
 pub struct StateStore {
     path: PathBuf,
 }
 
 impl StateStore {
-    /// Summary: Builds a new state store for the given path.
-    ///
-    /// Inputs: the desired state file path.
-    ///
-    /// Outputs: a `StateStore` configured with the path.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: state persistence setup.
-    ///
-    /// Why this exists: centralize state storage configuration in one struct.
+    /// Centralize state storage configuration in one struct.
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
-    /// Summary: Loads state from disk or returns a default state when missing.
-    ///
-    /// Inputs: the state file path.
-    ///
-    /// Outputs: the stored or default state plus a `StateStore` for persistence.
-    ///
-    /// Side effects: Reads the state file from disk when present.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: application startup flows.
-    ///
-    /// Why this exists: allow first run initialization without failing.
+    /// Allow first run initialization without failing.
     pub fn load_or_default(path: PathBuf) -> Result<(StoredState, StateStore)> {
         let io_policy = BlockingIoPolicy::bootstrap_defaults();
         if path.exists() {
@@ -80,51 +48,70 @@ impl StateStore {
         }
     }
 
-    /// Summary: Persists the current state to disk as JSON.
-    ///
-    /// Inputs: the state to serialize and persist.
-    ///
-    /// Outputs: `Ok(())` when the file is written.
-    ///
-    /// Side effects: Creates directories and writes the state file to disk.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: backup execution and verification flows.
-    ///
-    /// Why this exists: keep state durable and recoverable across runs.
+    /// Keep state durable and recoverable across runs.
     pub fn persist(&self, state: &StoredState) -> Result<()> {
         let io_policy = BlockingIoPolicy::bootstrap_defaults();
-        if let Some(parent) = self.path.parent() {
-            run_with_policy(
-                "state::store::persist create parent directory",
-                &io_policy,
-                CancellationFlag::none(),
-                || {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!(
-                            "state::store::persist failed to create state dir {:?}",
-                            parent
-                        )
-                    })
-                },
-            )?;
-        }
         let raw = serde_json::to_string_pretty(state)
             .context("state::store::persist failed to serialize state to JSON")?;
+        let parent = self
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+
         run_with_policy(
-            "state::store::persist write state file",
+            "state::store::persist create parent directory",
             &io_policy,
             CancellationFlag::none(),
             || {
-                fs::write(&self.path, raw.as_bytes()).with_context(|| {
+                fs::create_dir_all(parent).with_context(|| {
                     format!(
-                        "state::store::persist failed to write state file {:?}",
-                        self.path
+                        "state::store::persist failed to create state dir {:?}",
+                        parent
                     )
                 })
             },
         )?;
+
+        run_with_policy(
+            "state::store::persist replace state file",
+            &io_policy,
+            CancellationFlag::none(),
+            || {
+                let mut temp = tempfile::NamedTempFile::new_in(parent)
+                    .context("state::store::persist failed to create temporary state file")?;
+                temp.write_all(raw.as_bytes())
+                    .context("state::store::persist failed to write temporary state file")?;
+                temp.flush()
+                    .context("state::store::persist failed to flush temporary state file")?;
+                temp.as_file()
+                    .sync_all()
+                    .context("state::store::persist failed to sync temporary state file")?;
+                temp.persist(&self.path)
+                    .map_err(|error| error.error)
+                    .with_context(|| {
+                        format!(
+                            "state::store::persist failed to replace state file {:?}",
+                            self.path
+                        )
+                    })?;
+                sync_parent(parent)
+            },
+        )?;
         Ok(())
     }
+}
+
+#[cfg(target_family = "unix")]
+fn sync_parent(parent: &Path) -> Result<()> {
+    let directory = fs::File::open(parent)
+        .context("state::store::persist failed to open state directory for sync")?;
+    directory
+        .sync_all()
+        .context("state::store::persist failed to sync state directory")
+}
+
+#[cfg(not(target_family = "unix"))]
+fn sync_parent(_parent: &Path) -> Result<()> {
+    Ok(())
 }

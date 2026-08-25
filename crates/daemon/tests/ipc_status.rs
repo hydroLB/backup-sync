@@ -6,28 +6,11 @@ const IPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[cfg(unix)]
 #[tokio::test]
-/// Summary: Validates public IPC JSON contracts for status, health, and readiness probes.
-///
-/// Inputs: structured IPC requests sent over the daemon Unix socket.
-///
-/// Outputs: assertions on stable response shape, key fields, and request-id correlation behavior.
-///
-/// Side effects: Creates temp state, binds a local IPC socket, and performs request/response exchanges.
-///
-/// Error handling: Skips on bind conflicts and fails with contextual assertions for contract drift.
-///
-/// Ties to other methods: `daemon::runtime::ipc` request handlers and reply serialization.
-///
-/// Why this exists: protect machine-consumed IPC contract fields from accidental regressions.
+/// Protect machine-consumed IPC contract fields from accidental regressions.
 async fn unix_ipc_public_contract_status_health_readiness() {
     let _ipc_lock = support::ipc_test_lock().await;
-    support::cleanup_socket_file();
-
-    let Some(server) =
-        support::spawn_test_server("unix_ipc_public_contract_status_health_readiness").await
-    else {
-        return;
-    };
+    let server =
+        support::spawn_test_server("unix_ipc_public_contract_status_health_readiness").await;
     let path = server.socket_path();
 
     let status = support::send_json_request(
@@ -85,35 +68,17 @@ async fn unix_ipc_public_contract_status_health_readiness() {
     assert_eq!(readiness["status"], "ready");
 
     server.shutdown(IPC_TIMEOUT).await;
-    support::cleanup_socket_file();
 }
 
 #[cfg(unix)]
 #[tokio::test]
-/// Summary: Verifies public IPC ack and readiness contracts when safe mode is toggled.
-///
-/// Inputs: `SetSafeMode` and `ReadinessWithContext` IPC requests with explicit request ids.
-///
-/// Outputs: assertions that ack payloads and readiness state transitions are stable.
-///
-/// Side effects: Mutates in-memory daemon state through IPC requests.
-///
-/// Error handling: Skips on bind conflicts and fails if ack or readiness contract fields drift.
-///
-/// Ties to other methods: `SetSafeMode` handling and readiness projection in daemon IPC runtime.
-///
-/// Why this exists: ensure automation clients can safely depend on safe-mode state transitions.
+/// Ensure automation clients can safely depend on safe-mode state transitions.
 async fn unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition() {
     let _ipc_lock = support::ipc_test_lock().await;
-    support::cleanup_socket_file();
-
-    let Some(server) = support::spawn_test_server(
+    let server = support::spawn_test_server(
         "unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition",
     )
-    .await
-    else {
-        return;
-    };
+    .await;
     let path = server.socket_path();
 
     let ack_enable = support::send_json_request(
@@ -172,7 +137,6 @@ async fn unix_ipc_public_contract_set_safe_mode_ack_and_readiness_transition() {
     assert_eq!(readiness_ready["request_id"], "readiness-after-disable");
 
     server.shutdown(IPC_TIMEOUT).await;
-    support::cleanup_socket_file();
 }
 
 // Windows named pipe IPC is exercised via compilation; runtime test omitted here.

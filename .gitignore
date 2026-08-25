@@ -50,6 +50,7 @@ coverage/
 **/coverage/
 crates/gui/frontend/dist/
 crates/gui/frontend/.eslintcache
+crates/gui/frontend/.wrangler/
 
 # Python cache artifacts (local tooling)
 .venv/

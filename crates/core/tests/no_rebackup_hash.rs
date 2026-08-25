@@ -10,19 +10,7 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
-/// Summary: Ensures unchanged files are not re-backed up after state reload.
-///
-/// Inputs: a stable file, persisted state, and a reloaded plan.
-///
-/// Outputs: an empty plan on the second run.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: planner stability checks and stored state reuse.
-///
-/// Why this exists: avoid redundant backups when nothing has changed.
+/// Avoid redundant backups when nothing has changed.
 fn no_rebackup_when_state_reloaded_and_unchanged() {
     let dir = tempdir().expect(
         "no_rebackup_hash::no_rebackup_when_state_reloaded_and_unchanged failed to create temp dir",

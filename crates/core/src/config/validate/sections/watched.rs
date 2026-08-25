@@ -5,36 +5,12 @@ use std::collections::HashSet;
 
 use super::destinations::DestinationIndex;
 
-/// Summary: Validates watched list presence and enabled state.
-///
-/// Inputs: the config and label prefix.
-///
-/// Outputs: `Ok(())` when the watched list is well-formed for persistence.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon and GUI config save flows.
-///
-/// Why this exists: allow users to configure destinations and schedules before selecting folders.
+/// Allow users to configure destinations and schedules before selecting folders.
 pub(crate) fn validate_presence(_cfg: &Config, _label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Summary: Validates watched collection size limits.
-///
-/// Inputs: the config, limits, and label prefix.
-///
-/// Outputs: `Ok(())` when watched entry count is within limits.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon responsiveness guardrails.
-///
-/// Why this exists: cap scan and plan work to keep cycles bounded.
+/// Cap scan and plan work to keep cycles bounded.
 pub(crate) fn validate_count(cfg: &Config, limits: &ValidationLimits, label: &str) -> Result<()> {
     if cfg.watched.len() > limits.max_watched {
         bail!(
@@ -45,19 +21,7 @@ pub(crate) fn validate_count(cfg: &Config, limits: &ValidationLimits, label: &st
     Ok(())
 }
 
-/// Summary: Validates watched paths against destinations and structural constraints.
-///
-/// Inputs: the config, label prefix, and destination index.
-///
-/// Outputs: `Ok(())` when watched paths are non-overlapping and mapped to valid destinations.
-///
-/// Side effects: Reads filesystem metadata and may emit warnings for missing paths.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: planning and execution path safety checks.
-///
-/// Why this exists: prevent recursive backups and duplicate watched entries that are hard to debug.
+/// Prevent recursive backups and duplicate watched entries that are hard to debug.
 pub(crate) fn validate_paths(
     cfg: &Config,
     label: &str,

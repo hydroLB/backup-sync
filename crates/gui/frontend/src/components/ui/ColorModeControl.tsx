@@ -12,21 +12,7 @@ const MODE_OPTIONS: Array<{ mode: ColorModePreference; label: string; ariaLabel:
   { mode: 'auto', label: 'Auto', ariaLabel: 'Match system appearance' },
 ];
 
-/**
- * Summary: Render a segmented control for selecting light, dark, or auto mode.
- *
- * Inputs: Active preference and change callback.
- *
- * Outputs: Segmented control element tree.
- *
- * Side effects: Invokes `onChange` when a segment is selected.
- *
- * Error handling: Propagates contextual errors to the caller when render fails.
- *
- * Ties to other methods: App shell color-mode lifecycle via `useColorMode`.
- *
- * Why this exists: Provide explicit mode selection while keeping auto mode discoverable.
- */
+/** Provide explicit mode selection while keeping auto mode discoverable. */
 export function ColorModeControl({ preference, onChange }: Props) {
   try {
     const [expanded, setExpanded] = useState(false);

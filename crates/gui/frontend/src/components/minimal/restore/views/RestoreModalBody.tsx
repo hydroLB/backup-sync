@@ -33,21 +33,7 @@ type Props = {
   onRetry: () => void;
 };
 
-/**
- * Summary: Render the restore modal body for catalog selection, search, and file picking.
- *
- * Inputs: Restore catalog/search state and user-action callbacks.
- *
- * Outputs: The restore body element tree.
- *
- * Side effects: Delegated to the provided callbacks.
- *
- * Error handling: Delegated to the restore hooks and modal shell.
- *
- * Ties to other methods: Used by `RestoreModal`.
- *
- * Why this exists: Keep the restore UI layout isolated from modal orchestration and IPC logic.
- */
+/** Keep the restore UI layout isolated from modal orchestration and IPC logic. */
 export function RestoreModalBody({
   busy,
   folders,
@@ -108,8 +94,9 @@ export function RestoreModalBody({
 
       {!loading && !loadError && hasFolders && (
         <>
-          <FormField label="Folder">
+          <FormField label="Folder" htmlFor="restore-source-path">
             <select
+              id="restore-source-path"
               value={sourcePath}
               onChange={(event) => setSourcePath(event.target.value)}
               disabled={busy || loading}
@@ -123,8 +110,9 @@ export function RestoreModalBody({
             </select>
           </FormField>
 
-          <FormField label="Version">
+          <FormField label="Version" htmlFor="restore-version-id">
             <select
+              id="restore-version-id"
               value={versionId}
               onChange={(event) => setVersionId(event.target.value)}
               disabled={busy || loading}
@@ -150,6 +138,7 @@ export function RestoreModalBody({
               <button
                 type="button"
                 className={`choice-btn ${scope === 'folder' ? 'is-active' : ''}`}
+                aria-pressed={scope === 'folder'}
                 onClick={() => setScope('folder')}
                 disabled={busy || loading}
               >
@@ -161,6 +150,7 @@ export function RestoreModalBody({
               <button
                 type="button"
                 className={`choice-btn ${scope === 'files' ? 'is-active' : ''}`}
+                aria-pressed={scope === 'files'}
                 onClick={() => setScope('files')}
                 disabled={busy || loading}
               >
@@ -175,6 +165,7 @@ export function RestoreModalBody({
               <button
                 type="button"
                 className={`choice-btn ${mode === 'to_directory' ? 'is-active' : ''}`}
+                aria-pressed={mode === 'to_directory'}
                 onClick={() => setMode('to_directory')}
                 disabled={busy || loading}
               >
@@ -186,6 +177,7 @@ export function RestoreModalBody({
               <button
                 type="button"
                 className={`choice-btn ${mode === 'in_place' ? 'is-active' : ''}`}
+                aria-pressed={mode === 'in_place'}
                 onClick={() => setMode('in_place')}
                 disabled={busy || loading}
               >
@@ -220,10 +212,12 @@ export function RestoreModalBody({
             <div className="stack">
               <FormField
                 label="Search"
+                htmlFor="restore-file-search"
                 hint="Type part of a file path, then press Enter or Search."
               >
                 <div className="row-inline">
                   <input
+                    id="restore-file-search"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="notes/todo"
@@ -264,7 +258,7 @@ export function RestoreModalBody({
                     message="Scanning the selected restore version."
                   />
                 )}
-                {!fileLoading && (fileResults ?? []).length === 0 && (
+                {!fileLoading && fileResults !== null && fileResults.length === 0 && (
                   <StateBlock
                     tone="empty"
                     title="No matching files"

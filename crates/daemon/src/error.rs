@@ -2,19 +2,7 @@ use anyhow::Error;
 use backup_core::boundary_error::{classify_anyhow, CanonicalErrorCode};
 use backup_core::logging::redact_text;
 
-/// Summary: Typed daemon boundary error codes for startup/runtime failures.
-///
-/// Inputs: mapped from canonical boundary classifier output.
-///
-/// Outputs: stable daemon-specific error codes.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon process boundary handling in `main`.
-///
-/// Why this exists: keep daemon failure contracts explicit for operators and automation.
+/// Keep daemon failure contracts explicit for operators and automation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DaemonErrorCode {
     ConfigInvalid,
@@ -31,19 +19,7 @@ pub enum DaemonErrorCode {
 }
 
 impl DaemonErrorCode {
-    /// Summary: Returns string form used in daemon boundary logs.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: stable code string.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: daemon structured logging and runbook diagnostics.
-    ///
-    /// Why this exists: preserve deterministic error taxonomy at daemon boundaries.
+    /// Preserve deterministic error taxonomy at daemon boundaries.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ConfigInvalid => "CONFIG_INVALID",
@@ -60,19 +36,7 @@ impl DaemonErrorCode {
         }
     }
 
-    /// Summary: Returns deterministic daemon process exit code for this failure class.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: non-zero exit code for process termination.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: daemon process termination in `main`.
-    ///
-    /// Why this exists: keep daemon lifecycle semantics reproducible across environments.
+    /// Keep daemon lifecycle semantics reproducible across environments.
     pub fn exit_code(self) -> i32 {
         match self {
             Self::Internal => 1,
@@ -88,19 +52,7 @@ impl DaemonErrorCode {
 }
 
 impl From<CanonicalErrorCode> for DaemonErrorCode {
-    /// Summary: Converts canonical error codes into daemon boundary codes.
-    ///
-    /// Inputs: canonical boundary code.
-    ///
-    /// Outputs: daemon boundary code.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: daemon boundary mapper.
-    ///
-    /// Why this exists: ensure daemon code taxonomy stays aligned with canonical classifier output.
+    /// Ensure daemon code taxonomy stays aligned with canonical classifier output.
     fn from(value: CanonicalErrorCode) -> Self {
         match value {
             CanonicalErrorCode::ConfigInvalid => Self::ConfigInvalid,
@@ -118,19 +70,7 @@ impl From<CanonicalErrorCode> for DaemonErrorCode {
     }
 }
 
-/// Summary: Structured daemon boundary failure payload.
-///
-/// Inputs: generated from startup/runtime failures and panic payloads.
-///
-/// Outputs: typed error details for logs and process exit handling.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon entrypoint failure mapping.
-///
-/// Why this exists: centralize daemon operator-facing error rendering.
+/// Centralize daemon operator-facing error rendering.
 #[derive(Debug, Clone)]
 pub struct DaemonBoundaryError {
     pub code: DaemonErrorCode,
@@ -140,36 +80,12 @@ pub struct DaemonBoundaryError {
 }
 
 impl DaemonBoundaryError {
-    /// Summary: Returns deterministic daemon process exit code.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: non-zero exit code.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: daemon process termination path.
-    ///
-    /// Why this exists: keep daemon exits reproducible for service managers.
+    /// Keep daemon exits reproducible for service managers.
     pub fn exit_code(&self) -> i32 {
         self.code.exit_code()
     }
 
-    /// Summary: Renders an actionable daemon boundary message.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs: human-readable message with code and hint.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: stderr fallback output in daemon main.
-    ///
-    /// Why this exists: preserve operator guidance when logs are unavailable.
+    /// Preserve operator guidance when logs are unavailable.
     pub fn render_for_user(&self) -> String {
         format!(
             "{}: {}\nHint: {}",
@@ -180,19 +96,7 @@ impl DaemonBoundaryError {
     }
 }
 
-/// Summary: Maps daemon startup/runtime anyhow failures into structured boundary errors.
-///
-/// Inputs: failure object and boundary context label.
-///
-/// Outputs: daemon boundary error payload.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon main failure handling.
-///
-/// Why this exists: keep daemon boundary mapping centralized and testable.
+/// Keep daemon boundary mapping centralized and testable.
 pub fn map_anyhow(error: &Error, context: &'static str) -> DaemonBoundaryError {
     let classified = classify_anyhow(error);
     DaemonBoundaryError {
@@ -203,19 +107,7 @@ pub fn map_anyhow(error: &Error, context: &'static str) -> DaemonBoundaryError {
     }
 }
 
-/// Summary: Maps panic text into an internal daemon boundary error.
-///
-/// Inputs: panic text from panic hook.
-///
-/// Outputs: daemon boundary error payload.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: daemon panic hook.
-///
-/// Why this exists: keep panic outputs consistent with runtime boundary failures.
+/// Keep panic outputs consistent with runtime boundary failures.
 pub fn map_panic(panic_text: &str) -> DaemonBoundaryError {
     DaemonBoundaryError {
         code: DaemonErrorCode::Internal,

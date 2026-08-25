@@ -1,232 +1,196 @@
 # Backup Sync
 
-Backup Sync is a simple desktop backup app for space efficient, versioned backups of selected folders to an external drive or partition. It uses a content addressed blob store (SHA-256) so unchanged file contents are not duplicated across versions.
+<p align="center">
+  <a href="https://github.com/hydroLB/backup-sync/actions/workflows/ci.yml"><img src="https://github.com/hydroLB/backup-sync/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/hydroLB/backup-sync/actions/workflows/codeql.yml"><img src="https://github.com/hydroLB/backup-sync/actions/workflows/codeql.yml/badge.svg" alt="CodeQL status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f855a.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/Rust-1.93.0-000000.svg?logo=rust" alt="Rust 1.93.0">
+  <img src="https://img.shields.io/badge/Node.js-22.22.0-339933.svg?logo=node.js&logoColor=white" alt="Node.js 22.22.0">
+</p>
 
-## Repository map
-- `crates/core` contains the backup engine, blob store layout, and restore logic
-- `crates/daemon` runs scheduled cycles, watcher integrations, IPC, and shutdown handling
-- `crates/cli` provides operational commands for status, run once, verify, and diagnostics
-- `crates/gui` is the Tauri backend and IPC bridge
-- `crates/gui/frontend` is the React UI and service layer
-- `docs` holds standards, perf baselines, and release notes
+<p align="center">
+  <img src="assets/readme/backup-sync-hero.png" alt="Backup Sync desktop app showing protected folders, backup destinations, status, and restore controls">
+</p>
 
-Note on engines:
-- The production workflow uses the **versioned engine** under `crates/core/src/backup/versioned`.
-- The original scan plan execute file copy engine remains in `crates/core/src/backup/{planning,execution,retention}` for internal tests and reference, but the daemon, CLI, and GUI run on the versioned engine.
+<p align="center">
+  <strong>Local-first, versioned backups engineered around the restore path.</strong>
+</p>
 
-## System overview
-- By default every 30 minutes (configurable), the daemon scans each configured folder and builds a snapshot manifest.
-- A new version is created only when the snapshot differs from the latest manifest (add, modify, delete).
-- File contents are stored in `.backup_sync/v1/blobs/sha256/...` keyed by SHA-256; manifests map relative paths to blob hashes plus metadata.
-- Each folder keeps N versions (default 5). When retention prunes old manifests, unreferenced blobs are garbage collected.
-- Restore reconstructs a selected version either to a new directory or in place (in place removes files not present in the selected version).
-- When the backup destination is disconnected or unavailable, the daemon pauses writes, reports the issue, and auto-resumes when the destination returns.
+<p align="center">
+  <a href="https://backup-sync-web-edition.young-hen-7947.chatgpt.site"><strong>Launch the interactive web edition</strong></a>
+</p>
 
-Details: see [`docs/storage.md`](docs/storage.md) and [`docs/ui.md`](docs/ui.md).
+Backup Sync protects folders on external drives and mounted destinations through a Rust engine, background daemon, CLI, and Tauri/React desktop app. Its content-addressed store keeps unchanged bytes once; its safety model treats metadata, concurrency, corruption, and partial failure as first-class design problems.
 
-## Project docs
-- Contributor guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Security policy: [`SECURITY.md`](SECURITY.md)
-- Code ownership: [`.github/CODEOWNERS`](.github/CODEOWNERS)
-- Environment template: [`.env.example`](.env.example)
-- Standards: [`docs/standards.md`](docs/standards.md)
-- Module boundaries: [`docs/module-boundaries.md`](docs/module-boundaries.md)
-- Public API surface: [`docs/public-api.md`](docs/public-api.md)
-- Deprecation policy: [`docs/deprecation-policy.md`](docs/deprecation-policy.md)
-- Operability primitives: [`docs/operability.md`](docs/operability.md)
-- Incident runbooks index: [`docs/runbooks/README.md`](docs/runbooks/README.md)
-- Runbook: destination offline: [`docs/runbooks/destination-offline.md`](docs/runbooks/destination-offline.md)
-- Runbook: verify failure: [`docs/runbooks/verify-failure.md`](docs/runbooks/verify-failure.md)
-- Runbook: corruption suspicion: [`docs/runbooks/corruption-suspicion.md`](docs/runbooks/corruption-suspicion.md)
-- Runbook: stuck daemon: [`docs/runbooks/stuck-daemon.md`](docs/runbooks/stuck-daemon.md)
-- Threat model notes: [`docs/threat-model.md`](docs/threat-model.md)
-- Security runbook: [`docs/security-runbook.md`](docs/security-runbook.md)
-- Architecture narrative: [`docs/architecture.md`](docs/architecture.md)
-- ADR index: [`docs/adr/README.md`](docs/adr/README.md)
-- Design principles: [`docs/design-principles.md`](docs/design-principles.md)
-- Risk register: [`docs/risk-register.md`](docs/risk-register.md)
-- Delivery roadmap: [`docs/roadmap.md`](docs/roadmap.md)
-- Branch protection policy: [`docs/branch-protection.md`](docs/branch-protection.md)
-- Release process: [`docs/release.md`](docs/release.md)
-- Release notes template: [`docs/templates/release-notes.md`](docs/templates/release-notes.md)
-- Performance tuning guide: [`docs/performance-tuning.md`](docs/performance-tuning.md)
-- Storage architecture: [`docs/storage.md`](docs/storage.md)
-- UI architecture: [`docs/ui.md`](docs/ui.md)
+> [!IMPORTANT]
+> Backup Sync is pre-1.0 and source-distributed. This repository does not yet publish packaged, signed, or notarized installers. See the [roadmap](docs/roadmap.md) for the remaining release work.
 
-## Setup
-1. Install Rust stable, Node 18 or newer, and npm.
-2. Enable git hooks with `make hooks`.
-3. Remove local build and cache junk with `make clean-local` when you want a clean working tree.
-4. On macOS, install the optional native desktop bridge helper with `./scripts/install_desktopctl.sh` when you need the desktop tooling in `tools/desktopctl`.
-5. Build everything with `make build`.
-6. Run the desktop app with `make run`.
+The web edition uses the desktop app's exact React interface with a browser-local storage engine behind the existing controls. It performs real SHA-256 hashing, content deduplication, versioning, verification, replication repair, and restore on browser-owned data without uploading files. Native background services, unrestricted filesystem access, and OS snapshots remain exclusive to the full desktop application. See the [web edition contract](docs/web-edition.md).
 
-Quickstart (dev):
-- `./start` (builds prerequisites and launches the desktop app)
+## Why it is technically interesting
 
-Local-only paths:
-- `.env`, `.env.*` except `.env.example`, `.reports/`, `.npm-cache/`, `.vscode/`, `.codex/`, `projects/`, and frontend coverage output are intentionally ignored so local state and secrets do not enter Git.
+| Problem | Implemented control |
+|---|---|
+| A file changes while being read | The final plaintext SHA-256 must match the blob key; mismatched source reads never publish under the wrong hash. |
+| Store metadata is hostile or corrupt | Version IDs, manifest keys, relative paths, and 64-character lowercase hashes are validated before use. |
+| Restore fails halfway | Blobs and free space are preflighted, decoded bytes are re-hashed, selected files are staged before mutation, and targets are replaced atomically without following symlink components. |
+| Two processes mutate one store | Backup, restore, scrub, retention, and replication take bounded per-store cross-process leases in deterministic order. |
+| A replica is incomplete | Replication repairs missing manifests and blobs, then publishes the destination index only after revalidation. |
+| Integrity work must stay bounded | Sampled scrub uses a coprime stride with guaranteed termination; periodic full scrub covers every referenced blob. |
+| A process dies during state save | State is flushed and fsynced to a same-directory temporary file before atomic replacement. |
+| A second daemon starts | A private per-user IPC endpoint identifies a live singleton and refuses to unlink an endpoint it does not own. |
 
-Public-repo contract:
-- Git must contain everything required to rebuild the app from a clean clone except local secrets and machine-specific runtime state.
-- Pre-commit, pre-push, and CI all run a repository hygiene gate that blocks tracked local state, machine-specific absolute paths, restore-breaking omissions, and oversized tracked files.
-- `make clean-local` removes disposable local caches and reports (`.npm-cache`, `.reports`, `target`, and stray `.DS_Store` files) so they never linger between pushes.
-- To restore after local disk loss, clone the repo, install toolchains, run `make frontend-install`, then `make build` or `make run`.
+The production path is the versioned engine in `crates/core/src/backup/versioned`. The original scan-plan-copy engine remains only as an explicit legacy compatibility surface.
 
-## Usage
+## Architecture
 
-### Desktop app
-1. Start the app with `make run`.
-2. Choose a backup destination (external drive/partition path).
-3. Add one or more folders to back up.
-4. Set “Backups to keep” per folder (default 5).
-5. Use the Running toggle to pause or resume background writes (safe mode).
-6. Adjust the schedule via the interval (minutes) control.
-7. Use Restore version to pick a folder + version and restore to a new directory or in place.
-
-### CLI
-- Status snapshot: `cargo run -p cli -- status`
-- Guided setup: `cargo run -p cli -- init`
-- Generate encryption key: `cargo run -p cli -- keygen`
-- One off backup: `cargo run -p cli -- run-once` with `--dry-run`
-- Verify integrity: `cargo run -p cli -- verify`
-- Diagnostics: `cargo run -p cli -- doctor`
-- Install service on login: `cargo run -p cli -- install-service --enable`
-
-## Configuration
-
-Config file path:
-- `~/.config/backup_sync/config.toml`
-
-Environment layering for startup config:
-- `BACKUP_SYNC_CONFIG` overrides the config file path.
-- `BACKUP_SYNC_INTERVAL_SECONDS` overrides `interval_seconds`.
-- `BACKUP_SYNC_SAFE_MODE` overrides `safe_mode` (`true/false/1/0/yes/no/on/off`).
-
-State file path:
-- `~/.config/backup_sync/state.json`
-
-UI tuning knobs live in `crates/gui/frontend/src/config/uiTuning.ts`.
-Backend config defaults and guardrails are centralized in `crates/core/src/config/registry.rs`.
-Security notes:
-- Run the daemon as your user account and avoid elevated privileges unless required by your platform.
-
-Example config:
-```toml
-backup_root = "/Users/me/Backups"
-interval_seconds = 1800
-max_backups_per_file = 5
-ignore_patterns = ["**/node_modules/**", "**/target/**", "**/.DS_Store"]
-safe_mode = false
-
-[encryption]
-enabled = false
-# key_id = "..." # generated by `cargo run -p cli -- keygen`
-# key_path = "..." # optional override; defaults to ~/.config/backup_sync/key_v1.bin on most platforms
-# blob_chunk_bytes = 65536
-
-[compression]
-enabled = false
-# blob_chunk_bytes = 65536
-# zstd_level = 3
-
-[hashing]
-buffer_bytes = 65536
-timeout_seconds = 30
-
-[execution]
-copy_buffer_bytes = 65536
-copy_timeout_seconds = 300
-free_space_safety_buffer_bytes = 10485760
-recent_activity_cap = 50
-retry_delays_ms = [100, 200, 400, 800]
-retry_jitter_pct = 0.2
-
-[planning]
-hash_check_interval = 5
-max_plan_items = 20000
-scan_timeout_seconds = 300
-scan_capacity_multiplier = 16
-
-[runtime]
-prune_interval_cycles = 10
-force_full_scan_interval_cycles = 24
-verify_interval_seconds = 86400
-watcher_debounce_seconds = 2
-ipc_timeout_seconds = 5
-service_command_timeout_seconds = 15
-service_command_retry_delay_ms = 300
-service_command_poll_interval_ms = 50
-gui_start_hidden = false
-tray_tooltip_refresh_seconds = 10
-log_tail_lines = 200
-simulation_sample_limit = 10
-replication_enabled = true
-replication_mirror_manifests = true
-replication_max_manifest_deletes_per_cycle = 500
-
-[[destinations]]
-id = "primary"
-path = "/Users/me/Backups"
-label = "Primary"
-replicate_to = ["mirror"]
-
-[[destinations]]
-id = "mirror"
-path = "/Volumes/BackupMirror/Backups"
-label = "Mirror"
-
-[[watched]]
-path = "/Users/me/Projects"
-kind = "Directory"
-enabled = true
-destination_id = "primary"
-max_backups_per_file = 10
+```mermaid
+flowchart LR
+  UI["React UI"] --> GUI["Tauri command adapter"]
+  CLI["CLI"] --> CORE["backup_core"]
+  GUI --> CORE
+  DAEMON["Daemon + private IPC"] --> CORE
+  CORE --> STORE["Manifests + immutable blobs"]
+  CORE --> OS["Filesystem, state, snapshots, services"]
 ```
 
-## Performance
-- Performance baselines are recorded by `scripts/perf/record_baseline.sh` into `docs/perf-baseline.json`.
-- Regression checks run via `scripts/perf/check_baseline.sh` and are enforced in CI.
-- Hot paths are exercised in `crates/core/src/bin/perf_guard.rs`.
-- IPC critical-flow load checks run via `make perf-ipc-load` and are included in `make perf-check`.
-- Resource tuning guidance is documented in [`docs/performance-tuning.md`](docs/performance-tuning.md).
+`backup_core` owns the domain rules and local storage infrastructure. The daemon, CLI, and GUI orchestrate those APIs; the frontend talks only through typed Tauri commands. Automated boundary checks prevent reverse dependencies. Read the [architecture narrative](docs/architecture.md), [module contract](docs/module-boundaries.md), and [ADRs](docs/adr/README.md).
 
-## Testing
-- Backend unit and integration tests: `cargo test -p backup_core -p daemon -p cli`
-- Frontend unit tests: `npm --prefix crates/gui/frontend test`
-- End to end smoke test: `cargo test -p backup_core --test e2e_smoke`
-- Format and lint: `cargo fmt --all`, `cargo clippy --all-targets --all-features -- -D warnings`, `npm --prefix crates/gui/frontend run lint`
-- Operability policy enforcement: `make operability-check`
-- Lockfile hygiene check: `make lockfile-check`
-- Cargo deny policy check: `make deny`
-- Security gate bundle: `make security-check`
-- Secret scanning (working tree + full history): `make secrets`
-- Perf guard: `make perf-check`
-- Full quality gate run: `make ci` (format, lint, typecheck, tests with coverage, perf guard, security audits)
+### Source map
+
+| Path | Responsibility |
+|---|---|
+| `crates/core` | Config, scanning, versioned storage, restore, retention, scrub, replication, state, and platform adapters |
+| `crates/daemon` | Scheduling, watcher coordination, singleton IPC, service lifecycle, and graceful shutdown |
+| `crates/cli` | Setup, status, backup execution/simulation, verification, service control, and diagnostics |
+| `crates/gui` | Tauri commands, tray behavior, desktop lifecycle, and native dialogs |
+| `crates/gui/frontend` | Shared React presentation, request state, error boundaries, typed IPC service wrappers, and the isolated browser runtime |
+| `docs` | Storage/security contracts, decisions, runbooks, risks, and release policy |
+
+## Storage and recovery model
+
+1. The engine scans an enabled source and builds a candidate manifest.
+2. New plaintext content is encoded once under `.backup_sync/v1/blobs/sha256/<prefix>/<hash>`.
+3. Blob bytes are persisted and verified before the immutable version manifest is committed.
+4. The source index is updated last; retention removes old manifests before garbage collection.
+5. Replication validates the source, repairs destination content, and publishes its index last.
+6. Restore validates metadata and decoded content before replacing the requested target.
+
+Optional zstd compression and chunked XChaCha20-Poly1305 encryption affect blob bytes, not manifest paths or metadata. Losing the encryption key makes encrypted blobs unrecoverable. See the [storage contract](docs/storage.md) and [threat model](docs/threat-model.md).
+
+<p align="center">
+  <img src="assets/readme/backup-sync-restore.png" alt="Backup Sync restore workflow with version, scope, and destination controls">
+</p>
+
+## Quick start (macOS and Linux)
+
+Prerequisites: Rust 1.93.0 from `rust-toolchain.toml`, Node 22.22.0 from `.nvmrc`, npm, Python 3, and the [native prerequisites for Tauri 2](https://v2.tauri.app/start/prerequisites/).
+
+```bash
+git clone https://github.com/hydroLB/backup-sync.git
+cd backup-sync
+make frontend-install
+./start
+```
+
+`./start` installs locked frontend dependencies, builds and starts the daemon when configuration is available, then launches the desktop development app. Tauri and Vite use fixed port `5173`; custom `BACKUP_SYNC_DEV_PORT` or `VITE_PORT` values are rejected when they disagree.
+
+Windows is compile-checked in CI, but its native launcher, named-pipe behavior, service integration, and clean-machine runtime are not yet validated. Windows users should treat the repository as buildable source—not a supported first-run path—until that roadmap item closes.
+
+For a non-interactive build:
+
+```bash
+make build
+```
+
+The build produces debug Rust binaries under `target/debug` and the frontend bundle under `crates/gui/frontend/dist`; it does not create an installer. See [Getting started](docs/getting-started.md) for platform prerequisites and first-run steps.
+
+## CLI essentials
+
+```bash
+cargo run -p cli -- init
+cargo run -p cli -- status
+cargo run -p cli -- run-once --dry-run
+cargo run -p cli -- run-once
+cargo run -p cli -- verify
+cargo run -p cli -- doctor
+cargo run -p cli -- install-service --enable
+```
+
+Use `keygen` before enabling encryption. A dry run is the safest way to review a new source/destination mapping.
+
+## Configuration and local files
+
+Backup Sync uses the operating system's native config directory:
+
+| Platform | Config and state directory |
+|---|---|
+| macOS | `~/Library/Application Support/backup_sync/` |
+| Linux | `${XDG_CONFIG_HOME:-~/.config}/backup_sync/` |
+| Windows | `%APPDATA%\backup_sync\` |
+
+`config.toml`, `state.json`, and the default encryption key live in that directory. Logs and the default backup root use the OS-native data directory. `BACKUP_SYNC_CONFIG` selects an explicit config file for both reads and writes; the file must already exist when selected. `BACKUP_SYNC_INTERVAL_SECONDS` and `BACKUP_SYNC_SAFE_MODE` provide validated runtime overrides.
+
+The desktop UI keeps the common schedule at 30 minutes and normalizes that value when it saves. Advanced scheduling, replication, compression, encryption, scrub, and snapshot settings remain file-driven. See the complete [configuration reference](docs/configuration.md).
+
+## Desktop lifecycle
+
+- Closing the window hides it; it does not trigger a backup or mutate configuration.
+- Quitting the GUI closes only the GUI. An installed background service continues running.
+- The Running toggle maps to safe mode and pauses or resumes background writes.
+- Restore searches are explicit and stale requests cannot replace newer folder/version selections.
+
+## Quality gates
+
+`make check` is the canonical local and CI contract. It runs Rust/frontend formatting and linting, Rustdoc, architecture and operability policies, TypeScript checks, repository/docs hygiene, desktop-tool tests, lockfile checks, performance guards, backend tests, builds, Rust/frontend coverage, secret scans, dependency policy, and vulnerability audits. `make ci` is an alias.
+
+Useful focused commands:
+
+```bash
+make test
+make frontend-test
+make coverage
+make perf-check
+make security-check
+make docs-check
+```
+
+The current local coverage measurement is **63.23% Rust lines, 60.70% functions, and 62.97% regions**. The frontend suite currently reports **67 tests**. These are measurements, not claims of exhaustive coverage; enforced thresholds are defined by the build scripts.
+
+Hosted CI runs Linux quality gates plus macOS and Windows workspace compilation. Those jobs prove conditional compilation, not packaging, native service runtime behavior, or clean-machine recovery.
+
+Dependency policy currently reports zero known vulnerabilities. `cargo deny` also surfaces 19 informational warnings from the transitive Tauri/Linux GTK3 and HTML stack; they are warnings, not an advisory ignore list. Their status and other residual risks are tracked in the [risk register](docs/risk-register.md).
 
 ## Troubleshooting
-- If the UI cannot connect, ensure the daemon is running and the IPC socket is reachable.
-- If backups are skipped, verify watched paths exist and are outside the destination.
-- If verification reports issues, run `backup-sync verify` and review recent logs.
-- For detailed diagnostics, export a doctor report from the UI or CLI.
-- If the dev server port conflicts with another program, set `BACKUP_SYNC_DEV_PORT` or let Vite pick the repo-specific default in `crates/gui/frontend/vite.config.ts`.
-- Incident playbooks:
-  - destination offline: `docs/runbooks/destination-offline.md`
-  - verify failure: `docs/runbooks/verify-failure.md`
-  - corruption suspicion: `docs/runbooks/corruption-suspicion.md`
-  - stuck daemon: `docs/runbooks/stuck-daemon.md`
 
-## Release notes
-- Changes are tracked in `CHANGELOG.md`.
-- Versioning and tagging guidance lives in [`docs/release.md`](docs/release.md).
+- Invalid config: launch the shell, fix the path/value shown, then use Retry; `cargo run -p cli -- doctor` provides a redacted diagnostic report.
+- Daemon unavailable: check `cargo run -p cli -- status` and the [stuck daemon runbook](docs/runbooks/stuck-daemon.md).
+- Destination offline: keep safe mode enabled until the drive is mounted and writable; follow the [destination runbook](docs/runbooks/destination-offline.md).
+- Verify failure: do not delete evidence or overwrite the affected store; follow the [verification](docs/runbooks/verify-failure.md) and [corruption](docs/runbooks/corruption-suspicion.md) runbooks.
+- Port 5173 busy: stop the conflicting process. The development port is intentionally fixed.
 
-## Notable code paths
-This system emphasizes bounded IO, explicit config validation, and performance guardrails that stay visible in code review.
-- `crates/core/src/backup/versioned/store.rs` implements the SHA-256 blob store, manifests, retention, and garbage collection.
-- `crates/core/src/backup/versioned/restore.rs` reconstructs versions with atomic writes and optional in-place cleanup.
-- `crates/core/src/hashing.rs` centralizes SHA-256 hashing and hex formatting used across subsystems.
-- `crates/core/src/config/registry.rs` centralizes defaults and validation limits for config knobs.
-- `crates/core/src/bin/perf_guard.rs` captures and validates performance baselines.
-- `crates/daemon/src/runtime/loop.rs` coordinates lifecycle, IPC, and graceful shutdown.
-- `crates/gui/frontend/src/config/uiTuning.ts` consolidates UI tuning knobs.
-- `crates/gui/frontend/src/components/minimal/MinimalMain.tsx` is the spec-minimal main screen UI.
+## Tradeoffs and open work
+
+- Manifests remain plaintext for inspectable recovery and stable deduplication; file paths and metadata are not confidential.
+- The state file is atomically replaced, but cross-process read-modify-write updates are not transactional.
+- Blocking filesystem tasks leave the async runtime, but in-flight `spawn_blocking` work is not cooperatively cancellable.
+- Windows named-pipe ACLs and platform runtime behavior still need clean-machine verification.
+- Packaged and signed artifacts, native installers, and full platform recovery tests are not available yet.
+- The legacy engine remains until consumers migrate under the documented deprecation policy.
+
+See the [roadmap](docs/roadmap.md), [risk register](docs/risk-register.md), and [release process](docs/release.md) for the honest pre-1.0 boundary.
+
+## Documentation
+
+| Topic | Start here |
+|---|---|
+| Setup and configuration | [Getting started](docs/getting-started.md), [configuration](docs/configuration.md) |
+| Design | [Architecture](docs/architecture.md), [storage](docs/storage.md), [ADRs](docs/adr/README.md) |
+| Interactive showcase | [Web edition](docs/web-edition.md) |
+| Operations | [Operability](docs/operability.md), [runbooks](docs/runbooks/README.md), [performance](docs/performance-tuning.md) |
+| Security and delivery | [Security policy](SECURITY.md), [threat model](docs/threat-model.md), [branch protection](docs/branch-protection.md) |
+| Project status | [Changelog](CHANGELOG.md), [roadmap](docs/roadmap.md), [risk register](docs/risk-register.md) |
+
+## Contributing and license
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Backup Sync is available under the [MIT License](LICENSE).

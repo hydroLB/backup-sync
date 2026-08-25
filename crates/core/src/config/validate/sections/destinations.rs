@@ -12,37 +12,13 @@ pub(crate) struct DestinationIndex<'a> {
 }
 
 impl<'a> DestinationIndex<'a> {
-    /// Summary: Resolves a destination by id.
-    ///
-    /// Inputs: the destination id string.
-    ///
-    /// Outputs: the destination path when present.
-    ///
-    /// Side effects: None.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: watched path validation and overlap checks.
-    ///
-    /// Why this exists: keep destination id lookup centralized and type safe.
+    /// Keep destination id lookup centralized and type safe.
     pub(crate) fn get(&self, id: &str) -> Option<&'a Path> {
         self.by_id.get(id).copied()
     }
 }
 
-/// Summary: Validates destinations and builds a lookup index by destination id.
-///
-/// Inputs: the config and label prefix.
-///
-/// Outputs: a `DestinationIndex` for downstream watched-path checks.
-///
-/// Side effects: May create destination directories on disk during validation.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: destination selection in planning and runtime execution.
-///
-/// Why this exists: ensure destination id mapping is sane and writable before running a cycle.
+/// Ensure destination id mapping is sane and writable before running a cycle.
 pub(crate) fn validate_and_index<'cfg>(
     cfg: &'cfg Config,
     label: &str,
@@ -61,19 +37,7 @@ pub(crate) fn validate_and_index<'cfg>(
     Ok(DestinationIndex { by_id })
 }
 
-/// Summary: Validates a single destination entry.
-///
-/// Inputs: the config, destination, label prefix, and an id set.
-///
-/// Outputs: `Ok(())` when the destination passes structural and filesystem checks.
-///
-/// Side effects: May create the destination directory on disk.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: `validate_and_index`.
-///
-/// Why this exists: ensure each destination is usable before any cycle starts.
+/// Ensure each destination is usable before any cycle starts.
 fn validate_one_destination(
     cfg: &Config,
     d: &Destination,
@@ -145,19 +109,7 @@ fn validate_one_destination(
     Ok(())
 }
 
-/// Summary: Validate destination replication topology (replicate_to ids).
-///
-/// Inputs: loaded config, label prefix, and a destination id index.
-///
-/// Outputs: `Ok(())` when all replicate_to references are valid.
-///
-/// Side effects: None.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: versioned store replication and 3-2-1 workflows.
-///
-/// Why this exists: replication references must be validated early to avoid silent no-op replication.
+/// Replication references must be validated early to avoid silent no-op replication.
 fn validate_replication_targets(
     cfg: &Config,
     label: &str,

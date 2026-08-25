@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [features]
-default = []
+default = ["single-instance"]
 single-instance = ["dep:tauri-plugin-single-instance"]
 
 [dependencies]

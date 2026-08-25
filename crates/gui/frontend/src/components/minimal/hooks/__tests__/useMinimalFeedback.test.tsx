@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import { render, screen, act } from '@testing-library/react';
 import { useMinimalFeedback } from '../useMinimalFeedback';
 import { SavePulseScope } from '../useMinimalFeedback';
@@ -9,27 +9,13 @@ type Controller = {
   emit: (msg: string, kind?: EventKind, scope?: SavePulseScope) => void;
 };
 
-/**
- * Summary: Harness component to render feedback hook state for tests.
- *
- * Inputs: `onEvent` callback and an imperative controller ref.
- *
- * Outputs: Renders "Saved" when the badge is visible.
- *
- * Side effects: Exposes the hook `emitEvent` method via a ref.
- *
- * Error handling: None.
- *
- * Ties to other methods: Tests `useMinimalFeedback` behavior in isolation.
- *
- * Why this exists: Keep badge and toast logic testable without relying on full screen renders.
- */
+/** Keep badge and toast logic testable without relying on full screen renders. */
 function Harness({
   onEvent,
   controllerRef,
 }: {
   onEvent: (msg: string, kind?: EventKind) => void;
-  controllerRef: React.MutableRefObject<Controller | null>;
+  controllerRef: MutableRefObject<Controller | null>;
 }) {
   const { emitEvent, inline, showSavedBadge, savedBadgeNonce } = useMinimalFeedback({ onEvent });
   const emitRef = useRef(emitEvent);

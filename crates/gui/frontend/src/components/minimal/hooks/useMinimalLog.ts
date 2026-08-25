@@ -16,41 +16,13 @@ type MinimalLogState = {
   refreshLog: () => Promise<void>;
 };
 
-/**
- * Summary: Manage the minimal log tail state and refresh behavior.
- *
- * Inputs: Event handler for errors and a shared busy setter for UI disabling.
- *
- * Outputs: `showLog` state, current `logTail`, a show setter, and refresh handler.
- *
- * Side effects: Reads the log tail via IPC-backed services.
- *
- * Error handling: Emits user-visible errors via `onEvent`.
- *
- * Ties to other methods: Used by `MinimalMain` and `LogCard` to display and refresh logs.
- *
- * Why this exists: Keep log concerns isolated so the main screen focuses on orchestration.
- */
+/** Keep log concerns isolated so the main screen focuses on orchestration. */
 export function useMinimalLog({ onEvent, setBusy }: Params): MinimalLogState {
   const [showLog, setShowLog] = useState(false);
   const [logTail, setLogTail] = useState<string>('');
   const [logLoading, setLogLoading] = useState(false);
 
-  /**
-   * Summary: Refresh the log tail from the backend.
-   *
-   * Inputs: None.
-   *
-   * Outputs: None.
-   *
-   * Side effects: Performs IPC calls and updates local state.
-   *
-   * Error handling: Emits a user-visible error when the log cannot be read.
-   *
-   * Ties to other methods: Used by the `showLog` effect and the LogCard refresh button.
-   *
-   * Why this exists: Centralize log tail retrieval and keep busy state consistent.
-   */
+  /** Centralize log tail retrieval and keep busy state consistent. */
   const refreshLog = useCallback(async () => {
     try {
       setBusy(true);

@@ -1,50 +1,49 @@
 # Release Process
 
-Last updated: 2026-02-20
+Last updated: 2026-08-23
 
-This document defines the release contract for Backup Sync: how versions are chosen, how tags are validated, and how changelog/release notes are produced consistently.
+No Backup Sync release tags exist yet. The current workflow validates version metadata and publishes GitHub release notes; it does not build, sign, notarize, checksum, or attach application binaries.
 
-## Release policy
-1. Versioning follows SemVer: `MAJOR.MINOR.PATCH`.
-2. Release tags must match `vMAJOR.MINOR.PATCH` (for example `v1.4.2`).
-3. Pre-release tags are allowed only as `vMAJOR.MINOR.PATCH-rc.N` (for example `v1.5.0-rc.1`).
-4. Release tags must be annotated and signed.
-5. Releases are cut from `main` after required CI checks are green.
+## Policy
 
-## SemVer decision table
-- MAJOR: incompatible changes to public contracts (`docs/public-api.md`, IPC contract, CLI contract, config contract).
-- MINOR: backwards-compatible features, new optional knobs, additive API surface.
-- PATCH: bug fixes, internal refactors, and non-breaking operational improvements.
+1. Versions follow SemVer and tags use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.N`.
+2. Tags must be annotated, point to history reachable from `main`, and have a matching dated changelog section.
+3. Releases are cut only after required checks pass.
+4. Signed tags are a maintainer requirement, but the hosted workflow currently verifies only that a tag is annotated.
+5. Until artifact jobs and clean-machine tests exist, every release is source/metadata-only.
 
-## Changelog and release notes automation
-- `CHANGELOG.md` is the canonical human-curated release history.
-- GitHub Release Drafter (`.github/workflows/release-drafter.yml`) continuously prepares draft release notes from merged PRs.
-- GitHub Release workflow (`.github/workflows/release.yml`) runs on SemVer tags, validates policy, then publishes a GitHub Release with generated release notes.
-- Auto-generated release note categories are configured in `.github/release.yml`.
-- Manual override template for release notes lives in `docs/templates/release-notes.md`.
+## Current automation
 
-## Local release readiness checks
-Run before creating a tag:
-1. `make check`
-2. `./scripts/release/validate_changelog_for_release.sh X.Y.Z CHANGELOG.md`
-3. `./scripts/release/validate_semver_tag.sh vX.Y.Z`
+- Release Drafter prepares categorized notes from merged pull requests.
+- The tag workflow validates tag syntax, ancestry, changelog content, and its least-privilege permissions.
+- Only the publish job receives `contents: write`; validation remains read-only.
+- The publish job creates GitHub release metadata with generated notes.
 
-## Release steps (maintainer runbook)
-1. Confirm `main` is green and branch protection checks passed.
-2. Finalize `CHANGELOG.md` with a dated `## [X.Y.Z] - YYYY-MM-DD` section.
-3. Run local release checks listed above.
-4. Commit the changelog update.
-5. Create a signed tag:
-   - `git tag -s vX.Y.Z -m "Backup Sync vX.Y.Z"`
-6. Push commit and tag:
-   - `git push origin main`
-   - `git push origin vX.Y.Z`
-7. Verify the `Release` workflow completes and publishes notes.
+## Local readiness
 
-## Rollback/correction policy
-- If a tag is invalid or release automation fails, do not retag a different commit with the same tag.
-- Create a follow-up patch release (`vX.Y.(Z+1)`) with corrective notes in `CHANGELOG.md`.
-- If an emergency unpublish is needed, document the reason in the next changelog entry.
+```bash
+make check
+./scripts/release/validate_release_ref.sh HEAD origin/main
+./scripts/release/validate_changelog_for_release.sh X.Y.Z CHANGELOG.md
+./scripts/release/validate_semver_tag.sh vX.Y.Z
+```
 
-## Public contract deprecation policy
-Deprecation rules for API/CLI/IPC/config contracts are defined in [`docs/deprecation-policy.md`](deprecation-policy.md). MAJOR release changes must reference deprecations that were announced before removal.
+## Maintainer steps
+
+1. Confirm `main` and all required checks are green.
+2. Move relevant Unreleased entries into `## [X.Y.Z] - YYYY-MM-DD`.
+3. Run the local readiness commands.
+4. Commit the changelog.
+5. Create a signed annotated tag: `git tag -s vX.Y.Z -m "Backup Sync vX.Y.Z"`.
+6. Push `main`, then push the tag.
+7. Verify the workflow publishes notes and clearly labels the release as source-only.
+
+Do not imply that a `0.1.0` changelog baseline is released until the corresponding tag and GitHub release exist.
+
+## Before binary distribution
+
+The release contract must expand to include reproducible Tauri/CLI/daemon artifacts, checksums/provenance, platform signing/notarization, and clean-machine install → backup → verify → restore → uninstall tests. Those items remain roadmap work.
+
+## Corrections
+
+Do not move an existing tag to a different commit. Publish a follow-up patch version and document the correction. Public-contract deprecation rules are in [Deprecation policy](deprecation-policy.md).

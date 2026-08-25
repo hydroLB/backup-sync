@@ -4,19 +4,7 @@ use backup_core::{
 };
 use chrono::Utc;
 
-/// Summary: Verifies backups by rehashing the most recent copies.
-///
-/// Inputs: none.
-///
-/// Outputs: `Ok(())` when verification completes without issues.
-///
-/// Side effects: Reads config/state, hashes backup files, and writes updated state.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI verification command and state persistence.
-///
-/// Why this exists: provide a manual integrity check from the CLI.
+/// Provide a manual integrity check from the CLI.
 pub async fn verify_backups() -> Result<()> {
     let cfg = load_validated_config().context("cli::verify_backups failed to load config")?;
     let state_path =

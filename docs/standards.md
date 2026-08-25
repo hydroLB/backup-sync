@@ -14,9 +14,13 @@ This project follows official language and ecosystem standards and applies them 
 - TSDoc conventions for function and method documentation
 
 ## Documentation format
-- Every function or method uses the same doc comment headings in this order: Summary, Inputs, Outputs, Side effects, Error handling, Ties to other methods, Why this exists.
-- Each heading is a single sentence or short clause describing the method in that section.
-- Comments are ASCII only and avoid em dashes.
+- Public APIs document their contract, important failure modes, and any non-obvious side effects.
+- Internal comments explain invariants, safety boundaries, tradeoffs, or decisions that code alone cannot make clear.
+- Do not narrate signatures, repeat method names, or add template headings to self-explanatory functions and tests.
+- Test names should describe the protected behavior; comments are reserved for unusual fixture constraints or failure scenarios.
+- The repository hygiene gate rejects legacy `Summary`/`Inputs`/`Outputs` comment templates.
+- Documentation links and anchors must pass `make docs-check`.
+- Comments are ASCII unless a user-facing string or external contract requires otherwise.
 
 ## Error handling
 - Fallible operations return explicit errors with method names and context.

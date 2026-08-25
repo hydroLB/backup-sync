@@ -2,13 +2,17 @@ use super::model::{
     Manifest, ManifestEntry, ManifestEntryKind, ReadFailure, ReadFailurePhase, VersionIndex,
     VersionInfo,
 };
+use super::operation_lock::{acquire_store_lease, acquire_store_leases};
+use super::validation::validate_version_index;
 use crate::config::model::{Config, Destination, WatchedKind, WatchedPath};
 use crate::encryption::blobs::BlobCodec;
 use crate::fs::snapshots::prepare_source_view;
 use crate::hashing;
+use crate::io::BlockingIoPolicy;
 use crate::logging::redact_path;
 use crate::state::models::SafetyWarning;
 use anyhow::{Context, Result};
+use fs2::free_space;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -46,6 +50,32 @@ pub struct BackupCycleResult {
     pub safety_warnings: Vec<SafetyWarning>,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct BlobWritePassResult {
+    blobs_written: usize,
+    bytes_written: u64,
+    had_read_failures: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FolderStorePaths<'a> {
+    source_root: &'a Path,
+    manifests_root: &'a Path,
+    destination_root: &'a Path,
+}
+
+#[derive(Clone, Copy)]
+struct BlobWriteContext<'a> {
+    cfg: &'a Config,
+    watched: &'a WatchedPath,
+    scan_root: &'a Path,
+    prev: Option<&'a Manifest>,
+    blobs_root: &'a Path,
+    blob_codec: &'a BlobCodec,
+    retry_delays: &'a [Duration],
+    destination_root: &'a Path,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SimulationSummary {
     pub watched: usize,
@@ -64,34 +94,7 @@ pub struct SimulationSummary {
 pub(crate) const STORE_DIR: &str = ".backup_sync";
 pub(crate) const STORE_SCHEMA_VERSION: u32 = 1;
 
-/**
- * Summary: Best-effort directory fsync helper for crash-consistent commits.
- *
- * Inputs: `path` directory path to sync.
- *
- * Outputs: `Ok(())` when the directory metadata is durably flushed.
- *
- * Side effects: Opens a directory handle and invokes `sync_all` on it.
- *
- * Error handling: On Unix, returns contextual errors; on non-Unix, it is a no-op.
- *
- * Ties to other methods: Used by `create_dir_all_durable`, `write_json_atomic_durable`, and `write_blob_durable`.
- *
- * Why this exists: Atomic rename is not durable across power loss without syncing the parent directory.
- */
-/// Summary: sync_dir orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/// Best-effort directory fsync used to make manifest/blob commits power-loss durable on Unix.
 #[cfg(target_family = "unix")]
 fn sync_dir(path: &Path) -> Result<()> {
     let dir = fs::File::open(path)
@@ -101,67 +104,13 @@ fn sync_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/**
- * Summary: Best-effort directory fsync helper for crash-consistent commits.
- *
- * Inputs: `path` directory path to sync.
- *
- * Outputs: `Ok(())` always.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `create_dir_all_durable`, `write_json_atomic_durable`, and `write_blob_durable`.
- *
- * Why this exists: Some platforms do not support opening directories with `std::fs::File` reliably.
- */
-/// Summary: sync_dir orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/// Non-Unix fallback: directory fsync is treated as a no-op.
 #[cfg(not(target_family = "unix"))]
 fn sync_dir(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/**
- * Summary: Create a directory tree and fsync its parent directories for durability.
- *
- * Inputs: `path` directory to create; `durability_root` root directory to stop syncing at.
- *
- * Outputs: `Ok(())` when the directory exists and parent entries are durably flushed.
- *
- * Side effects: Creates directories and performs directory fsync operations.
- *
- * Error handling: Returns contextual errors when create or sync steps fail.
- *
- * Ties to other methods: Used to prepare `blobs_root` and `manifests_root` before durable writes.
- *
- * Why this exists: Directory creation and atomic renames are not crash-safe without syncing parents.
- */
-/// Summary: create_dir_all_durable orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/// Create a directory tree and fsync ancestors back to the durability root.
 fn create_dir_all_durable(path: &Path, durability_root: &Path) -> Result<()> {
     if path != durability_root && !path.starts_with(durability_root) {
         anyhow::bail!(
@@ -201,21 +150,7 @@ fn create_dir_all_durable(path: &Path, durability_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/**
- * Summary: Retry helper that runs an operation with backoff and optional overall timeout.
- *
- * Inputs: `label` used for error context, `timeout_seconds` as an overall time bound, `retry_delays`
- *
- * Outputs: On success, returns `(value, attempts_used)`. On failure, returns the last error.
- *
- * Side effects: Sleeps between attempts when retries are configured.
- *
- * Error handling: Preserves the last error and adds context including attempt count and timeout status.
- *
- * Ties to other methods: Used by file hashing, blob writing, and metadata reads for glitch resilience.
- *
- * Why this exists: Make transient IO failures first-class without failing an entire backup cycle.
- */
+/** Make transient IO failures first-class without failing an entire backup cycle. */
 fn retry_with_backoff<T, F>(
     label: &str,
     timeout_seconds: u64,
@@ -252,25 +187,49 @@ where
         .with_context(|| format!("{label} failed after {max_attempts} attempts"))
 }
 
-/// Summary: run_backup_cycle orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/// Run the production versioned backup cycle across all enabled watched paths.
 pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
     let destinations_by_id: HashMap<&str, &Destination> = cfg
         .destinations
         .iter()
         .map(|d| (d.id.as_str(), d))
         .collect();
+
+    // Resolve every destination before taking any lease so a configuration error
+    // cannot leave a partially started cycle. The helper normalizes, deduplicates,
+    // and sorts paths before locking them.
+    let mut enabled_destinations = Vec::new();
+    for watched in cfg.watched.iter().filter(|w| w.enabled) {
+        let destination = destinations_by_id
+            .get(watched.destination_id.as_str())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "versioned::run_backup_cycle missing destination id {} for watched path {}",
+                    watched.destination_id,
+                    redact_path(&watched.path)
+                )
+            })?;
+        enabled_destinations.push(*destination);
+    }
+
+    if let Some(min_free_space_bytes) = cfg.min_free_space_bytes {
+        let mut checked_destinations = HashSet::new();
+        for destination in &enabled_destinations {
+            let unique_path =
+                fs::canonicalize(&destination.path).unwrap_or_else(|_| destination.path.clone());
+            if checked_destinations.insert(unique_path) {
+                ensure_destination_free_space(&destination.path, min_free_space_bytes)?;
+            }
+        }
+    }
+    let lock_policy = BlockingIoPolicy::from_config(cfg);
+    let _operation_leases = acquire_store_leases(
+        enabled_destinations
+            .iter()
+            .map(|destination| destination.path.as_path()),
+        &lock_policy,
+    )
+    .context("versioned::run_backup_cycle could not serialize destination stores")?;
 
     let blob_codec = BlobCodec::from_config(cfg)
         .context("versioned::run_backup_cycle failed to initialize blob codec")?;
@@ -309,38 +268,35 @@ pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
     Ok(cycle)
 }
 
-/**
- * Summary: Removes a kept safety version (pending or pinned baseline) for a watched source.
- *
- * Inputs: Destination root containing the versioned store and the watched source path.
- *
- * Outputs: `Ok(Some(version_id))` when a kept version was removed, `Ok(None)` when none existed.
- *
- * Side effects: Updates `index.json`, deletes the pinned manifest file, and runs blob GC.
- *
- * Error handling: Returns contextual errors for index IO/serialization and manifest deletion failures.
- *
- * Ties to other methods: Clears pins set by `maybe_pin_large_deletion_baseline` and relies on `gc_unreferenced_blobs`.
- *
- * Why this exists: Let users explicitly drop the extra baseline when a shrink was expected.
- */
-/// Summary: remove_kept_safety_version orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+fn ensure_destination_free_space(destination_root: &Path, minimum_bytes: u64) -> Result<()> {
+    let store_id = hashing::sha256_hex(destination_root.to_string_lossy().as_bytes());
+    let store_id = store_id.get(..12).unwrap_or(store_id.as_str());
+    let free_bytes = free_space(destination_root).with_context(|| {
+        format!(
+            "versioned::run_backup_cycle failed to query free space for destination store {}",
+            store_id
+        )
+    })?;
+    if free_bytes < minimum_bytes {
+        anyhow::bail!(
+            "versioned::run_backup_cycle destination store {} has {} free bytes, below configured minimum {}",
+            store_id,
+            free_bytes,
+            minimum_bytes
+        );
+    }
+    Ok(())
+}
+
+/** Let users explicitly drop the extra baseline when a shrink was expected. */
 pub fn remove_kept_safety_version(
     destination_root: &Path,
     source_path: &Path,
 ) -> Result<Option<String>> {
+    let lock_policy = BlockingIoPolicy::bootstrap_defaults();
+    let _operation_lease = acquire_store_lease(destination_root, &lock_policy).context(
+        "versioned::remove_kept_safety_version could not serialize the destination store",
+    )?;
     let store_root = store_root(destination_root);
     let blobs_root = blobs_root(&store_root);
 
@@ -392,34 +348,7 @@ pub fn remove_kept_safety_version(
     Ok(Some(kept))
 }
 
-/**
- * Summary: Compute a stable "size" summary for a manifest for safety comparisons.
- *
- * Inputs: A manifest representing a watched file or directory state.
- *
- * Outputs: `ManifestSize` containing file count and total file bytes.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `maybe_pin_large_deletion_baseline` to detect large shrink events.
- *
- * Why this exists: Provide a deterministic, cheap metric to detect suspicious mass deletions.
- */
-/// Summary: manifest_size orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Provide a deterministic, cheap metric to detect suspicious mass deletions. */
 fn manifest_size(manifest: &Manifest) -> ManifestSize {
     let mut out = ManifestSize::default();
     for e in manifest.entries.values() {
@@ -432,34 +361,7 @@ fn manifest_size(manifest: &Manifest) -> ManifestSize {
     out
 }
 
-/**
- * Summary: Compute the maximum shrink ratio between two manifest sizes.
- *
- * Inputs: previous and next manifest size summaries.
- *
- * Outputs: Optional shrink ratio in `[0.0, 1.0]` when a baseline is available.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `maybe_pin_large_deletion_baseline`.
- *
- * Why this exists: Detect suspicious deletions using both byte and file-count heuristics.
- */
-/// Summary: shrink_ratio orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Detect suspicious deletions using both byte and file-count heuristics. */
 fn shrink_ratio(prev: ManifestSize, next: ManifestSize) -> Option<f64> {
     let bytes_ratio = if prev.file_bytes > 0 && next.file_bytes <= prev.file_bytes {
         (prev.file_bytes - next.file_bytes) as f64 / prev.file_bytes as f64
@@ -478,34 +380,7 @@ fn shrink_ratio(prev: ManifestSize, next: ManifestSize) -> Option<f64> {
     }
 }
 
-/**
- * Summary: Pin a pre-change version when a watched path shrinks dramatically.
- *
- * Inputs: Config, watched path, previous manifest, next manifest, and a mutable version index.
- *
- * Outputs: A `SafetyWarning` when pinning occurred; otherwise `None`.
- *
- * Side effects: Mutates the index to set `safety_pinned_version_id` for retention.
- *
- * Error handling: Best-effort, returns `None` when required metadata is unavailable.
- *
- * Ties to other methods: Called by `backup_one_folder` before pruning, and persisted via `write_index`.
- *
- * Why this exists: Prevent silent "bad runs" from pruning the last known-good full version.
- */
-/// Summary: maybe_pin_large_deletion_baseline orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Prevent silent "bad runs" from pruning the last known-good full version. */
 fn maybe_pin_large_deletion_baseline(
     cfg: &Config,
     watched: &WatchedPath,
@@ -633,37 +508,13 @@ fn maybe_pin_large_deletion_baseline(
     )
 }
 
-/// Summary: Simulate a versioned backup cycle without writing to the destination store.
-///
-/// Inputs: a validated config with watched paths and destinations.
-///
-/// Outputs: a `SimulationSummary` describing what would change and what would be written.
-///
-/// Side effects: Reads filesystem metadata and file contents for hashing; reads existing store manifests/blobs.
-///
-/// Error handling: Returns contextual errors for invalid config references, scan/hashing failures, and store reads.
-///
-/// Ties to other methods: Mirrors the scan and equivalence logic used by `run_backup_cycle` and `backup_one_folder`.
-///
-/// Why this exists: Provide a safe preview of changes and expected IO before running a real backup.
+/// Provide a safe preview of changes and expected IO before running a real backup.
 pub fn simulate_backup_cycle(cfg: &Config) -> Result<SimulationSummary> {
     let sample_limit = cfg.runtime.simulation_sample_limit;
     simulate_backup_cycle_with_sample_limit(cfg, sample_limit)
 }
 
-/// Summary: Simulate a versioned backup cycle with an explicit sample limit override.
-///
-/// Inputs: config and a maximum number of sample paths to return.
-///
-/// Outputs: a `SimulationSummary` describing planned changes.
-///
-/// Side effects: Same as `simulate_backup_cycle`.
-///
-/// Error handling: Same as `simulate_backup_cycle`.
-///
-/// Ties to other methods: Used by tests and callers that need a smaller sample cap.
-///
-/// Why this exists: Allow deterministic and bounded simulation output.
+/// Allow deterministic and bounded simulation output.
 pub fn simulate_backup_cycle_with_sample_limit(
     cfg: &Config,
     sample_limit: usize,
@@ -742,19 +593,146 @@ pub fn simulate_backup_cycle_with_sample_limit(
     Ok(summary)
 }
 
-/// Summary: backup_one_folder orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+fn write_missing_blobs_for_snapshot(
+    snapshot: &mut Manifest,
+    ctx: BlobWriteContext<'_>,
+) -> BlobWritePassResult {
+    let mut outcome = BlobWritePassResult::default();
+    let file_rel_paths: Vec<String> = snapshot
+        .entries
+        .values()
+        .filter(|entry| entry.kind == ManifestEntryKind::File)
+        .map(|entry| entry.rel_path.clone())
+        .collect();
+
+    for rel_path in file_rel_paths {
+        let entry = match snapshot.entries.get(&rel_path).cloned() {
+            None => continue,
+            Some(entry) => entry,
+        };
+        let Some(hash) = entry.sha256.as_deref() else {
+            outcome.had_read_failures = true;
+            snapshot.read_failures.push(ReadFailure {
+                rel_path: rel_path.clone(),
+                phase: ReadFailurePhase::BlobWrite,
+                attempts: 1,
+                message: "missing sha256 for file entry".to_string(),
+            });
+            snapshot.entries.remove(&rel_path);
+            continue;
+        };
+
+        let blob_path = blob_path(ctx.blobs_root, hash);
+        if blob_path.exists() {
+            continue;
+        }
+
+        let src_path = match ctx.watched.kind {
+            WatchedKind::File => ctx.scan_root.to_path_buf(),
+            WatchedKind::Directory => ctx.scan_root.join(Path::new(&rel_path)),
+        };
+        match write_blob(
+            &src_path,
+            &blob_path,
+            hash,
+            ctx.cfg.hashing.timeout_seconds,
+            ctx.retry_delays,
+            ctx.blob_codec,
+            ctx.destination_root,
+        ) {
+            Ok((count, bytes)) => {
+                outcome.blobs_written += count;
+                outcome.bytes_written += bytes;
+            }
+            Err(error) => {
+                outcome.had_read_failures = true;
+                snapshot.read_failures.push(ReadFailure {
+                    rel_path: rel_path.clone(),
+                    phase: ReadFailurePhase::BlobWrite,
+                    attempts: (ctx.retry_delays.len() + 1) as u32,
+                    message: format!("{error:#}"),
+                });
+                if let Some(prev_manifest) = ctx.prev {
+                    if let Some(prev_entry) = prev_manifest.entries.get(&rel_path) {
+                        snapshot
+                            .entries
+                            .insert(rel_path.clone(), prev_entry.clone());
+                    } else {
+                        snapshot.entries.remove(&rel_path);
+                    }
+                } else {
+                    snapshot.entries.remove(&rel_path);
+                }
+            }
+        }
+    }
+
+    outcome
+}
+
+fn finish_scan_without_new_version(
+    cfg: &Config,
+    watched: &WatchedPath,
+    prev: Option<&Manifest>,
+    snapshot: &Manifest,
+    index: &mut VersionIndex,
+    paths: FolderStorePaths<'_>,
+    write_outcome: BlobWritePassResult,
+) -> Result<FolderBackupResult> {
+    let mut safety_warning: Option<SafetyWarning> = None;
+    if let Some(prev_manifest) = prev {
+        let (warn, index_changed) = maybe_pin_large_deletion_baseline(
+            cfg,
+            watched,
+            prev_manifest,
+            snapshot,
+            index,
+            paths.manifests_root,
+            write_outcome.had_read_failures,
+        );
+        safety_warning = warn;
+        if index_changed {
+            write_index(paths.source_root, index, paths.destination_root)?;
+        }
+    }
+
+    write_scan_report(paths.source_root, snapshot, None, paths.destination_root)?;
+    Ok(FolderBackupResult {
+        changed: false,
+        blobs_written: write_outcome.blobs_written,
+        bytes_written: write_outcome.bytes_written,
+        safety_warning,
+        ..Default::default()
+    })
+}
+
+fn collect_prunable_versions(index: &VersionIndex, keep_versions: usize) -> Vec<VersionInfo> {
+    let mut remaining = index.versions.clone();
+    let mut pruned: Vec<VersionInfo> = Vec::new();
+    let mut protected: Vec<&str> = Vec::new();
+
+    if let Some(pinned) = index.safety_pinned_version_id.as_deref() {
+        protected.push(pinned);
+    }
+    if let Some(pending) = index.safety_pending_version_id.as_deref() {
+        if !protected.contains(&pending) {
+            protected.push(pending);
+        }
+    }
+
+    let allowed = keep_versions + protected.len();
+    while remaining.len() > allowed {
+        let remove_pos = remaining
+            .iter()
+            .position(|version| !protected.contains(&version.id.as_str()));
+        let Some(pos) = remove_pos else { break };
+        pruned.push(remaining.remove(pos));
+    }
+
+    pruned
+}
+
+/// Scan, materialize, and commit one watched source into the versioned store.
 fn backup_one_folder(
     cfg: &Config,
     watched: &WatchedPath,
@@ -764,24 +742,30 @@ fn backup_one_folder(
     let retry_delays = cfg.execution.retry_delays();
     let store_root = store_root(&desc.destination_root);
     let blobs_root = blobs_root(&store_root);
+    let source_id = hashing::sha256_hex(desc.source_path.to_string_lossy().as_bytes());
+    let source_root = sources_root(&store_root).join(&source_id);
+    let manifests_root = source_root.join("manifests");
+    let paths = FolderStorePaths {
+        source_root: &source_root,
+        manifests_root: &manifests_root,
+        destination_root: &desc.destination_root,
+    };
+
+    // Treat existing index data as untrusted before creating any per-source or blob
+    // directories. A poisoned identifier must never influence a later path operation.
+    let mut index = load_index(&source_root, &desc.source_path)?;
     create_dir_all_durable(&blobs_root, &desc.destination_root).with_context(|| {
         format!(
             "versioned::backup_one_folder failed to create durable blob directory {:?}",
             blobs_root
         )
     })?;
-
-    let source_id = hashing::sha256_hex(desc.source_path.to_string_lossy().as_bytes());
-    let source_root = sources_root(&store_root).join(&source_id);
-    let manifests_root = source_root.join("manifests");
     create_dir_all_durable(&manifests_root, &desc.destination_root).with_context(|| {
         format!(
             "versioned::backup_one_folder failed to create durable manifests directory {:?}",
             manifests_root
         )
     })?;
-
-    let mut index = load_index(&source_root, &desc.source_path)?;
     let prev = latest_manifest(&manifests_root, &index)?;
     let source_view = prepare_source_view(
         &watched.path,
@@ -796,6 +780,9 @@ fn backup_one_folder(
             "versioned backup could not obtain a snapshot view; scanning live filesystem"
         );
     }
+
+    // Stage 1: build the next manifest candidate from the source view and compare it with the
+    // last committed manifest before touching the blob store.
     let mut snapshot = scan_snapshot(cfg, watched, source_view.scan_path(), &prev, &retry_delays)?;
     snapshot.source_snapshot = source_view.snapshot().cloned();
     snapshot.source_snapshot_error = snapshot_error.clone();
@@ -807,28 +794,18 @@ fn backup_one_folder(
         Some(prev_manifest) => !manifests_equivalent(prev_manifest, &snapshot),
     };
     if !changed {
-        let mut safety_warning: Option<SafetyWarning> = None;
-        if let Some(prev_manifest) = prev.as_ref() {
-            let (warn, index_changed) = maybe_pin_large_deletion_baseline(
-                cfg,
-                watched,
-                prev_manifest,
-                &snapshot,
-                &mut index,
-                &manifests_root,
+        return finish_scan_without_new_version(
+            cfg,
+            watched,
+            prev.as_ref(),
+            &snapshot,
+            &mut index,
+            paths,
+            BlobWritePassResult {
                 had_read_failures,
-            );
-            safety_warning = warn;
-            if index_changed {
-                write_index(&source_root, &index, &desc.destination_root)?;
-            }
-        }
-        write_scan_report(&source_root, &snapshot, None, &desc.destination_root)?;
-        return Ok(FolderBackupResult {
-            changed: false,
-            safety_warning,
-            ..Default::default()
-        });
+                ..Default::default()
+            },
+        );
     }
 
     let mut version_id = chrono::Utc::now().format("%Y%m%d-%H%M%S-%f").to_string();
@@ -846,101 +823,44 @@ fn backup_one_folder(
         ..Default::default()
     };
 
-    let file_rel_paths: Vec<String> = snapshot
-        .entries
-        .values()
-        .filter(|e| e.kind == ManifestEntryKind::File)
-        .map(|e| e.rel_path.clone())
-        .collect();
-
-    for rel_path in file_rel_paths {
-        let entry = match snapshot.entries.get(&rel_path).cloned() {
-            None => continue,
-            Some(e) => e,
-        };
-        let Some(hash) = entry.sha256.as_deref() else {
-            had_read_failures = true;
-            snapshot.read_failures.push(ReadFailure {
-                rel_path: rel_path.clone(),
-                phase: ReadFailurePhase::BlobWrite,
-                attempts: 1,
-                message: "missing sha256 for file entry".to_string(),
-            });
-            snapshot.entries.remove(&rel_path);
-            continue;
-        };
-        let blob_path = blob_path(&blobs_root, hash);
-        if blob_path.exists() {
-            continue;
-        }
-        let src_path = match watched.kind {
-            WatchedKind::File => source_view.scan_path().to_path_buf(),
-            WatchedKind::Directory => source_view.scan_path().join(Path::new(&rel_path)),
-        };
-        match write_blob(
-            &src_path,
-            &blob_path,
-            cfg.hashing.timeout_seconds,
-            &retry_delays,
+    // Stage 2: materialize only the missing blobs referenced by the candidate manifest. When a
+    // source read fails, keep the last known-good manifest entry instead of turning a transient
+    // read problem into a destructive deletion.
+    let blob_write_outcome = write_missing_blobs_for_snapshot(
+        &mut snapshot,
+        BlobWriteContext {
+            cfg,
+            watched,
+            scan_root: source_view.scan_path(),
+            prev: prev.as_ref(),
+            blobs_root: &blobs_root,
             blob_codec,
-            &desc.destination_root,
-        ) {
-            Ok((count, bytes)) => {
-                written.blobs_written += count;
-                written.bytes_written += bytes;
-            }
-            Err(e) => {
-                had_read_failures = true;
-                snapshot.read_failures.push(ReadFailure {
-                    rel_path: rel_path.clone(),
-                    phase: ReadFailurePhase::BlobWrite,
-                    attempts: (retry_delays.len() + 1) as u32,
-                    message: format!("{e:#}"),
-                });
-                if let Some(prev_manifest) = prev.as_ref() {
-                    if let Some(prev_entry) = prev_manifest.entries.get(&rel_path) {
-                        snapshot
-                            .entries
-                            .insert(rel_path.clone(), prev_entry.clone());
-                    } else {
-                        snapshot.entries.remove(&rel_path);
-                    }
-                } else {
-                    snapshot.entries.remove(&rel_path);
-                }
-            }
-        }
-    }
+            retry_delays: &retry_delays,
+            destination_root: &desc.destination_root,
+        },
+    );
+    written.blobs_written = blob_write_outcome.blobs_written;
+    written.bytes_written = blob_write_outcome.bytes_written;
+    had_read_failures |= blob_write_outcome.had_read_failures;
 
     let changed_after_failures = match &prev {
         None => true,
         Some(prev_manifest) => !manifests_equivalent(prev_manifest, &snapshot),
     };
     if !changed_after_failures {
-        let mut safety_warning: Option<SafetyWarning> = None;
-        if let Some(prev_manifest) = prev.as_ref() {
-            let (warn, index_changed) = maybe_pin_large_deletion_baseline(
-                cfg,
-                watched,
-                prev_manifest,
-                &snapshot,
-                &mut index,
-                &manifests_root,
-                had_read_failures,
-            );
-            safety_warning = warn;
-            if index_changed {
-                write_index(&source_root, &index, &desc.destination_root)?;
-            }
-        }
-        write_scan_report(&source_root, &snapshot, None, &desc.destination_root)?;
-        return Ok(FolderBackupResult {
-            changed: false,
-            blobs_written: written.blobs_written,
-            bytes_written: written.bytes_written,
-            safety_warning,
-            ..Default::default()
-        });
+        let settled_write_outcome = BlobWritePassResult {
+            had_read_failures,
+            ..blob_write_outcome
+        };
+        return finish_scan_without_new_version(
+            cfg,
+            watched,
+            prev.as_ref(),
+            &snapshot,
+            &mut index,
+            paths,
+            settled_write_outcome,
+        );
     }
 
     if let Some(prev_manifest) = prev.as_ref() {
@@ -956,6 +876,8 @@ fn backup_one_folder(
         written.safety_warning = warn;
     }
 
+    // Stage 3: commit the manifest and index before any retention cleanup so an interrupted run
+    // never strands data referenced only by an uncommitted manifest.
     write_json_atomic_durable(&manifest_path, &snapshot, &desc.destination_root).with_context(
         || {
             format!(
@@ -979,24 +901,11 @@ fn backup_one_folder(
 
     let mut pruned: Vec<VersionInfo> = Vec::new();
     if !had_read_failures {
-        let mut protected: Vec<&str> = Vec::new();
-        if let Some(pinned) = index.safety_pinned_version_id.as_deref() {
-            protected.push(pinned);
-        }
-        if let Some(pending) = index.safety_pending_version_id.as_deref() {
-            if !protected.contains(&pending) {
-                protected.push(pending);
-            }
-        }
-        let allowed = desc.keep_versions + protected.len();
-        while index.versions.len() > allowed {
-            let remove_pos = index
-                .versions
-                .iter()
-                .position(|v| !protected.contains(&v.id.as_str()));
-            let Some(pos) = remove_pos else { break };
-            pruned.push(index.versions.remove(pos));
-        }
+        pruned = collect_prunable_versions(&index, desc.keep_versions);
+        let pruned_ids: HashSet<&str> = pruned.iter().map(|version| version.id.as_str()).collect();
+        index
+            .versions
+            .retain(|version| !pruned_ids.contains(version.id.as_str()));
     }
 
     write_index(&source_root, &index, &desc.destination_root)?;
@@ -1033,19 +942,6 @@ fn backup_one_folder(
     Ok(written)
 }
 
-/// Summary: diff_for_simulation orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn diff_for_simulation(
     watched: &WatchedPath,
     prev: Option<&Manifest>,
@@ -1124,19 +1020,6 @@ fn diff_for_simulation(
     )
 }
 
-/// Summary: format_change_sample orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn format_change_sample(prefix: char, watched: &WatchedPath, rel_path: &str) -> String {
     let full = match watched.kind {
         WatchedKind::File => watched.path.clone(),
@@ -1152,34 +1035,7 @@ mod tests {
     use crate::config::registry::config_defaults;
     use std::io::Write;
 
-    /**
-     * Summary: Build a minimal config for versioned backup tests.
-     *
-     * Inputs: Source and destination paths and keep versions count.
-     *
-     * Outputs: A config suitable for calling `run_backup_cycle`.
-     *
-     * Side effects: None.
-     *
-     * Error handling: Propagates default config creation failures.
-     *
-     * Ties to other methods: Used by durability and pruning tests in this module.
-     *
-     * Why this exists: Avoid duplicating verbose config initialization in each test.
-     */
-    /// Summary: test_config orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
+    /** Avoid duplicating verbose config initialization in each test. */
     fn test_config(source: &Path, destination: &Path, keep_versions: usize) -> Result<Config> {
         let mut cfg = config_defaults()?;
         cfg.backup_root = destination.to_path_buf();
@@ -1200,34 +1056,153 @@ mod tests {
         Ok(cfg)
     }
 
-    /**
-     * Summary: Ensure pruning does not delete manifests unless the index commit succeeds.
-     *
-     * Inputs: None.
-     *
-     * Outputs: None.
-     *
-     * Side effects: Creates temp directories, writes files, runs backups, and toggles permissions.
-     *
-     * Error handling: Fails the test with actionable context on unexpected backup behavior.
-     *
-     * Ties to other methods: Exercises `backup_one_folder` prune pipeline and `write_index` durability.
-     *
-     * Why this exists: A crash or write failure during `index.json` update must not strand an index that
-     */
-    /// Summary: pruning_is_deferred_until_index_commit orchestrates this method's core behavior.
-    ///
-    /// Inputs: Method parameters and required receiver state.
-    ///
-    /// Outputs: Return value and observable result for callers.
-    ///
-    /// Side effects: None beyond this method's explicit operations.
-    ///
-    /// Error handling: Propagates contextual errors to the caller when operations fail.
-    ///
-    /// Ties to other methods: Invoked by and composes with adjacent module methods.
-    ///
-    /// Why this exists: Keeps this behavior isolated, testable, and reusable.
+    #[test]
+    fn collect_prunable_versions_respects_protected_baselines() {
+        let index = VersionIndex {
+            schema_version: STORE_SCHEMA_VERSION,
+            source_path: "/src".to_string(),
+            versions: vec![
+                VersionInfo {
+                    id: "v1".to_string(),
+                    created_at_unix: 1,
+                },
+                VersionInfo {
+                    id: "v2".to_string(),
+                    created_at_unix: 2,
+                },
+                VersionInfo {
+                    id: "v3".to_string(),
+                    created_at_unix: 3,
+                },
+            ],
+            safety_pinned_version_id: Some("v1".to_string()),
+            safety_pending_version_id: Some("v2".to_string()),
+            safety_pending_first_seen_unix: Some(2),
+        };
+
+        let pruned = collect_prunable_versions(&index, 0);
+        let pruned_ids: Vec<&str> = pruned.iter().map(|version| version.id.as_str()).collect();
+        assert_eq!(pruned_ids, vec!["v3"]);
+    }
+
+    #[test]
+    fn collect_prunable_versions_prunes_oldest_unprotected_first() {
+        let index = VersionIndex {
+            schema_version: STORE_SCHEMA_VERSION,
+            source_path: "/src".to_string(),
+            versions: vec![
+                VersionInfo {
+                    id: "v1".to_string(),
+                    created_at_unix: 1,
+                },
+                VersionInfo {
+                    id: "v2".to_string(),
+                    created_at_unix: 2,
+                },
+                VersionInfo {
+                    id: "v3".to_string(),
+                    created_at_unix: 3,
+                },
+            ],
+            safety_pinned_version_id: None,
+            safety_pending_version_id: None,
+            safety_pending_first_seen_unix: None,
+        };
+
+        let pruned = collect_prunable_versions(&index, 1);
+        let pruned_ids: Vec<&str> = pruned.iter().map(|version| version.id.as_str()).collect();
+        assert_eq!(pruned_ids, vec!["v1", "v2"]);
+    }
+
+    #[test]
+    fn blob_plaintext_digest_mismatch_never_reaches_final_path() -> Result<()> {
+        let src_dir = tempfile::tempdir().context("test temp src")?;
+        let dst_dir = tempfile::tempdir().context("test temp dst")?;
+        let src_path = src_dir.path().join("changing.txt");
+        fs::write(&src_path, b"content after the scan")?;
+
+        let mut cfg = test_config(src_dir.path(), dst_dir.path(), 1)?;
+        cfg.encryption.enabled = false;
+        cfg.compression.enabled = false;
+        let codec = BlobCodec::from_config(&cfg)?;
+        let expected_sha256 = "0".repeat(64);
+        let final_path = blob_path(&blobs_root(&store_root(dst_dir.path())), &expected_sha256);
+
+        let error = write_blob(
+            &src_path,
+            &final_path,
+            &expected_sha256,
+            0,
+            &[],
+            &codec,
+            dst_dir.path(),
+        )
+        .expect_err("a blob whose plaintext changed must be rejected");
+
+        assert!(
+            format!("{error:#}").contains("source changed or blob integrity check failed"),
+            "unexpected error classification: {error:#}"
+        );
+        assert!(
+            !final_path.exists(),
+            "digest-mismatched bytes must not be published at {:?}",
+            final_path
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn destination_free_space_preflight_rejects_impossible_minimum() -> Result<()> {
+        let destination = tempfile::tempdir().context("test temp destination")?;
+        let error = ensure_destination_free_space(destination.path(), u64::MAX)
+            .expect_err("an impossible minimum must fail before backup work begins");
+        let message = format!("{error:#}");
+        assert!(message.contains("below configured minimum"));
+        assert!(
+            !message.contains(&destination.path().display().to_string()),
+            "preflight errors must not expose the raw destination path"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn poisoned_index_id_is_rejected_before_store_artifact_changes() -> Result<()> {
+        let source = tempfile::tempdir().context("test source")?;
+        let destination = tempfile::tempdir().context("test destination")?;
+        fs::write(source.path().join("file.txt"), b"content")?;
+        let cfg = test_config(source.path(), destination.path(), 0)?;
+
+        let versioned_root = store_root(destination.path());
+        let source_id = hashing::sha256_hex(source.path().to_string_lossy().as_bytes());
+        let source_root = sources_root(&versioned_root).join(source_id);
+        fs::create_dir_all(&source_root)?;
+        let poisoned = VersionIndex {
+            schema_version: STORE_SCHEMA_VERSION,
+            source_path: source.path().to_string_lossy().into_owned(),
+            versions: vec![VersionInfo {
+                id: "../escape".to_string(),
+                created_at_unix: 1,
+            }],
+            safety_pinned_version_id: None,
+            safety_pending_version_id: None,
+            safety_pending_first_seen_unix: None,
+        };
+        fs::write(
+            source_root.join("index.json"),
+            serde_json::to_vec_pretty(&poisoned)?,
+        )?;
+        let sentinel = source_root.join("escape.json");
+        fs::write(&sentinel, b"sentinel")?;
+
+        let error = run_backup_cycle(&cfg).expect_err("poisoned index must fail closed");
+        assert!(format!("{error:#}").contains("invalid versions[0].id"));
+        assert_eq!(fs::read(&sentinel)?, b"sentinel");
+        assert!(!versioned_root.join("blobs").exists());
+        assert!(!source_root.join("manifests").exists());
+        Ok(())
+    }
+
+    /** Pruning must not delete manifests until the index update commits successfully. */
 
     #[test]
     #[cfg(target_family = "unix")]
@@ -1297,113 +1272,69 @@ mod tests {
     }
 }
 
-/// Summary: store_root orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn store_root(destination_root: &Path) -> PathBuf {
     destination_root
         .join(STORE_DIR)
         .join(format!("v{STORE_SCHEMA_VERSION}"))
 }
 
-/// Summary: sources_root orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn sources_root(store_root: &Path) -> PathBuf {
     store_root.join("sources")
 }
 
-/// Summary: blobs_root orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn blobs_root(store_root: &Path) -> PathBuf {
     store_root.join("blobs").join("sha256")
 }
 
-/// Summary: blob_path orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn blob_path(blobs_root: &Path, hash: &str) -> PathBuf {
-    let prefix = &hash[0..2];
-    blobs_root.join(prefix).join(hash)
+    if is_lower_hex_sha256(hash) {
+        // The validation above guarantees this boundary is present and ASCII.
+        let prefix = hash.get(..2).unwrap_or("__invalid__");
+        blobs_root.join(prefix).join(hash)
+    } else {
+        // Keep malformed, externally sourced manifest values from panicking or
+        // escaping the blob root. Write paths reject these values explicitly.
+        blobs_root
+            .join("__invalid__")
+            .join(hashing::sha256_hex(hash.as_bytes()))
+    }
 }
 
-/**
- * Summary: Write a content-addressed blob durably (fsync file and parent directory).
- *
- * Inputs: Source file path, destination blob path, timeout in seconds, and `durability_root`.
- *
- * Outputs: `(blobs_written, bytes_written)` for accounting.
- *
- * Side effects: Reads from the source filesystem and writes a new blob file under the destination store.
- *
- * Error handling: Returns contextual errors for create, IO, timeout, fsync, and rename failures.
- *
- * Ties to other methods: Called by `backup_one_folder` before writing the manifest that references blobs.
- *
- * Why this exists: A blob referenced by a manifest must be durable across power loss before the manifest commit.
- */
-/// Summary: write_blob orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+fn is_lower_hex_sha256(hash: &str) -> bool {
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_expected_blob_hash(expected_sha256: &str, blob_path: &Path) -> Result<()> {
+    if !is_lower_hex_sha256(expected_sha256) {
+        anyhow::bail!(
+            "versioned::write_blob invalid expected plaintext sha256 {:?}",
+            expected_sha256
+        );
+    }
+    if blob_path.file_name().and_then(|name| name.to_str()) != Some(expected_sha256) {
+        anyhow::bail!(
+            "versioned::write_blob destination name does not match expected plaintext sha256 {}: {:?}",
+            expected_sha256,
+            blob_path
+        );
+    }
+    Ok(())
+}
+
+/** A blob referenced by a manifest must be durable across power loss before the manifest commit. */
 fn write_blob(
     src_path: &Path,
     blob_path: &Path,
+    expected_sha256: &str,
     timeout_seconds: u64,
     retry_delays: &[Duration],
     blob_codec: &BlobCodec,
     durability_root: &Path,
 ) -> Result<(usize, u64)> {
+    validate_expected_blob_hash(expected_sha256, blob_path)?;
     let parent = blob_path
         .parent()
         .context("versioned::write_blob missing blob parent")?;
@@ -1416,45 +1347,26 @@ fn write_blob(
 
     let label = format!("versioned::write_blob {:?} -> {:?}", src_path, blob_path);
     let (written, _) = retry_with_backoff(&label, timeout_seconds, retry_delays, || {
-        write_blob_once(src_path, blob_path, timeout_seconds, blob_codec)
+        write_blob_once(
+            src_path,
+            blob_path,
+            expected_sha256,
+            timeout_seconds,
+            blob_codec,
+        )
     })?;
     Ok((1, written))
 }
 
-/**
- * Summary: Single-attempt blob write (used by retry wrapper).
- *
- * Inputs: Source file path, destination blob path, and timeout in seconds.
- *
- * Outputs: Number of bytes written to the blob temp file.
- *
- * Side effects: Reads from source, writes temp file, fsyncs, renames, and fsyncs the parent directory.
- *
- * Error handling: Returns contextual errors for IO, timeout, fsync, and rename operations.
- *
- * Ties to other methods: Called by `write_blob` via `retry_with_backoff`.
- *
- * Why this exists: Allow clean retry semantics without partial blob files surviving failed attempts.
- */
-/// Summary: write_blob_once orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Allow clean retry semantics without partial blob files surviving failed attempts. */
 fn write_blob_once(
     src_path: &Path,
     blob_path: &Path,
+    expected_sha256: &str,
     timeout_seconds: u64,
     blob_codec: &BlobCodec,
 ) -> Result<u64> {
+    validate_expected_blob_hash(expected_sha256, blob_path)?;
     let start = Instant::now();
     let parent = blob_path
         .parent()
@@ -1484,6 +1396,22 @@ fn write_blob_once(
             src_path
         )
     })?;
+    let actual_sha256 = blob_codec
+        .sha256_plaintext_blob(temp.path(), timeout_seconds)
+        .with_context(|| {
+            format!(
+                "versioned::write_blob_once failed verifying encoded blob for {:?}",
+                src_path
+            )
+        })?;
+    if actual_sha256 != expected_sha256 {
+        anyhow::bail!(
+            "versioned::write_blob_once source changed or blob integrity check failed for {:?} (expected plaintext sha256 {}, got {})",
+            src_path,
+            expected_sha256,
+            actual_sha256
+        );
+    }
     temp.as_file().sync_all().with_context(|| {
         format!(
             "versioned::write_blob_once failed to fsync temp file for {:?}",
@@ -1501,19 +1429,6 @@ fn write_blob_once(
     Ok(written)
 }
 
-/// Summary: scan_snapshot orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn scan_snapshot(
     cfg: &Config,
     watched: &WatchedPath,
@@ -1651,34 +1566,7 @@ fn scan_snapshot(
     })
 }
 
-/**
- * Summary: Carry forward previous manifest entries for an unreadable subtree.
- *
- * Inputs: Current `entries` map, optional previous manifest, and a relative path prefix.
- *
- * Outputs: Adds any missing prior entries under the prefix to `entries`.
- *
- * Side effects: Mutates the provided `entries` map.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `scan_snapshot` when `walkdir` yields permission or IO errors.
- *
- * Why this exists: Prevent transient directory read failures from being interpreted as deletions.
- */
-/// Summary: carry_forward_prev_prefix orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Prevent transient directory read failures from being interpreted as deletions. */
 fn carry_forward_prev_prefix(
     entries: &mut BTreeMap<String, ManifestEntry>,
     prev: Option<&Manifest>,
@@ -1702,34 +1590,7 @@ fn carry_forward_prev_prefix(
     }
 }
 
-/**
- * Summary: Classify a scan failure into a stable phase for reporting.
- *
- * Inputs: A scan-related error.
- *
- * Outputs: A `ReadFailurePhase` value indicating the most likely failure phase.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `scan_snapshot` when recording `read_failures`.
- *
- * Why this exists: Keep failure reporting useful without plumbing custom error types everywhere.
- */
-/// Summary: classify_scan_failure orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Keep failure reporting useful without plumbing custom error types everywhere. */
 fn classify_scan_failure(error: &anyhow::Error) -> ReadFailurePhase {
     let msg = format!("{error:#}");
     if msg.contains("failed to stat file") || msg.contains("metadata") {
@@ -1739,19 +1600,6 @@ fn classify_scan_failure(error: &anyhow::Error) -> ReadFailurePhase {
     }
 }
 
-/// Summary: scan_one_file orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn scan_one_file(
     abs_path: &Path,
     rel_path: &str,
@@ -1805,19 +1653,6 @@ fn scan_one_file(
     })
 }
 
-/// Summary: manifests_equivalent orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn manifests_equivalent(prev: &Manifest, next: &Manifest) -> bool {
     if prev.entries.len() != next.entries.len() {
         return false;
@@ -1837,19 +1672,6 @@ fn manifests_equivalent(prev: &Manifest, next: &Manifest) -> bool {
     true
 }
 
-/// Summary: load_index orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn load_index(source_root: &Path, source_path: &Path) -> Result<VersionIndex> {
     let path = source_root.join("index.json");
     if !path.exists() {
@@ -1866,37 +1688,12 @@ fn load_index(source_root: &Path, source_path: &Path) -> Result<VersionIndex> {
         .with_context(|| format!("versioned::load_index failed to read {:?}", path))?;
     let index: VersionIndex = serde_json::from_str(&raw)
         .with_context(|| format!("versioned::load_index failed to parse {:?}", path))?;
+    validate_version_index(&index)
+        .with_context(|| format!("versioned::load_index rejected unsafe data in {:?}", path))?;
     Ok(index)
 }
 
-/**
- * Summary: Persist the version index durably (atomic rename plus fsync).
- *
- * Inputs: `source_root` folder, `index` payload, and `durability_root` stop directory for fsync.
- *
- * Outputs: `Ok(())` when the updated index is durably persisted.
- *
- * Side effects: Writes `index.json` under the source root.
- *
- * Error handling: Returns contextual errors from serialization, IO, fsync, and rename operations.
- *
- * Ties to other methods: Called after `write_json_atomic_durable` writes the manifest for a new version.
- *
- * Why this exists: The index is the commit pointer; it must not reference versions that are not durable on disk.
- */
-/// Summary: write_index orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** The index is the commit pointer; it must not reference versions that are not durable on disk. */
 fn write_index(source_root: &Path, index: &VersionIndex, durability_root: &Path) -> Result<()> {
     let path = source_root.join("index.json");
     write_json_atomic_durable(&path, index, durability_root).with_context(|| {
@@ -1920,34 +1717,7 @@ struct LastScanReport<'a> {
     read_failures: &'a [ReadFailure],
 }
 
-/**
- * Summary: Persist the last scan report for a watched source.
- *
- * Inputs: `source_root` destination store source directory, scanned `snapshot`, optional committed
- *
- * Outputs: `Ok(())` when the report is durably written.
- *
- * Side effects: Writes `last_scan_report.json` under the source directory.
- *
- * Error handling: Returns contextual errors for serialization, IO, fsync, and rename operations.
- *
- * Ties to other methods: Called by `backup_one_folder` after scans and commits (or skipped commits).
- *
- * Why this exists: Make read failures visible and inspectable even when a version cannot be safely created.
- */
-/// Summary: write_scan_report orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
+/** Make read failures visible and inspectable even when a version cannot be safely created. */
 fn write_scan_report(
     source_root: &Path,
     snapshot: &Manifest,
@@ -1972,19 +1742,6 @@ fn write_scan_report(
     })
 }
 
-/// Summary: latest_manifest orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn latest_manifest(manifests_root: &Path, index: &VersionIndex) -> Result<Option<Manifest>> {
     let last = match index.versions.last() {
         None => return Ok(None),
@@ -2001,21 +1758,7 @@ fn latest_manifest(manifests_root: &Path, index: &VersionIndex) -> Result<Option
     Ok(Some(manifest))
 }
 
-/**
- * Summary: Atomically write JSON and make it durable with fsync.
- *
- * Inputs: `path` destination file path, `value` JSON-serializable payload, and `durability_root`.
- *
- * Outputs: `Ok(())` when the file is atomically replaced and durably committed.
- *
- * Side effects: Writes a temp file, fsyncs it, renames it into place, and fsyncs the parent directory.
- *
- * Error handling: Returns contextual errors for create, serialize, write, fsync, and rename failures.
- *
- * Ties to other methods: Used for both manifests and `index.json` writes in the commit pipeline.
- *
- * Why this exists: Without fsync, a power loss can leave a missing or truncated file after an atomic rename.
- */
+/** Without fsync, a power loss can leave a missing or truncated file after an atomic rename. */
 fn write_json_atomic_durable<T: serde::Serialize>(
     path: &Path,
     value: &T,
@@ -2053,19 +1796,6 @@ fn write_json_atomic_durable<T: serde::Serialize>(
     Ok(())
 }
 
-/// Summary: sha256_file orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn sha256_file(
     path: &Path,
     tuning: &crate::config::model::HashingTuning,
@@ -2078,19 +1808,6 @@ fn sha256_file(
     Ok(hash)
 }
 
-/// Summary: normalize_rel orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 pub(crate) fn normalize_rel(path: &Path) -> String {
     let s = path.to_string_lossy().replace('\\', "/");
     if s.starts_with("./") {
@@ -2100,19 +1817,6 @@ pub(crate) fn normalize_rel(path: &Path) -> String {
     }
 }
 
-/// Summary: is_hidden orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn is_hidden(rel: &Path) -> bool {
     rel.components().any(|c| {
         let name = c.as_os_str().to_string_lossy();
@@ -2120,19 +1824,6 @@ fn is_hidden(rel: &Path) -> bool {
     })
 }
 
-/// Summary: build_ignore_set orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn build_ignore_set(patterns: &[String]) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for p in patterns {
@@ -2145,19 +1836,6 @@ fn build_ignore_set(patterns: &[String]) -> Result<GlobSet> {
         .context("versioned::build_ignore_set failed to build ignore set")
 }
 
-/// Summary: gc_unreferenced_blobs orchestrates this method's core behavior.
-///
-/// Inputs: Method parameters and required receiver state.
-///
-/// Outputs: Return value and observable result for callers.
-///
-/// Side effects: None beyond this method's explicit operations.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Invoked by and composes with adjacent module methods.
-///
-/// Why this exists: Keeps this behavior isolated, testable, and reusable.
 fn gc_unreferenced_blobs(store_root: &Path, blobs_root: &Path) -> Result<()> {
     let sources = sources_root(store_root);
     if !sources.exists() {

@@ -1,20 +1,6 @@
 import { statusTextClass } from '../../theme/statusText';
 
-/**
- * Summary: Verify semantic status-class mapping for common status strings.
- *
- * Inputs: None.
- *
- * Outputs: Assertions for each Ready/Working/Success/Error bucket.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Covers shared status mapping used across UI surfaces.
- *
- * Why this exists: Prevent regressions in status color semantics.
- */
+/** Prevent regressions in status color semantics. */
 describe('statusTextClass', () => {
   it('maps ready-like text', () => {
     expect(statusTextClass('Ready')).toBe('status-text status-text-ready');

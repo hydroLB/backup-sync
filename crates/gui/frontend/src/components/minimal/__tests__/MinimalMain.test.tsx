@@ -3,6 +3,7 @@ import { MinimalMain } from '../MinimalMain';
 import { Config } from '../../../domain/config';
 import { loadConfig, saveConfig } from '../../../services/config';
 import { safeInvoke } from '../../../services/ipc';
+import { removeKeptExtraVersion } from '../../../services/safety';
 
 const { tauriAvailableMock } = vi.hoisted(() => ({
   tauriAvailableMock: vi.fn(() => true),
@@ -19,21 +20,11 @@ vi.mock('../../../services/ipc', () => ({
   wrapError: (context: string, error: unknown) => new Error(`${context}: ${String(error)}`),
 }));
 
-/**
- * Summary: Build a successful hardening report payload for background checks.
- *
- * Inputs: None.
- *
- * Outputs: A `HardeningReport` compatible object for IPC mocks.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `renderMinimal` safeInvoke default implementation.
- *
- * Why this exists: Keep background hardening deterministic in minimal UI tests.
- */
+vi.mock('../../../services/safety', () => ({
+  removeKeptExtraVersion: vi.fn(),
+}));
+
+/** Keep background hardening deterministic in minimal UI tests. */
 function makePassingHardeningReport() {
   return {
     ok: true,
@@ -58,28 +49,22 @@ function makePassingHardeningReport() {
   };
 }
 
-/**
- * Summary: Build a stable status payload for minimal UI tests.
- *
- * Inputs: Optional safe-mode override.
- *
- * Outputs: A `StatusDto` compatible object.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by `renderMinimal` service mocks when desktop mode is enabled.
- *
- * Why this exists: Prevent status polling noise from obscuring real test failures.
- */
-function makeStatus(safeMode = false) {
+/** Prevent status polling noise from obscuring real test failures. */
+function makeStatus(
+  safeMode = false,
+  lastSafetyWarning: {
+    ts: number;
+    message: string;
+    watched_path?: string | null;
+    kept_version_id?: string | null;
+  } | null = null,
+) {
   return {
     last_run_ts: 1709500000,
     last_files_backed_up: 3,
     last_error: null,
     last_dirty_count: 0,
-    last_safety_warning: null,
+    last_safety_warning: lastSafetyWarning,
     uptime_secs: 600,
     version: 'test',
     free_bytes: 1024 * 1024 * 1024,
@@ -106,21 +91,7 @@ function makeStatus(safeMode = false) {
   };
 }
 
-/**
- * Summary: Build a complete config object for minimal UI tests.
- *
- * Inputs: Optional partial overrides.
- *
- * Outputs: A valid `Config` object.
- *
- * Side effects: None.
- *
- * Error handling: None.
- *
- * Ties to other methods: Used by all MinimalMain tests.
- *
- * Why this exists: Keep tests explicit without repeating config boilerplate.
- */
+/** Keep tests explicit without repeating config boilerplate. */
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     backup_root: '/tmp/backups',
@@ -178,37 +149,27 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   };
 }
 
-/**
- * Summary: Render the MinimalMain component with a mocked config load.
- *
- * Inputs: Optional config overrides.
- *
- * Outputs: A mocked `onEvent` callback.
- *
- * Side effects: Mocks service calls and mounts React component tree.
- *
- * Error handling: Throws with test context on failures.
- *
- * Ties to other methods: Used by all MinimalMain tests.
- *
- * Why this exists: Ensure each test gets a clean instance and predictable mocks.
- */
+/** Ensure each test gets a clean instance and predictable mocks. */
 async function renderMinimal(
   overrides: Partial<Config> = {},
+  status = makeStatus(overrides.safe_mode ?? false),
 ): Promise<{ onEvent: ReturnType<typeof vi.fn> }> {
   try {
     localStorage.clear();
     tauriAvailableMock.mockReturnValue(true);
     const cfg = makeConfig(overrides);
     (loadConfig as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(cfg);
-    (saveConfig as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (saveConfig as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      daemon_restarted: true,
+      daemon_restart_warning: null,
+    });
     (safeInvoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       async (command: string, payload?: { desired?: boolean }) => {
         if (command === 'hardening_check_cmd') {
           return makePassingHardeningReport();
         }
         if (command === 'get_status') {
-          return makeStatus(cfg.safe_mode);
+          return status;
         }
         if (command === 'check_destination_cmd') {
           return {
@@ -227,14 +188,18 @@ async function renderMinimal(
           };
         }
         if (command === 'toggle_safe_mode_cmd') {
-          return payload?.desired ?? false;
+          return {
+            safe_mode: payload?.desired ?? false,
+            applied_live: true,
+            warning: null,
+          };
         }
         return null;
       },
     );
     const onEvent = vi.fn();
     render(<MinimalMain onEvent={onEvent} />);
-    await screen.findByRole('heading', { name: 'Destination' });
+    await screen.findByRole('heading', { name: 'Where should copies live?' });
     return { onEvent };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -242,56 +207,28 @@ async function renderMinimal(
   }
 }
 
-/**
- * Summary: Verify the minimal UI exposes running toggle, automatic cadence summary, and only restore action.
- *
- * Inputs: None.
- *
- * Outputs: Asserts presence/absence of key controls.
- *
- * Side effects: Renders the component and queries DOM.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Invoked by and composes with adjacent module methods.
- *
- * Why this exists: Ensure the UI matches the simplified spec.
- */
+/** Ensure the UI matches the simplified spec. */
 async function assertOnlyRestoreActionVisible(): Promise<void> {
   try {
     await renderMinimal();
     expect(screen.getByLabelText('Running')).toBeInTheDocument();
-    expect(screen.getByText('Automatic backups')).toBeInTheDocument();
-    expect(screen.getByText(/Every 30 min/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Automatic protection').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Every 30 min/i).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText('Backup interval minutes')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restore Backup Version' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Browse saved versions' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Safety checks required' }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Actions')).not.toBeInTheDocument();
     expect(screen.queryByText('Back up now')).not.toBeInTheDocument();
-    expect(screen.getByText('Setup complete')).toBeInTheDocument();
+    expect(screen.getByText('Your protection workflow is connected.')).toBeInTheDocument();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[MinimalMain.test.tsx::assertOnlyRestoreActionVisible] ${reason}`);
   }
 }
 
-/**
- * Summary: Verify minimal mode prioritizes destination setup when no destination path exists.
- *
- * Inputs: None.
- *
- * Outputs: Asserts setup notice content and disabled add-path controls.
- *
- * Side effects: Renders the component with an empty primary destination.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Covers the destination-first setup branch in `MinimalMain`.
- *
- * Why this exists: Prevent regressions where first-run setup order becomes ambiguous.
- */
+/** Prevent regressions where first-run setup order becomes ambiguous. */
 async function assertDestinationFirstGuidance(): Promise<void> {
   try {
     await renderMinimal({
@@ -299,7 +236,7 @@ async function assertDestinationFirstGuidance(): Promise<void> {
       destinations: [{ id: 'default', path: '', label: 'Primary' }],
       watched: [],
     });
-    expect(screen.getByText('Choose a primary destination first')).toBeInTheDocument();
+    expect(screen.getByText('Start with a safe place for your copies.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Choose destination' })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Add protected path' })[0]).toBeDisabled();
   } catch (error) {
@@ -308,47 +245,19 @@ async function assertDestinationFirstGuidance(): Promise<void> {
   }
 }
 
-/**
- * Summary: Verify minimal mode points users to protected paths after destination setup.
- *
- * Inputs: None.
- *
- * Outputs: Asserts setup notice content and the add-path quick action.
- *
- * Side effects: Renders the component with an empty watched list.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Covers the second setup branch in `MinimalMain`.
- *
- * Why this exists: Keep the next required step obvious after destination selection.
- */
+/** Keep the next required step obvious after destination selection. */
 async function assertAddPathGuidance(): Promise<void> {
   try {
     await renderMinimal({ watched: [] });
-    expect(screen.getByText('Add the first protected path')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Add path…' }).length).toBeGreaterThan(0);
+    expect(screen.getByText('Storage is ready. Choose what matters.')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Add protected path' }).length).toBeGreaterThan(0);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[MinimalMain.test.tsx::assertAddPathGuidance] ${reason}`);
   }
 }
 
-/**
- * Summary: Verify toggling running calls the safe mode IPC command.
- *
- * Inputs: None.
- *
- * Outputs: Asserts `safeInvoke` is called with `toggle_safe_mode_cmd`.
- *
- * Side effects: Fires checkbox click and awaits async handler.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Invoked by and composes with adjacent module methods.
- *
- * Why this exists: Ensure the running toggle is wired to daemon safe mode.
- */
+/** Ensure the running toggle is wired to daemon safe mode. */
 async function assertRunningToggleCallsIpc(): Promise<void> {
   try {
     await renderMinimal({ safe_mode: false });
@@ -363,21 +272,7 @@ async function assertRunningToggleCallsIpc(): Promise<void> {
   }
 }
 
-/**
- * Summary: Verify pausing shows Saved badge confirmation.
- *
- * Inputs: None.
- *
- * Outputs: Asserts the Saved badge is visible after pausing.
- *
- * Side effects: Clicks running toggle and awaits UI updates.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Invoked by and composes with adjacent module methods.
- *
- * Why this exists: Prevent regressions where pause actions do not surface a success confirmation.
- */
+/** Prevent regressions where pause actions do not surface a success confirmation. */
 async function assertPauseShowsSavedBadge(): Promise<void> {
   try {
     await renderMinimal({ safe_mode: false });
@@ -392,21 +287,7 @@ async function assertPauseShowsSavedBadge(): Promise<void> {
   }
 }
 
-/**
- * Summary: Verify additional destinations are visible and removable from the minimal destination card.
- *
- * Inputs: None.
- *
- * Outputs: Asserts extra destination text and remove control are rendered.
- *
- * Side effects: Renders the component and queries DOM.
- *
- * Error handling: Propagates contextual errors to the caller when operations fail.
- *
- * Ties to other methods: Invoked by and composes with adjacent module methods.
- *
- * Why this exists: Prevent regressions where added destinations exist in config but are not shown in UI.
- */
+/** Prevent regressions where added destinations exist in config but are not shown in UI. */
 async function assertAdditionalDestinationsVisible(): Promise<void> {
   try {
     await renderMinimal({
@@ -440,4 +321,61 @@ describe('MinimalMain', () => {
   it('wires running toggle to IPC', assertRunningToggleCallsIpc);
   it('shows Saved badge when paused', assertPauseShowsSavedBadge);
   it('shows additional destinations with remove controls', assertAdditionalDestinationsVisible);
+
+  it('shows a retryable configuration error and recovers', async () => {
+    const cfg = makeConfig();
+    vi.mocked(loadConfig)
+      .mockRejectedValueOnce(new Error('permission denied'))
+      .mockResolvedValueOnce(cfg);
+    vi.mocked(saveConfig).mockResolvedValue({
+      daemon_restarted: true,
+      daemon_restart_warning: null,
+    });
+    vi.mocked(safeInvoke).mockImplementation(async (command: string) => {
+      if (command === 'hardening_check_cmd') return makePassingHardeningReport();
+      if (command === 'get_status') return makeStatus();
+      if (command === 'check_destination_cmd') {
+        return { writable: true, free_bytes: 1024, message: 'Ready' };
+      }
+      if (command === 'test_access_cmd') {
+        return {
+          destination_writable: true,
+          destination_message: 'Ready',
+          watched_ok: ['/tmp/project'],
+          watched_missing: [],
+          watched_unwritable: [],
+        };
+      }
+      return null;
+    });
+
+    render(<MinimalMain onEvent={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('permission denied');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Where should copies live?' }),
+    ).toBeInTheDocument();
+    expect(loadConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces remove-extra-version failures to the user', async () => {
+    vi.mocked(removeKeptExtraVersion).mockRejectedValueOnce(new Error('version is locked'));
+    const warning = {
+      ts: 42,
+      message: 'An extra version was kept for safety.',
+      watched_path: '/tmp/project',
+      kept_version_id: 'v1',
+    };
+    const { onEvent } = await renderMinimal({}, makeStatus(false, warning));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove extra version' }));
+
+    await waitFor(() => {
+      expect(onEvent).toHaveBeenCalledWith(
+        'Could not remove extra version: version is locked',
+        'error',
+      );
+    });
+  });
 });

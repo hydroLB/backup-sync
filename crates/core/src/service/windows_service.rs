@@ -1,45 +1,21 @@
 use crate::io::{run_with_policy, BlockingIoPolicy, CancellationFlag};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Summary: Resolves the default scheduled task XML path for Windows.
-///
-/// Inputs: none.
-///
-/// Outputs: the default XML path.
-///
-/// Side effects: Reads the roaming app data directory.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: CLI and GUI scheduled task installation flows.
-///
-/// Why this exists: centralize schtasks XML storage location.
+/// Centralize schtasks XML storage location.
 pub fn default_task_xml_path() -> Result<PathBuf> {
     let mut path = dirs::data_dir().ok_or_else(|| anyhow::anyhow!("data dir not found"))?;
     path.push("backup_sync/backup_sync_task.xml");
     Ok(path)
 }
 
-/// Summary: Builds and optionally writes the schtasks XML definition.
-///
-/// Inputs: the destination path and daemon executable path.
-///
-/// Outputs: the XML content string.
-///
-/// Side effects: Creates directories and writes the XML when a destination is provided.
-///
-/// Error handling: Propagates contextual errors to the caller when operations fail.
-///
-/// Ties to other methods: Windows service installation and export flows.
-///
-/// Why this exists: keep scheduled task definitions consistent across installs.
+/// Keep scheduled task definitions consistent across installs.
 pub fn write_schtasks_xml(destination: &Path, exec: &Path) -> Result<String> {
     let io_policy = BlockingIoPolicy::bootstrap_defaults();
-    let exec_str = exec.display().to_string();
+    let exec_str = escape_xml_text(&exec.display().to_string(), "executable path")?;
     let contents = format!(
-        r#"<?xml version="1.0" encoding="UTF-16"?>
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
     <LogonTrigger>
@@ -72,6 +48,9 @@ pub fn write_schtasks_xml(destination: &Path, exec: &Path) -> Result<String> {
 "#,
         exec = exec_str
     );
+    if destination.as_os_str().is_empty() {
+        return Ok(contents);
+    }
     if let Some(parent) = destination.parent() {
         run_with_policy(
             "backup_core::service::windows_service::write_schtasks_xml create parent directory",
@@ -94,4 +73,31 @@ pub fn write_schtasks_xml(destination: &Path, exec: &Path) -> Result<String> {
         },
     )?;
     Ok(contents)
+}
+
+fn escape_xml_text(value: &str, field: &str) -> Result<String> {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if !is_xml_10_character(character) {
+            bail!(
+                "{field} contains a character that XML 1.0 cannot represent: U+{:04X}",
+                character as u32
+            );
+        }
+
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(character),
+        }
+    }
+    Ok(escaped)
+}
+
+fn is_xml_10_character(character: char) -> bool {
+    matches!(character, '\u{9}' | '\u{A}' | '\u{D}')
+        || matches!(character as u32, 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF)
 }

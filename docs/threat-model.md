@@ -1,78 +1,64 @@
-# Threat Model Notes
+# Threat Model
 
-## Scope
-Focused on critical local attack surfaces in this repository:
-1. Daemon IPC interface
-2. Config loading and environment overrides
-3. Path handling for watched sources and backup destinations
+Last updated: 2026-08-23
 
-## Trust Boundaries
-1. User/process boundary:
-   - GUI, CLI, and daemon processes can exchange IPC payloads.
-   - Inputs crossing process boundaries are untrusted.
-2. Filesystem boundary:
-   - Config, state, and data paths can be user-controlled or stale.
-3. Environment boundary:
-   - Startup env vars can override runtime config paths/values.
+## Scope and assets
 
-## Assets
-1. Backup data integrity and availability.
-2. Local filesystem confidentiality (avoid sensitive path/secret leakage).
-3. Operational safety signals (health/readiness correctness).
+Critical assets are backup availability and integrity, the encryption key, source/destination confidentiality, and trustworthy operational status. Trust boundaries include config/environment input, manifest/index/blob metadata, source/destination filesystems, local IPC clients, platform service definitions, and diagnostic exports.
 
-## Threat Surfaces and Controls
+The system assumes the host account and kernel are not fully compromised. A malicious process running as the same user can read plaintext manifests and may access any file allowed by that account; Backup Sync does not claim remote attestation.
 
-### IPC Surface (`crates/daemon/src/runtime/ipc.rs`)
-Threats:
-1. Malformed or oversized IPC payloads causing resource exhaustion.
-2. Log injection through untrusted request identifiers.
-3. Stale or spoofed operational probe traffic confusing operators.
+## Store and restore
+
+Threats include manifest path traversal, absolute paths, map-key/path mismatch, malformed hashes, missing or substituted blobs, source mutation during read, symlink races, incomplete replication, and concurrent store mutation.
 
 Controls:
-1. Bounded request read size and chunked parsing using runtime limits.
-2. Timeout around IPC read/write operations.
-3. Correlation/request id sanitization before log emission.
-4. Structured machine-parseable logs with stable fields.
-5. Explicit status/health/readiness contracts with request-id echo.
 
-Residual risk:
-1. Local same-user process can still send high-rate valid requests; rate limiting is not yet enforced.
+- Strict version-ID, relative-path, key coherence, and lowercase 64-character digest validation
+- Exact decoded-plaintext SHA-256 enforcement before blob publication and restore target mutation
+- Symlink-safe staged restore and final rename only after complete preflight/reconstruction
+- Bounded per-store cross-process leases, ordered deterministically for multi-store operations
+- Blob → manifest → index commit ordering; replication repair and source revalidation before replica index publication
+- Sampled/full scrub and optional chunked AEAD encryption
 
-### Config Surface (`crates/core/src/config/*`)
-Threats:
-1. Invalid or hostile config values triggering unsafe runtime behavior.
-2. Drift between defaults and validation allowing out-of-range knobs.
-3. Environment overrides bypassing expected startup invariants.
+Residuals: plaintext manifests expose paths/metadata; a malicious local actor can delete/replace metadata; authenticated manifest/index signing is not implemented; filesystem/mount churn retains a bounded TOCTOU class.
 
-Controls:
-1. Single validated config load path for entrypoints.
-2. Validation limits for timeout/retry/backoff and size bounds.
-3. Fail-fast startup behavior on invalid config.
+## IPC and process lifecycle
 
-Residual risk:
-1. Intentional misconfiguration by local user remains possible; guardrails reduce but do not eliminate operator error.
-
-### Path Handling Surface (`crates/core/src/fs/*`, daemon cycle + GUI commands)
-Threats:
-1. Unsafe path traversal or invalid destination selection.
-2. Sensitive absolute paths leaking into logs/errors.
-3. Destination disconnect/reconnect races causing unsafe writes.
+Threats include oversized messages, endpoint impersonation, unlinking a live daemon socket, second-instance races, unsafe cleanup, and local request flooding.
 
 Controls:
-1. Canonicalization and path validation before critical operations.
-2. Redaction helpers for path/text logging.
-3. Destination health checks and pause/resume behavior.
-4. Readiness probe reflects safe-mode and destination pause/unavailable states.
 
-Residual risk:
-1. Symlink and mount churn between validation and use remains a local TOCTOU class risk.
+- Bounded request/response sizes and timeouts
+- Private per-user Unix runtime directory, mode-`0600` socket, endpoint type/owner/identity checks
+- Live singleton detection; only a verified refused stale socket is removable
+- Cleanup removes only the endpoint identity created by that daemon
+- Structured, sanitized request/correlation identifiers
 
-## Detection and Response Hooks
-1. CI security gates (`ci-security`): secrets, lockfile hygiene, deny policy, advisories.
-2. Local runbook: `docs/security-runbook.md`.
-3. Structured logs with correlation for IPC and shutdown operations.
+Residuals: same-user valid-request rate limiting is not implemented; explicit Windows pipe ACLs and clean-machine runtime behavior are unverified.
 
-## Priority Follow-ups
-1. Add IPC request rate limiting/backpressure for local abuse resistance.
-2. Add explicit symlink policy notes and tests for high-risk path operations.
-3. Add periodic review cadence for advisory ignore exceptions in `deny.toml`.
+## Config, service definitions, and exports
+
+Threats include environment override confusion, unsafe destination mapping, XML/systemd injection, predictable temporary files, symlink truncation, and path/secret leakage.
+
+Controls:
+
+- One parse/layer/validate flow shared by entrypoints; `BACKUP_SYNC_CONFIG` is coherent for read and write
+- Validated destination/source relationships and real-destination free-space checks in core
+- Context-aware launchd/Windows XML escaping and systemd argument escaping/control-character rejection
+- Exclusive unpredictable doctor/diagnostic/export files with cleanup on incomplete writes
+- Stable redacted boundary errors and Tauri content security policy
+
+Residuals: operator misconfiguration remains possible; generated service behavior is not runtime-tested on every platform.
+
+## Supply chain
+
+CI runs secret scanning, lockfile hygiene, `cargo deny`, `cargo audit`, full npm audit, and CodeQL. Current scans report zero vulnerabilities and no Rust advisory ignore list. `cargo deny` emits 19 informational warnings from the transitive Tauri/Linux GTK3 and HTML stack; those upstream maintenance signals remain tracked risks.
+
+## Priority follow-ups
+
+1. Define Windows per-user pipe ACLs and add platform runtime tests.
+2. Add authenticated manifest/index metadata.
+3. Make cross-process state updates transactional.
+4. Add IPC backpressure and cancellation checkpoints for long blocking work.
+5. Reassess Tauri/Linux dependency warnings on every desktop-stack upgrade.
