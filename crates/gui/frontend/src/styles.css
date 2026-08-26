@@ -3388,6 +3388,27 @@ code {
   cursor: pointer;
 }
 
+.folder-row__retention-note {
+  display: grid;
+  flex: 0 1 clamp(250px, 24vw, 390px);
+  min-width: 210px;
+  gap: clamp(2px, 0.25vw, 4px);
+  padding-left: clamp(12px, 1vw, 18px);
+  border-left: 1px solid rgba(125, 148, 184, 0.18);
+}
+
+.folder-row__retention-note strong {
+  color: var(--text-section-header);
+  font-size: clamp(12px, 0.86vw, 16px);
+  font-weight: 680;
+}
+
+.folder-row__retention-note span {
+  color: var(--text-hint);
+  font-size: clamp(11px, 0.75vw, 14px);
+  font-weight: 560;
+}
+
 .folder-row__main:hover .folder-path,
 .folder-row__main:focus-visible .folder-path,
 .destination-item__main:hover .destination-item__path,
@@ -3987,6 +4008,19 @@ code {
 
   .compact-destination-list {
     grid-template-columns: 1fr;
+  }
+
+  .folder-row__source {
+    flex-wrap: wrap;
+  }
+
+  .folder-row__retention-note {
+    order: 4;
+    flex: 1 0 100%;
+    min-width: 0;
+    padding: 10px 0 0;
+    border-top: 1px solid rgba(125, 148, 184, 0.18);
+    border-left: 0;
   }
 
   .recovery-button {

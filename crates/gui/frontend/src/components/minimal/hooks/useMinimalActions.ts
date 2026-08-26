@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Config, WatchedPath } from '../../../domain/config';
 import { ensurePrimaryDestination, normalizeWatched } from '../helpers/config';
+import type { PersistOptions } from './useMinimalConfig';
 
 type EventKind = 'ok' | 'error' | 'info';
 
@@ -16,7 +17,7 @@ type Pickers = {
 type Params = {
   cfg: Config | null;
   primaryId: string | null;
-  persist: (next: Config, successMessage?: string) => Promise<void>;
+  persist: (next: Config, successMessage?: string, options?: PersistOptions) => Promise<void>;
   pickers: Pickers;
   onEvent: (msg: string, kind?: EventKind) => void;
 };
@@ -338,7 +339,9 @@ export function useMinimalActions({
           max_backups_per_file: nextKeep,
         };
       });
-      await persist({ ...cfg, watched: nextWatched }, `Backups to keep updated for ${path}.`);
+      await persist({ ...cfg, watched: nextWatched }, `Versions to keep updated for ${path}.`, {
+        globalBusy: false,
+      });
     },
     [cfg, persist, primaryId],
   );

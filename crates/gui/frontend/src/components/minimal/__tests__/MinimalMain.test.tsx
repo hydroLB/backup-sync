@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MinimalMain } from '../MinimalMain';
 import { Config } from '../../../domain/config';
 import { loadConfig, saveConfig } from '../../../services/config';
@@ -358,6 +358,40 @@ describe('MinimalMain', () => {
   it('shows Saved badge when paused', assertPauseShowsSavedBadge);
   it('makes configured paths directly clickable', assertPathRowsAreClickable);
   it('shows additional destinations with remove controls', assertAdditionalDestinationsVisible);
+
+  it('saves retention within its row without disabling the rest of the screen', async () => {
+    await renderMinimal();
+    let finishSave!: (result: { daemon_restarted: boolean; daemon_restart_warning: null }) => void;
+    vi.mocked(saveConfig).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep more versions for /tmp/project' }));
+
+    await waitFor(() => {
+      expect(saveConfig).toHaveBeenCalled();
+      expect(screen.getByText('Keeps 6 previous versions for recovery')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Checks for new changes every 30 minutes')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Add backup location' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Change main storage' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Keep more versions for /tmp/project' }),
+    ).toBeDisabled();
+
+    await act(async () => {
+      finishSave({ daemon_restarted: true, daemon_restart_warning: null });
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Keep more versions for /tmp/project' }),
+      ).toBeEnabled();
+    });
+  });
 
   it('keeps storage controls available while the source picker is open', async () => {
     let finishPicker: ((value: null) => void) | undefined;

@@ -13,6 +13,10 @@ type Events = {
   onEvent: (msg: string, kind?: EventKind) => void;
 };
 
+export type PersistOptions = {
+  globalBusy?: boolean;
+};
+
 type MinimalConfigState = {
   cfg: Config | null;
   primary: Destination | null;
@@ -25,7 +29,7 @@ type MinimalConfigState = {
   setBusy: (busy: boolean) => void;
   setCfg: (cfg: Config | null) => void;
   reload: () => void;
-  persist: (next: Config, successMessage?: string) => Promise<void>;
+  persist: (next: Config, successMessage?: string, options?: PersistOptions) => Promise<void>;
 };
 
 /** Keep the minimal screen orchestration small and ensure config normalization is consistent. */
@@ -110,10 +114,11 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
     return cfg.watched.map((w) => normalizeWatched(w, primary.id, cfg.max_backups_per_file));
   }, [cfg, primary]);
 
-  /** Keep save behavior uniform and ensure busy state is applied consistently. */
-  const persist = async (next: Config, successMessage = 'Saved.') => {
+  /** Save small inline controls without making unrelated sections look unavailable. */
+  const persist = async (next: Config, successMessage = 'Saved.', options: PersistOptions = {}) => {
+    const globalBusy = options.globalBusy ?? true;
     try {
-      setBusy(true);
+      if (globalBusy) setBusy(true);
       const normalized = enforceFixedAutomaticInterval(next);
       const result = await saveConfig(normalized);
       setCfg(normalized);
@@ -123,7 +128,7 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`Save failed: ${reason}`, 'error');
     } finally {
-      setBusy(false);
+      if (globalBusy) setBusy(false);
     }
   };
 

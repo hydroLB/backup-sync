@@ -318,6 +318,7 @@ describe('useMinimalActions', () => {
         (entry) => entry.path === '/source' && entry.destination_id === 'primary',
       )?.max_backups_per_file,
     ).toBe(1000);
+    expect(persist.mock.calls[1]?.[2]).toEqual({ globalBusy: false });
     expect(onEvent).toHaveBeenCalledWith(
       'Destination no longer exists. Reload and try again.',
       'error',

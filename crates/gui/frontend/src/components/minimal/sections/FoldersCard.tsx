@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { WatchedPath } from '../../../domain/config';
 import { Button } from '../../ui/Button';
 import { InlineAlert } from '../../ui/InlineAlert';
@@ -15,6 +15,7 @@ type Props = {
   busy: boolean;
   items: Item[];
   defaultKeep: number;
+  intervalSeconds: number;
   watchedWarning: string | null;
   onAddFolder: () => Promise<void>;
   onChangePath: (path: string, kind: 'File' | 'Directory') => Promise<void>;
@@ -36,6 +37,7 @@ export function FoldersCard({
   busy,
   items,
   defaultKeep,
+  intervalSeconds,
   watchedWarning,
   onAddFolder,
   onChangePath,
@@ -95,6 +97,7 @@ export function FoldersCard({
               path={item.path}
               kind={item.kind}
               keep={item.max_backups_per_file ?? defaultKeep}
+              intervalSeconds={intervalSeconds}
               onChange={() => onChangePath(item.path, item.kind)}
               onRemove={() => onRemovePath(item.path, item.kind, item.destination_id)}
               onUpdateKeep={(keep) => onUpdateKeep(item.path, item.kind, item.destination_id, keep)}
@@ -111,16 +114,51 @@ type RowProps = {
   path: string;
   kind: 'File' | 'Directory';
   keep: number;
+  intervalSeconds: number;
   onChange: () => Promise<void>;
   onRemove: () => Promise<void>;
   onUpdateKeep: (keep: number) => Promise<void>;
 };
 
-function FolderRow({ busy, path, kind, keep, onChange, onRemove, onUpdateKeep }: RowProps) {
+function formatCheckCadence(seconds: number): string {
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return `${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+  return `${seconds} second${seconds === 1 ? '' : 's'}`;
+}
+
+function FolderRow({
+  busy,
+  path,
+  kind,
+  keep,
+  intervalSeconds,
+  onChange,
+  onRemove,
+  onUpdateKeep,
+}: RowProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [keepBusy, setKeepBusy] = useState(false);
+  const [displayKeep, setDisplayKeep] = useState(keep);
+
+  useEffect(() => {
+    setDisplayKeep(keep);
+  }, [keep]);
 
   const saveKeep = async (nextKeep: number) => {
-    await onUpdateKeep(nextKeep);
+    if (keepBusy || nextKeep === displayKeep) return;
+    setDisplayKeep(nextKeep);
+    setKeepBusy(true);
+    try {
+      await onUpdateKeep(nextKeep);
+    } finally {
+      setKeepBusy(false);
+    }
   };
 
   return (
@@ -156,14 +194,20 @@ function FolderRow({ busy, path, kind, keep, onChange, onRemove, onUpdateKeep }:
               {path}
             </span>
           </button>
+          <div className="folder-row__retention-note" aria-live="polite">
+            <strong>
+              Keeps {displayKeep} previous version{displayKeep === 1 ? '' : 's'} for recovery
+            </strong>
+            <span>Checks for new changes every {formatCheckCadence(intervalSeconds)}</span>
+          </div>
           <div className="folder-row__keep">
-            <span className="folder-row__keep-label">Keep versions</span>
+            <span className="folder-row__keep-label">Versions kept</span>
             <div className="stepper" aria-label={`Versions to keep for ${path}`}>
               <button
                 className="btn secondary btn-sm stepper-btn"
                 type="button"
-                onClick={() => void saveKeep(Math.max(1, keep - 1))}
-                disabled={busy || keep <= 1}
+                onClick={() => void saveKeep(Math.max(1, displayKeep - 1))}
+                disabled={busy || keepBusy || displayKeep <= 1}
                 aria-label={`Keep fewer versions for ${path}`}
               >
                 −
@@ -173,20 +217,20 @@ function FolderRow({ busy, path, kind, keep, onChange, onRemove, onUpdateKeep }:
                 type="number"
                 min={1}
                 max={1000}
-                value={keep}
+                value={displayKeep}
                 aria-label={`Versions to keep for ${path}`}
                 onChange={(event) => {
                   const value = Number(event.target.value);
                   if (!Number.isFinite(value)) return;
                   void saveKeep(Math.max(1, Math.min(1000, Math.round(value))));
                 }}
-                disabled={busy}
+                disabled={busy || keepBusy}
               />
               <button
                 className="btn secondary btn-sm stepper-btn"
                 type="button"
-                onClick={() => void saveKeep(Math.min(1000, keep + 1))}
-                disabled={busy}
+                onClick={() => void saveKeep(Math.min(1000, displayKeep + 1))}
+                disabled={busy || keepBusy}
                 aria-label={`Keep more versions for ${path}`}
               >
                 +

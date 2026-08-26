@@ -442,6 +442,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           busy={busy || pickerBusyScope === 'source'}
           items={folderItems}
           defaultKeep={cfg.max_backups_per_file}
+          intervalSeconds={cfg.interval_seconds}
           watchedWarning={watchedHealthWarning}
           onAddFolder={() =>
             runWithSaveScope('none', async () => {

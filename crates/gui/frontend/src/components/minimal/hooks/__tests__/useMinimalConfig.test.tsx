@@ -4,6 +4,7 @@ import type { Config } from '../../../../domain/config';
 import { useMinimalConfig } from '../useMinimalConfig';
 import { loadConfig, saveConfig } from '../../../../services/config';
 import type { ConfigSaveResult } from '../../../../services/config';
+import type { PersistOptions } from '../useMinimalConfig';
 
 vi.mock('../../../../services/config', () => ({
   loadConfig: vi.fn(),
@@ -68,7 +69,7 @@ type Controller = {
   cfg: Config | null;
   loadError: string | null;
   reload: () => void;
-  persist: (next: Config, successMessage?: string) => Promise<void>;
+  persist: (next: Config, successMessage?: string, options?: PersistOptions) => Promise<void>;
 };
 
 function Harness({
