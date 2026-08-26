@@ -9,7 +9,7 @@ type Pickers = {
   pickPathForDest: (
     destId: string,
     kind: 'File' | 'Directory',
-    addWatched: (path: string, kind: 'File' | 'Directory', destId?: string) => void,
+    addWatched: (path: string, kind: 'File' | 'Directory', destId?: string) => void | Promise<void>,
   ) => Promise<void>;
 };
 
@@ -27,6 +27,7 @@ type MinimalActions = {
   removeDestination: (destinationId: string) => Promise<void>;
   addFolder: () => Promise<void>;
   addFile: () => Promise<void>;
+  changePath: (path: string, kind: 'File' | 'Directory') => Promise<void>;
   removePath: (
     path: string,
     kind: 'File' | 'Directory',
@@ -276,19 +277,43 @@ export function useMinimalActions({
     await addPath('File');
   }, [addPath]);
 
+  const changePath = useCallback(
+    async (path: string, kind: 'File' | 'Directory') => {
+      if (!cfg || !primaryId) return;
+      try {
+        await pickers.pickPathForDest(primaryId, kind, async (pickedPath, pickedKind) => {
+          if (pickedPath === path) return;
+          const duplicate = cfg.watched.some(
+            (watched) =>
+              watched.path === pickedPath && (watched.kind ?? 'Directory') === pickedKind,
+          );
+          if (duplicate) {
+            onEvent('That path is already protected.', 'info');
+            return;
+          }
+          const watched = cfg.watched.map((entry) =>
+            entry.path === path && (entry.kind ?? 'Directory') === kind
+              ? { ...entry, path: pickedPath, kind: pickedKind }
+              : entry,
+          );
+          await persist({ ...cfg, watched }, `Protected path changed to ${pickedPath}.`);
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        onEvent(`[useMinimalActions] Failed to change protected path: ${reason}`, 'error');
+      }
+    },
+    [cfg, onEvent, persist, pickers, primaryId],
+  );
+
   const removePath = useCallback(
-    async (path: string, kind: 'File' | 'Directory', sourceDestinationId: string) => {
+    async (path: string, kind: 'File' | 'Directory', _sourceDestinationId: string) => {
       if (!cfg || !primaryId) return;
       const next: Config = {
         ...cfg,
-        watched: cfg.watched.filter((w) => {
-          const currentDestinationId = resolveWatchedDestinationId(w, primaryId);
-          return !(
-            w.path === path &&
-            (w.kind ?? 'Directory') === kind &&
-            currentDestinationId === sourceDestinationId
-          );
-        }),
+        watched: cfg.watched.filter(
+          (watched) => watched.path !== path || (watched.kind ?? 'Directory') !== kind,
+        ),
       };
       await persist(next, `Removed ${path} from protection.`);
     },
@@ -296,16 +321,16 @@ export function useMinimalActions({
   );
 
   const updateKeep = useCallback(
-    async (path: string, kind: 'File' | 'Directory', sourceDestinationId: string, keep: number) => {
+    async (
+      path: string,
+      kind: 'File' | 'Directory',
+      _sourceDestinationId: string,
+      keep: number,
+    ) => {
       if (!cfg || !primaryId) return;
       const nextKeep = Math.max(0, Math.min(1000, keep));
       const nextWatched = cfg.watched.map((w) => {
-        const currentDestinationId = resolveWatchedDestinationId(w, primaryId);
-        if (
-          w.path !== path ||
-          (w.kind ?? 'Directory') !== kind ||
-          currentDestinationId !== sourceDestinationId
-        ) {
+        if (w.path !== path || (w.kind ?? 'Directory') !== kind) {
           return w;
         }
         return {
@@ -388,6 +413,7 @@ export function useMinimalActions({
     removeDestination,
     addFolder,
     addFile,
+    changePath,
     removePath,
     updateKeep,
     updateDestination,

@@ -10,7 +10,7 @@ const WEB_DESCRIPTION =
 const WEB_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self' blob:";
 
-function webMetadata(): Plugin {
+function webMetadata(includeSecurityMeta: boolean): Plugin {
   return {
     name: 'backup-sync-web-metadata',
     transformIndexHtml: {
@@ -18,11 +18,15 @@ function webMetadata(): Plugin {
       handler(html) {
         const siteUrl = process.env.VITE_PUBLIC_SITE_URL?.replace(/\/$/, '');
         const tags = [
-          {
-            tag: 'meta',
-            attrs: { 'http-equiv': 'Content-Security-Policy', content: WEB_CSP },
-            injectTo: 'head' as const,
-          },
+          ...(includeSecurityMeta
+            ? [
+                {
+                  tag: 'meta',
+                  attrs: { 'http-equiv': 'Content-Security-Policy', content: WEB_CSP },
+                  injectTo: 'head' as const,
+                },
+              ]
+            : []),
           {
             tag: 'meta',
             attrs: { name: 'description', content: WEB_DESCRIPTION },
@@ -97,11 +101,14 @@ function webMetadata(): Plugin {
   };
 }
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
   const webRuntime = process.env.VITE_APP_RUNTIME === 'web';
 
   return {
-    plugins: [react(), ...(webRuntime ? [webMetadata(), sites(), cloudflare()] : [])],
+    plugins: [
+      react(),
+      ...(webRuntime ? [webMetadata(command === 'build'), sites(), cloudflare()] : []),
+    ],
     resolve: webRuntime
       ? {
           alias: {

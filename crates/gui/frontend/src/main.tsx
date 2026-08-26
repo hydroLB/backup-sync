@@ -2,14 +2,13 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles.css';
-import { readColorModePreference, resolveColorMode, systemPrefersDark } from './theme/colorMode';
+import { resolveColorMode, systemPrefersDark } from './theme/colorMode';
 import { applyThemeTokens } from './theme/tokens';
 
 /** Keeps startup wiring in one function for safer initialization and error context. */
 function mountApp(): void {
   try {
-    const initialPreference = readColorModePreference();
-    const initialMode = resolveColorMode(initialPreference, systemPrefersDark());
+    const initialMode = resolveColorMode('auto', systemPrefersDark());
     applyThemeTokens(initialMode);
 
     const root = document.getElementById('root');

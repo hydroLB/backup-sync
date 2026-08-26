@@ -87,12 +87,40 @@ describe('useMinimalActions', () => {
       await actions.removeDestination('missing');
       await actions.addFolder();
       await actions.addFile();
+      await actions.changePath('/tmp/a', 'Directory');
       await actions.removePath('/tmp/a', 'Directory', 'primary');
       await actions.updateKeep('/tmp/a', 'Directory', 'primary', 4);
       await actions.updateDestination('/tmp/a', 'Directory', 'primary', 'other');
     });
 
     expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('changes every destination copy of a protected path together', async () => {
+    const cfg = buildConfig();
+    cfg.destinations.push({ id: 'mirror', path: '/mirror' });
+    cfg.watched = [
+      { path: '/source', kind: 'Directory', enabled: true, destination_id: 'primary' },
+      { path: '/source', kind: 'Directory', enabled: true, destination_id: 'mirror' },
+      { path: '/other', kind: 'File', enabled: true, destination_id: 'primary' },
+    ];
+    const pickPathForDest = vi.fn<Params['pickers']['pickPathForDest']>(
+      async (_destinationId, kind, updateWatched) => {
+        await updateWatched('/new-source', kind, 'primary');
+      },
+    );
+    const { actions, persist } = renderActions({
+      cfg,
+      pickers: { pickDestinationPath: vi.fn(async () => null), pickPathForDest },
+    });
+
+    await act(async () => actions.changePath('/source', 'Directory'));
+
+    const saved = persist.mock.calls[0]?.[0] as Config;
+    expect(saved.watched.filter((entry) => entry.path === '/new-source')).toHaveLength(2);
+    expect(saved.watched).toContainEqual(
+      expect.objectContaining({ path: '/other', destination_id: 'primary' }),
+    );
   });
 
   it('chooses a primary destination and reports picker failures', async () => {

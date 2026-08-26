@@ -30,7 +30,7 @@ export async function openDialog(options: OpenOptions): Promise<OpenResult> {
         return '/Browser Workspace/Restored' as OpenResult;
       }
       if (title.includes('destination')) {
-        return `browser-vault://vault-${Date.now()}` as OpenResult;
+        return 'browser-vault://new-storage' as OpenResult;
       }
 
       const selection = await new Promise<File[]>((resolve) => {

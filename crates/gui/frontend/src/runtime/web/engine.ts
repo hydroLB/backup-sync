@@ -632,6 +632,42 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
         if (!config.safe_mode) await runBackup(state);
         return { daemon_restarted: false, daemon_restart_warning: null };
       })) as T;
+    case 'relocate_destination_cmd':
+      return (await mutate(async (state) => {
+        const destinationId = String(args?.destinationId ?? '');
+        const newPath = String(args?.newPath ?? '');
+        const destinationIndex = state.config.destinations.findIndex(
+          (destination) => destination.id === destinationId,
+        );
+        if (destinationIndex < 0) throw new Error('Storage location no longer exists.');
+        if (!newPath) throw new Error('Choose a new storage location.');
+        if (
+          state.config.destinations.some(
+            (destination) => destination.id !== destinationId && destination.path === newPath,
+          )
+        ) {
+          throw new Error('That storage location is already configured.');
+        }
+        const vault = state.vaults[destinationId] ?? { blobs: {}, manifests: [] };
+        const filesMoved = Object.keys(vault.blobs).length + vault.manifests.length;
+        const bytesMoved = Object.values(vault.blobs).reduce(
+          (total, bytes) => total + bytes.byteLength,
+          0,
+        );
+        state.config.destinations[destinationIndex] = {
+          ...state.config.destinations[destinationIndex]!,
+          path: newPath,
+        };
+        if (destinationIndex === 0) state.config.backup_root = newPath;
+        log(state, `storage ${destinationId} moved and verified at ${newPath}`);
+        return {
+          config: structuredClone(state.config),
+          files_moved: filesMoved,
+          bytes_moved: bytesMoved,
+          old_location_removed: true,
+          warning: null,
+        };
+      })) as T;
     case 'toggle_safe_mode_cmd':
       return (await mutate(async (state) => {
         const desired = Boolean(args?.desired);

@@ -9,6 +9,19 @@ import {
 } from './types';
 import { safeInvoke, safeInvokeWithTimeout, wrapError } from './ipc';
 
+/** Preserve the current live state before an in-place recall when the user asks for it. */
+export async function createSafetyBackup(): Promise<void> {
+  try {
+    await safeInvokeWithTimeout<void>(
+      'run_now_cmd',
+      { correlationId: correlationId('restore_safety') },
+      0,
+    );
+  } catch (error) {
+    throw wrapError('[createSafetyBackup] Failed to preserve the current state', error);
+  }
+}
+
 /** Enables selecting a restore version from the GUI. */
 export async function listVersions(): Promise<FolderVersionsDto[]> {
   try {

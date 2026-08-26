@@ -20,11 +20,20 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const response = await env.ASSETS.fetch(request);
     const secured = new Response(response.body, response);
+    const url = new URL(request.url);
+    const localDevelopment =
+      url.hostname === '127.0.0.1' ||
+      url.hostname === 'localhost' ||
+      url.hostname === '[::1]';
+
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      if (localDevelopment && name === 'Content-Security-Policy') {
+        continue;
+      }
       secured.headers.set(name, value);
     }
 
-    const path = new URL(request.url).pathname;
+    const path = url.pathname;
     if (/^\/assets\/[^/]+\.[A-Za-z0-9]+$/.test(path)) {
       secured.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
     } else if (path === '/' || path.endsWith('.html')) {

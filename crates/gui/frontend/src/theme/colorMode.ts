@@ -108,3 +108,20 @@ export function useColorMode(): {
 
   return { preference, resolvedMode, setPreference };
 }
+
+/** Follow the operating system appearance without exposing an app-level theme setting. */
+export function useSystemColorMode(): ResolvedColorMode {
+  const [prefersDark, setPrefersDark] = useState<boolean>(() => systemPrefersDark());
+  const resolvedMode: ResolvedColorMode = prefersDark ? 'dark' : 'light';
+
+  useEffect(() => observeSystemColorScheme(setPrefersDark), []);
+
+  useEffect(() => {
+    applyThemeTokens(resolvedMode);
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.colorModePreference = 'auto';
+    }
+  }, [resolvedMode]);
+
+  return resolvedMode;
+}

@@ -5,7 +5,6 @@ import { RestoreModal } from './RestoreModal';
 import { useMinimalActions } from './hooks/useMinimalActions';
 import { useMinimalConfig } from './hooks/useMinimalConfig';
 import { useMinimalRunning } from './hooks/useMinimalRunning';
-import { useMinimalLog } from './hooks/useMinimalLog';
 import { SavePulseScope, useMinimalFeedback } from './hooks/useMinimalFeedback';
 import { useMinimalStatus } from './hooks/useMinimalStatus';
 import { useMinimalLiveHealth } from './hooks/useMinimalLiveHealth';
@@ -14,13 +13,13 @@ import { removeKeptExtraVersion } from '../../services/safety';
 import { MinimalHeader } from './sections/MinimalHeader';
 import { DestinationCard } from './sections/DestinationCard';
 import { FoldersCard } from './sections/FoldersCard';
-import { LogCard } from './sections/LogCard';
 import { RestoreCard } from './sections/RestoreCard';
-import { SetupNotice } from './sections/SetupNotice';
 import { ToastMessage } from '../ui/ToastMessage';
 import { InlineAlert } from '../ui/InlineAlert';
 import { Button } from '../ui/Button';
 import { StateBlock } from '../ui/StateBlock';
+import { PendingStorageMove, StorageMoveModal } from './StorageMoveModal';
+import { relocateDestination } from '../../services/storage';
 
 type EventKind = 'ok' | 'error' | 'info';
 
@@ -34,6 +33,8 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   const [hardeningNonce, setHardeningNonce] = useState(0);
   const [dismissedSafetyWarningTs, setDismissedSafetyWarningTs] = useState<number | null>(null);
   const [safetyRemoveBusy, setSafetyRemoveBusy] = useState(false);
+  const [pendingStorageMove, setPendingStorageMove] = useState<PendingStorageMove | null>(null);
+  const [storageMoveBusy, setStorageMoveBusy] = useState(false);
   const lastHardeningKeyRef = useRef<string | null>(null);
   const hardeningRunIdRef = useRef(0);
 
@@ -91,7 +92,6 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     cfg,
     primary,
     destinations,
-    watchedDirs,
     watchedItems,
     loading,
     loadError,
@@ -106,19 +106,15 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     addDestination,
     removeDestination,
     addFolder,
+    changePath,
     removePath,
     updateKeep,
-    updateDestination,
   } = useMinimalActions({
     cfg,
     primaryId: primary?.id ?? null,
     persist,
     pickers,
     onEvent: emitEvent,
-  });
-  const { showLog, logTail, logLoading, setShowLog, refreshLog } = useMinimalLog({
-    onEvent: emitEvent,
-    setBusy,
   });
   const { liveSafeMode, setLiveSafeMode, destinationWarning, replicationWarning, safetyWarning } =
     useMinimalStatus({ onEvent: emitEvent });
@@ -134,27 +130,82 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     suspend: pickerBusy,
   });
 
-  const folderItems = useMemo(
-    () =>
-      watchedItems.map((watched) => ({
+  const requestStorageMove = useCallback(
+    async (destinationId: string) => {
+      const destination = destinations.find((candidate) => candidate.id === destinationId);
+      if (!destination) {
+        emitEvent('That storage location no longer exists.', 'error');
+        return;
+      }
+      const picked = await pickers.pickDestinationPath();
+      if (!picked || picked === destination.path) return;
+      if (
+        destinations.some(
+          (candidate) => candidate.id !== destinationId && candidate.path === picked,
+        )
+      ) {
+        emitEvent('That storage location is already configured.', 'info');
+        return;
+      }
+      const index = destinations.findIndex((candidate) => candidate.id === destinationId);
+      setPendingStorageMove({
+        destinationId,
+        label: index === 0 ? 'Main storage' : 'Secondary backup location',
+        oldPath: destination.path,
+        newPath: picked,
+      });
+    },
+    [destinations, emitEvent, pickers],
+  );
+
+  const confirmStorageMove = useCallback(async () => {
+    if (!pendingStorageMove) return;
+    try {
+      setStorageMoveBusy(true);
+      setBusy(true);
+      const result = await relocateDestination(
+        pendingStorageMove.destinationId,
+        pendingStorageMove.newPath,
+      );
+      setCfg(result.config);
+      setPendingStorageMove(null);
+      if (result.warning) emitEvent(result.warning, 'info');
+      emitEvent(`${pendingStorageMove.label} moved safely to ${pendingStorageMove.newPath}.`, 'ok');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      emitEvent(
+        `Storage move failed. The old backup location was kept unchanged: ${reason}`,
+        'error',
+      );
+    } finally {
+      setStorageMoveBusy(false);
+      setBusy(false);
+    }
+  }, [emitEvent, pendingStorageMove, setBusy, setCfg]);
+
+  const folderItems = useMemo(() => {
+    const unique = new Map<
+      string,
+      {
+        path: string;
+        kind: 'File' | 'Directory';
+        destination_id: string;
+        max_backups_per_file: number | null;
+      }
+    >();
+    for (const watched of watchedItems) {
+      const kind = watched.kind ?? 'Directory';
+      const key = `${kind}:${watched.path}`;
+      if (unique.has(key)) continue;
+      unique.set(key, {
         path: watched.path,
-        kind: watched.kind ?? 'Directory',
+        kind,
         destination_id: watched.destination_id ?? primary?.id ?? 'default',
         max_backups_per_file: watched.max_backups_per_file ?? null,
-      })),
-    [primary?.id, watchedItems],
-  );
-  const destinationReady = (primary?.path ?? '').trim().length > 0;
-  const configuredDestinationCount = useMemo(
-    () => destinations.filter((destination) => destination.path.trim().length > 0).length,
-    [destinations],
-  );
-  const setupStep = useMemo(() => {
-    if (!destinationReady) return 'destination' as const;
-    if (folderItems.length === 0) return 'folders' as const;
-    return 'ready' as const;
-  }, [destinationReady, folderItems.length]);
-
+      });
+    }
+    return [...unique.values()];
+  }, [primary?.id, watchedItems]);
   useEffect(() => {
     if (!cfg) return;
     const fingerprint = hardeningFingerprint(cfg);
@@ -226,7 +277,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         return;
       }
       if (running) {
-        await runWithSaveScope('global', async () => {
+        await runWithSaveScope('header', async () => {
           await applyRunningState(running);
         });
         return;
@@ -291,13 +342,9 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         liveSafeMode={liveSafeMode}
         busy={busy}
         runningBusy={runningBusy}
-        showLog={showLog}
-        destinationCount={configuredDestinationCount}
-        watchedCount={folderItems.length}
         onRunningChange={(running) => {
           void setRunning(running);
         }}
-        onToggleLog={() => setShowLog((prev) => !prev)}
       />
 
       {inline && (
@@ -362,93 +409,68 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           </InlineAlert>
         )}
 
-      <SetupNotice
-        step={setupStep}
-        destinationCount={configuredDestinationCount}
-        watchedCount={folderItems.length}
-        busy={busy || pickerBusy}
-        onChooseDestination={() => {
-          void runWithSaveScope('destination', async () => {
-            await chooseDestination();
-          });
-        }}
-        onAddPath={() => {
-          void runWithSaveScope('folders', async () => {
-            await addFolder();
-          });
-        }}
-      />
-
       <div className="grid minimal-grid">
+        <FoldersCard
+          busy={busy}
+          items={folderItems}
+          defaultKeep={cfg.max_backups_per_file}
+          watchedWarning={watchedHealthWarning}
+          onAddFolder={() =>
+            runWithSaveScope('none', async () => {
+              await addFolder();
+            })
+          }
+          onChangePath={(path, kind) =>
+            runWithSaveScope('none', async () => {
+              await changePath(path, kind);
+            })
+          }
+          onRemovePath={(path, kind, sourceDestinationId) =>
+            runWithSaveScope('none', async () => {
+              await removePath(path, kind, sourceDestinationId);
+            })
+          }
+          onUpdateKeep={(path, kind, sourceDestinationId, keep) =>
+            runWithSaveScope('none', async () => {
+              await updateKeep(path, kind, sourceDestinationId, keep);
+            })
+          }
+        />
+
         <DestinationCard
           destinations={destinations}
           busy={busy || pickerBusy}
           destinationWarning={destinationWarning ?? destinationHealthWarning}
           replicationWarning={replicationWarning}
-          onChoose={() => {
-            void runWithSaveScope('destination', async () => {
+          onChoose={() =>
+            runWithSaveScope('none', async () => {
               await chooseDestination();
-            });
-          }}
-          onAddDestination={() => {
-            void runWithSaveScope('destination', async () => {
+            })
+          }
+          onChangeDestination={(destinationId) =>
+            runWithSaveScope('none', async () => {
+              await requestStorageMove(destinationId);
+            })
+          }
+          onAddDestination={() =>
+            runWithSaveScope('none', async () => {
               await addDestination();
-            });
-          }}
-          onRemoveDestination={(destinationId) => {
-            void runWithSaveScope('destination', async () => {
+            })
+          }
+          onRemoveDestination={(destinationId) =>
+            runWithSaveScope('none', async () => {
               await removeDestination(destinationId);
-            });
-          }}
-        />
-
-        <FoldersCard
-          busy={busy}
-          items={folderItems}
-          destinations={destinations}
-          destinationReady={destinationReady}
-          defaultKeep={cfg.max_backups_per_file}
-          watchedWarning={watchedHealthWarning}
-          onAddFolder={() => {
-            void runWithSaveScope('folders', async () => {
-              await addFolder();
-            });
-          }}
-          onRemovePath={(path, kind, sourceDestinationId) => {
-            void runWithSaveScope('folders', async () => {
-              await removePath(path, kind, sourceDestinationId);
-            });
-          }}
-          onUpdateKeep={(path, kind, sourceDestinationId, keep) => {
-            void runWithSaveScope('folders', async () => {
-              await updateKeep(path, kind, sourceDestinationId, keep);
-            });
-          }}
-          onUpdateDestination={(path, kind, sourceDestinationId, destinationId) => {
-            void runWithSaveScope('folders', async () => {
-              await updateDestination(path, kind, sourceDestinationId, destinationId);
-            });
-          }}
+            })
+          }
         />
 
         <RestoreCard
           busy={busy}
-          disabled={watchedDirs.length === 0}
-          watchedCount={watchedDirs.length}
+          disabled={folderItems.length === 0}
           onOpenRestore={() => setRestoreOpen(true)}
         />
       </div>
 
-      <LogCard
-        open={showLog}
-        busy={busy}
-        loading={logLoading}
-        tail={logTail}
-        onRefresh={() => {
-          void refreshLog();
-        }}
-        onClose={() => setShowLog(false)}
-      />
       <RestoreModal
         open={restoreOpen}
         onClose={() => setRestoreOpen(false)}
@@ -458,6 +480,12 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           }
           emitEvent(msg, kind);
         }}
+      />
+      <StorageMoveModal
+        move={pendingStorageMove}
+        busy={storageMoveBusy}
+        onCancel={() => setPendingStorageMove(null)}
+        onConfirm={confirmStorageMove}
       />
       <ToastMessage toast={toast} onDismiss={clearToast} />
       {showSavedBadge && (

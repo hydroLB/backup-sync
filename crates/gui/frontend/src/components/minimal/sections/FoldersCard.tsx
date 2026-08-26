@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { WatchedPath } from '../../../domain/config';
 import { Button } from '../../ui/Button';
 import { InlineAlert } from '../../ui/InlineAlert';
@@ -10,128 +11,93 @@ type Item = {
   max_backups_per_file: number | null;
 };
 
-type DestinationOption = {
-  id: string;
-  label?: string | null;
-  path: string;
-};
-
 type Props = {
   busy: boolean;
   items: Item[];
-  destinations: DestinationOption[];
-  destinationReady: boolean;
   defaultKeep: number;
   watchedWarning: string | null;
-  onAddFolder: () => void;
-  onRemovePath: (path: string, kind: 'File' | 'Directory', sourceDestinationId: string) => void;
+  onAddFolder: () => Promise<void>;
+  onChangePath: (path: string, kind: 'File' | 'Directory') => Promise<void>;
+  onRemovePath: (
+    path: string,
+    kind: 'File' | 'Directory',
+    sourceDestinationId: string,
+  ) => Promise<void>;
   onUpdateKeep: (
     path: string,
     kind: 'File' | 'Directory',
     sourceDestinationId: string,
     keep: number,
-  ) => void;
-  onUpdateDestination: (
-    path: string,
-    kind: 'File' | 'Directory',
-    sourceDestinationId: string,
-    destinationId: string,
-  ) => void;
+  ) => Promise<void>;
 };
 
-/** Encapsulate folder rendering and keep `MinimalMain` focused on orchestration. */
+/** Put the user's protected content first and show each source only once. */
 export function FoldersCard({
   busy,
   items,
-  destinations,
-  destinationReady,
   defaultKeep,
   watchedWarning,
   onAddFolder,
+  onChangePath,
   onRemovePath,
   onUpdateKeep,
-  onUpdateDestination,
 }: Props) {
-  const hasItems = items.length > 0;
-
   return (
     <section className="card folders-card" aria-labelledby="folders-card-title">
       <div className="section-title paths-head">
         <div className="section-identity">
           <span className="section-step-badge" aria-hidden="true">
-            02
+            01
           </span>
           <div>
             <span className="section-eyebrow">Protection</span>
             <h2 className="section-heading" id="folders-card-title">
-              What should stay protected?
+              Protected items
             </h2>
+            <p className="section-summary">Folders and files included in every backup</p>
           </div>
         </div>
-        <div className="btn-ring">
-          <Button
-            className="add-path-btn"
-            onClick={onAddFolder}
-            disabled={busy || !destinationReady}
-            aria-label="Add protected path"
-          >
-            Add path…
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          className="add-path-btn"
+          onClick={() => void onAddFolder()}
+          disabled={busy}
+          aria-label="Add protected path"
+        >
+          <span aria-hidden="true">+</span> Add item
+        </Button>
       </div>
-      <p className="section-subtitle section-subtitle--roomy">
-        {destinationReady
-          ? 'Add the folders and files that matter. Backup Sync stores only new or changed content.'
-          : 'Choose a storage location first so protected content has somewhere safe to go.'}
-      </p>
+
       {watchedWarning && (
         <InlineAlert kind="error" className="mt-3">
           {watchedWarning}
         </InlineAlert>
       )}
 
-      {!hasItems && (
+      {items.length === 0 ? (
         <StateBlock
           tone="empty"
-          title={
-            destinationReady ? 'No paths protected yet' : 'Choose a destination before adding paths'
-          }
-          message={
-            destinationReady
-              ? 'Add the first folder or file, then Backup Sync will route it to every destination.'
-              : 'The first destination defines where new protected paths will store backup history.'
-          }
-          className="mt-3 paths-empty-state"
+          title="Nothing is protected yet"
+          message="Add a folder or file now. Choose where its copies live in step 2."
+          className="compact-empty-state"
           action={
-            <Button
-              tone="secondary"
-              size="sm"
-              onClick={onAddFolder}
-              disabled={busy || !destinationReady}
-              aria-label="Add protected path"
-            >
-              Add path…
+            <Button size="sm" onClick={() => void onAddFolder()} disabled={busy}>
+              Add your first folder
             </Button>
           }
         />
-      )}
-
-      {hasItems && (
-        <div className="stack folder-list">
-          {items.map((w) => (
+      ) : (
+        <div className="folder-list">
+          {items.map((item) => (
             <FolderRow
-              key={`${w.kind}:${w.path}:${w.destination_id}`}
+              key={`${item.kind}:${item.path}`}
               busy={busy}
-              path={w.path}
-              kind={w.kind}
-              destinationId={w.destination_id}
-              destinations={destinations}
-              keep={w.max_backups_per_file ?? defaultKeep}
-              onRemove={() => onRemovePath(w.path, w.kind, w.destination_id)}
-              onUpdateKeep={(keep) => onUpdateKeep(w.path, w.kind, w.destination_id, keep)}
-              onUpdateDestination={(destinationId) =>
-                onUpdateDestination(w.path, w.kind, w.destination_id, destinationId)
-              }
+              path={item.path}
+              kind={item.kind}
+              keep={item.max_backups_per_file ?? defaultKeep}
+              onChange={() => onChangePath(item.path, item.kind)}
+              onRemove={() => onRemovePath(item.path, item.kind, item.destination_id)}
+              onUpdateKeep={(keep) => onUpdateKeep(item.path, item.kind, item.destination_id, keep)}
             />
           ))}
         </div>
@@ -144,105 +110,111 @@ type RowProps = {
   busy: boolean;
   path: string;
   kind: 'File' | 'Directory';
-  destinationId: string;
-  destinations: DestinationOption[];
   keep: number;
-  onRemove: () => void;
-  onUpdateKeep: (keep: number) => void;
-  onUpdateDestination: (destinationId: string) => void;
+  onChange: () => Promise<void>;
+  onRemove: () => Promise<void>;
+  onUpdateKeep: (keep: number) => Promise<void>;
 };
 
-/** Keep folder list rendering small and reuse consistent markup. */
-function FolderRow({
-  busy,
-  path,
-  destinationId,
-  destinations,
-  keep,
-  onRemove,
-  onUpdateKeep,
-  onUpdateDestination,
-}: RowProps) {
+function FolderRow({ busy, path, kind, keep, onChange, onRemove, onUpdateKeep }: RowProps) {
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  const saveKeep = async (nextKeep: number) => {
+    await onUpdateKeep(nextKeep);
+  };
+
   return (
     <div className="folder-row">
-      <div className="pill" title={path}>
-        <span className="pill-main truncate">{path}</span>
-      </div>
-      <div className="folder-row-controls">
-        <div className="stack-sm">
-          <span className="muted text-xs">Destination</span>
-          <select
-            value={destinationId}
-            aria-label={`Destination for ${path}`}
-            onChange={(event) => onUpdateDestination(event.target.value)}
-            disabled={busy}
-          >
-            {destinations.map((destination) => (
-              <option key={destination.id} value={destination.id}>
-                {(destination.label && destination.label.trim().length > 0
-                  ? destination.label.trim()
-                  : destination.path) || destination.id}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="stack-sm">
-          <span className="muted text-xs">Backups to keep</span>
-          <div className="stepper" aria-label="Backups to keep">
-            <button
-              className="btn secondary btn-sm stepper-btn"
-              type="button"
-              onClick={() => onUpdateKeep(Math.max(0, keep - 1))}
+      {confirmRemove ? (
+        <div className="inline-confirm" role="alert">
+          <span>Stop protecting this {kind.toLowerCase()}?</span>
+          <div>
+            <Button
+              tone="secondary"
+              size="sm"
+              onClick={() => setConfirmRemove(false)}
               disabled={busy}
-              aria-label="Decrease backups to keep"
             >
-              -
-            </button>
-            <input
-              className="stepper-input"
-              type="number"
-              min={0}
-              max={1000}
-              value={keep}
-              aria-label={`Backups to keep for ${path}`}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                if (!Number.isFinite(n)) return;
-                onUpdateKeep(Math.max(0, Math.min(1000, Math.round(n))));
-              }}
-              disabled={busy}
-            />
-            <button
-              className="btn secondary btn-sm stepper-btn"
-              type="button"
-              onClick={() => onUpdateKeep(Math.min(1000, keep + 1))}
-              disabled={busy}
-              aria-label="Increase backups to keep"
-            >
-              +
-            </button>
+              Cancel
+            </Button>
+            <Button tone="danger" size="sm" onClick={() => void onRemove()} disabled={busy}>
+              Remove
+            </Button>
           </div>
         </div>
-        <Button
-          tone="secondary"
-          size="sm"
-          onClick={onRemove}
-          disabled={busy}
-          aria-label={`Remove protected path ${path}`}
-        >
-          Remove
-        </Button>
-      </div>
+      ) : (
+        <div className="folder-row__source">
+          <button
+            className="folder-row__main"
+            type="button"
+            onClick={() => void onChange()}
+            disabled={busy}
+            aria-label={`Change protected ${kind.toLowerCase()} ${path}`}
+          >
+            <span className="folder-kind">{kind === 'Directory' ? 'Folder' : 'File'}</span>
+            <span className="folder-path truncate" title={path}>
+              {path}
+            </span>
+          </button>
+          <div className="folder-row__keep">
+            <span className="folder-row__keep-label">Keep versions</span>
+            <div className="stepper" aria-label={`Versions to keep for ${path}`}>
+              <button
+                className="btn secondary btn-sm stepper-btn"
+                type="button"
+                onClick={() => void saveKeep(Math.max(1, keep - 1))}
+                disabled={busy || keep <= 1}
+                aria-label={`Keep fewer versions for ${path}`}
+              >
+                −
+              </button>
+              <input
+                className="stepper-input"
+                type="number"
+                min={1}
+                max={1000}
+                value={keep}
+                aria-label={`Versions to keep for ${path}`}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  if (!Number.isFinite(value)) return;
+                  void saveKeep(Math.max(1, Math.min(1000, Math.round(value))));
+                }}
+                disabled={busy}
+              />
+              <button
+                className="btn secondary btn-sm stepper-btn"
+                type="button"
+                onClick={() => void saveKeep(Math.min(1000, keep + 1))}
+                disabled={busy}
+                aria-label={`Keep more versions for ${path}`}
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <button
+            className="icon-remove"
+            type="button"
+            onClick={() => setConfirmRemove(true)}
+            disabled={busy}
+            aria-label={`Remove protected path ${path}`}
+            title="Remove from protection"
+          >
+            ×
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 /** Keep adapter logic centralized and testable. */
-export function watchedToItem(w: WatchedPath): Item {
+export function watchedToItem(watched: WatchedPath): Item {
   return {
-    path: w.path,
-    kind: w.kind ?? 'Directory',
-    destination_id: w.destination_id ?? 'default',
-    max_backups_per_file: w.max_backups_per_file ?? null,
+    path: watched.path,
+    kind: watched.kind ?? 'Directory',
+    destination_id: watched.destination_id ?? 'default',
+    max_backups_per_file: watched.max_backups_per_file ?? null,
   };
 }

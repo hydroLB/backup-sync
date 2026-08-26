@@ -2,8 +2,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MinimalMain } from '../MinimalMain';
 import { Config } from '../../../domain/config';
 import { loadConfig, saveConfig } from '../../../services/config';
-import { safeInvoke } from '../../../services/ipc';
+import { safeInvoke, safeInvokeWithTimeout } from '../../../services/ipc';
 import { removeKeptExtraVersion } from '../../../services/safety';
+import { openDialog } from '../../../services/dialog';
+import { relocateDestination } from '../../../services/storage';
 
 const { tauriAvailableMock } = vi.hoisted(() => ({
   tauriAvailableMock: vi.fn(() => true),
@@ -16,12 +18,21 @@ vi.mock('../../../services/config', () => ({
 
 vi.mock('../../../services/ipc', () => ({
   safeInvoke: vi.fn(),
+  safeInvokeWithTimeout: vi.fn(),
   tauriAvailable: tauriAvailableMock,
   wrapError: (context: string, error: unknown) => new Error(`${context}: ${String(error)}`),
 }));
 
 vi.mock('../../../services/safety', () => ({
   removeKeptExtraVersion: vi.fn(),
+}));
+
+vi.mock('../../../services/dialog', () => ({
+  openDialog: vi.fn(),
+}));
+
+vi.mock('../../../services/storage', () => ({
+  relocateDestination: vi.fn(),
 }));
 
 /** Keep background hardening deterministic in minimal UI tests. */
@@ -163,43 +174,45 @@ async function renderMinimal(
       daemon_restarted: true,
       daemon_restart_warning: null,
     });
-    (safeInvoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      async (command: string, payload?: { desired?: boolean }) => {
-        if (command === 'hardening_check_cmd') {
-          return makePassingHardeningReport();
-        }
-        if (command === 'get_status') {
-          return status;
-        }
-        if (command === 'check_destination_cmd') {
-          return {
-            writable: true,
-            free_bytes: 1024 * 1024 * 1024,
-            message: 'Ready',
-          };
-        }
-        if (command === 'test_access_cmd') {
-          return {
-            destination_writable: true,
-            destination_message: 'Ready',
-            watched_ok: cfg.watched.map((entry) => entry.path),
-            watched_missing: [],
-            watched_unwritable: [],
-          };
-        }
-        if (command === 'toggle_safe_mode_cmd') {
-          return {
-            safe_mode: payload?.desired ?? false,
-            applied_live: true,
-            warning: null,
-          };
-        }
-        return null;
-      },
+    const invokeImplementation = async (command: string, payload?: { desired?: boolean }) => {
+      if (command === 'hardening_check_cmd') {
+        return makePassingHardeningReport();
+      }
+      if (command === 'get_status') {
+        return status;
+      }
+      if (command === 'check_destination_cmd') {
+        return {
+          writable: true,
+          free_bytes: 1024 * 1024 * 1024,
+          message: 'Ready',
+        };
+      }
+      if (command === 'test_access_cmd') {
+        return {
+          destination_writable: true,
+          destination_message: 'Ready',
+          watched_ok: cfg.watched.map((entry) => entry.path),
+          watched_missing: [],
+          watched_unwritable: [],
+        };
+      }
+      if (command === 'toggle_safe_mode_cmd') {
+        return {
+          safe_mode: payload?.desired ?? false,
+          applied_live: true,
+          warning: null,
+        };
+      }
+      return null;
+    };
+    (safeInvoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(invokeImplementation);
+    (safeInvokeWithTimeout as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      invokeImplementation,
     );
     const onEvent = vi.fn();
     render(<MinimalMain onEvent={onEvent} />);
-    await screen.findByRole('heading', { name: 'Where should copies live?' });
+    await screen.findByRole('heading', { name: 'Backup locations' });
     return { onEvent };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -212,36 +225,36 @@ async function assertOnlyRestoreActionVisible(): Promise<void> {
   try {
     await renderMinimal();
     expect(screen.getByLabelText('Running')).toBeInTheDocument();
-    expect(screen.getAllByText('Automatic protection').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Every 30 min/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('Automatic, versioned protection')).toBeInTheDocument();
     expect(screen.queryByLabelText('Backup interval minutes')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Browse saved versions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recover a previous version' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Safety checks required' }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Actions')).not.toBeInTheDocument();
     expect(screen.queryByText('Back up now')).not.toBeInTheDocument();
-    expect(screen.getByText('Your protection workflow is connected.')).toBeInTheDocument();
+    expect(screen.queryByText('How Backup Sync works')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Theme control/i)).not.toBeInTheDocument();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[MinimalMain.test.tsx::assertOnlyRestoreActionVisible] ${reason}`);
   }
 }
 
-/** Prevent regressions where first-run setup order becomes ambiguous. */
-async function assertDestinationFirstGuidance(): Promise<void> {
+/** Protected content stays first even before storage has been chosen. */
+async function assertProtectionFirstGuidance(): Promise<void> {
   try {
     await renderMinimal({
       backup_root: '',
       destinations: [{ id: 'default', path: '', label: 'Primary' }],
       watched: [],
     });
-    expect(screen.getByText('Start with a safe place for your copies.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Choose destination' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Add protected path' })[0]).toBeDisabled();
+    expect(screen.getByText('Nothing is protected yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose storage' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[MinimalMain.test.tsx::assertDestinationFirstGuidance] ${reason}`);
+    throw new Error(`[MinimalMain.test.tsx::assertProtectionFirstGuidance] ${reason}`);
   }
 }
 
@@ -249,8 +262,8 @@ async function assertDestinationFirstGuidance(): Promise<void> {
 async function assertAddPathGuidance(): Promise<void> {
   try {
     await renderMinimal({ watched: [] });
-    expect(screen.getByText('Storage is ready. Choose what matters.')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Add protected path' }).length).toBeGreaterThan(0);
+    expect(screen.getByText('Nothing is protected yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[MinimalMain.test.tsx::assertAddPathGuidance] ${reason}`);
@@ -296,13 +309,38 @@ async function assertAdditionalDestinationsVisible(): Promise<void> {
         { id: 'dest-2', path: '/tmp/backup-2', label: 'Destination 2' },
       ],
     });
-    expect(screen.getByText(/Destination 2: \/tmp\/backup-2/)).toBeInTheDocument();
+    expect(screen.getByText('Main storage')).toBeInTheDocument();
+    expect(screen.getByText('Secondary backup location')).toBeInTheDocument();
+    expect(screen.getByText('Complete redundant backup copy')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/backup-2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change main storage' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Remove destination Destination 2' }),
+      screen.getByRole('button', { name: 'Change secondary backup location' }),
     ).toBeInTheDocument();
+    const removeCopy = screen.getByRole('button', {
+      name: 'Remove secondary backup location /tmp/backup-2',
+    });
+    expect(removeCopy).toBeInTheDocument();
+    fireEvent.click(removeCopy);
+    expect(screen.getByText('Remove this storage location?')).toBeInTheDocument();
+    expect(screen.queryByText('/tmp/backup-2')).not.toBeInTheDocument();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`[MinimalMain.test.tsx::assertAdditionalDestinationsVisible] ${reason}`);
+  }
+}
+
+/** Folder and storage rows should advertise that their paths can be changed in place. */
+async function assertPathRowsAreClickable(): Promise<void> {
+  try {
+    await renderMinimal();
+    expect(
+      screen.getByRole('button', { name: 'Change protected directory /tmp/project' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change main storage' })).toBeInTheDocument();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`[MinimalMain.test.tsx::assertPathRowsAreClickable] ${reason}`);
   }
 }
 
@@ -310,17 +348,49 @@ describe('MinimalMain', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tauriAvailableMock.mockReturnValue(true);
+    vi.mocked(openDialog).mockResolvedValue(null);
   });
 
   it('shows running toggle, automatic cadence, and restore button', assertOnlyRestoreActionVisible);
-  it(
-    'shows destination-first setup guidance when no destination is selected',
-    assertDestinationFirstGuidance,
-  );
+  it('keeps protection first when no destination is selected', assertProtectionFirstGuidance);
   it('shows add-path guidance when no protected paths exist', assertAddPathGuidance);
   it('wires running toggle to IPC', assertRunningToggleCallsIpc);
   it('shows Saved badge when paused', assertPauseShowsSavedBadge);
+  it('makes configured paths directly clickable', assertPathRowsAreClickable);
   it('shows additional destinations with remove controls', assertAdditionalDestinationsVisible);
+
+  it('confirms and safely migrates main storage before changing its path', async () => {
+    const nextConfig = makeConfig({
+      backup_root: '/tmp/new-backups',
+      destinations: [{ id: 'default', path: '/tmp/new-backups', label: 'Primary' }],
+    });
+    vi.mocked(openDialog).mockResolvedValueOnce('/tmp/new-backups');
+    vi.mocked(relocateDestination).mockResolvedValueOnce({
+      config: nextConfig,
+      files_moved: 12,
+      bytes_moved: 4096,
+      old_location_removed: true,
+      warning: null,
+    });
+    await renderMinimal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change main storage' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Move backup storage?' }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('/tmp/backups')).toHaveLength(2);
+    expect(screen.getByText('/tmp/new-backups')).toBeInTheDocument();
+    expect(relocateDestination).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move backups safely' }));
+
+    await waitFor(() => {
+      expect(relocateDestination).toHaveBeenCalledWith('default', '/tmp/new-backups');
+    });
+    expect(await screen.findByText('/tmp/new-backups')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Move backup storage?' })).not.toBeInTheDocument();
+  });
 
   it('shows a retryable configuration error and recovers', async () => {
     const cfg = makeConfig();
@@ -353,9 +423,7 @@ describe('MinimalMain', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('permission denied');
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(
-      await screen.findByRole('heading', { name: 'Where should copies live?' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Backup locations' })).toBeInTheDocument();
     expect(loadConfig).toHaveBeenCalledTimes(2);
   });
 
