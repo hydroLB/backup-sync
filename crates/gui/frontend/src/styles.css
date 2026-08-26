@@ -3074,9 +3074,24 @@ code {
   background: #f4f5f7;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 80dvh;
+  min-height: 80dvh;
+  overflow: hidden;
+}
+
 .app {
   width: 100%;
   max-width: 1500px;
+  height: 80dvh;
+  min-height: 0;
+  overflow: hidden;
   gap: clamp(14px, calc(0.8vw + 0.45vh), 26px);
   padding: clamp(18px, 2.2vh, 32px) clamp(20px, 2.2vw, 44px) clamp(24px, 3vh, 42px);
 }
@@ -3182,14 +3197,26 @@ code {
 }
 
 .minimal-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr)) auto;
   gap: clamp(16px, calc(0.9vw + 0.5vh), 28px);
+  align-items: stretch;
+}
+
+.minimal-grid > * {
+  align-self: stretch;
 }
 
 .minimal-grid .card {
   position: relative;
   isolation: isolate;
-  overflow: visible;
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  flex-direction: column;
   min-height: 0;
   padding: clamp(18px, 1.65vw, 30px);
   border: 1px solid rgba(125, 148, 184, 0.24);
@@ -3308,6 +3335,27 @@ code {
   font-size: clamp(22px, 1.7vw, 32px);
 }
 
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(9px, 0.7vw, 13px);
+}
+
+.section-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: clamp(23px, 1.65vw, 29px);
+  padding: 0 clamp(8px, 0.65vw, 12px);
+  border: 1px solid color-mix(in srgb, var(--section-accent) 34%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--section-accent) 11%, transparent);
+  color: color-mix(in srgb, var(--section-accent) 78%, var(--text));
+  font-size: clamp(10px, 0.67vw, 13px);
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .minimal-grid .section-title .btn {
   width: auto;
   min-width: clamp(116px, 8.4vw, 148px);
@@ -3359,8 +3407,40 @@ code {
 .folder-list,
 .compact-destination-list {
   display: grid;
+  min-height: 0;
   gap: clamp(8px, 0.7vw, 13px);
   margin-top: clamp(14px, 1.3vw, 22px);
+  padding-right: clamp(4px, 0.4vw, 8px);
+  overflow-y: auto;
+  align-content: start;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--section-accent) 48%, transparent) transparent;
+}
+
+.folder-list,
+.compact-destination-list,
+.compact-empty-state {
+  flex: 1 1 auto;
+}
+
+.folder-list::-webkit-scrollbar,
+.compact-destination-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.folder-list::-webkit-scrollbar-track,
+.compact-destination-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.folder-list::-webkit-scrollbar-thumb,
+.compact-destination-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--section-accent) 48%, transparent);
+  background-clip: padding-box;
 }
 
 .compact-destination-list {
@@ -4184,6 +4264,40 @@ code {
 }
 
 @media (max-width: 520px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .app {
+    height: auto;
+    min-height: 80dvh;
+    overflow: visible;
+  }
+
+  .minimal-grid {
+    flex: 0 0 auto;
+    overflow: visible;
+    grid-template-rows: auto auto auto;
+  }
+
+  .folders-card,
+  .destination-card,
+  .minimal-grid .card {
+    height: auto;
+    overflow: visible;
+  }
+
+  .folder-list,
+  .compact-destination-list {
+    padding-right: 0;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
   .compact-header {
     align-items: flex-start;
   }

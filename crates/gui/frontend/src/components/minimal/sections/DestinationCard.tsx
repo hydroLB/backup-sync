@@ -50,9 +50,17 @@ export function DestinationCard({
           </span>
           <div>
             <span className="section-eyebrow">Storage</span>
-            <h2 className="section-heading" id="destination-card-title">
-              Backup locations
-            </h2>
+            <div className="section-heading-row">
+              <h2 className="section-heading" id="destination-card-title">
+                Backup locations
+              </h2>
+              <span
+                className="section-count"
+                aria-label={`${configured.length} backup ${configured.length === 1 ? 'location' : 'locations'} total`}
+              >
+                {configured.length} total
+              </span>
+            </div>
             <p className="section-summary">Every protected item is copied to each location</p>
           </div>
         </div>

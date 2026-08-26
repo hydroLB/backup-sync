@@ -62,9 +62,17 @@ export function FoldersCard({
           </span>
           <div>
             <span className="section-eyebrow">Protection</span>
-            <h2 className="section-heading" id="folders-card-title">
-              Protected items
-            </h2>
+            <div className="section-heading-row">
+              <h2 className="section-heading" id="folders-card-title">
+                Protected items
+              </h2>
+              <span
+                className="section-count"
+                aria-label={`${items.length} protected ${items.length === 1 ? 'item' : 'items'} total`}
+              >
+                {items.length} total
+              </span>
+            </div>
             <p className="section-summary">Folders and files included in every backup</p>
           </div>
         </div>

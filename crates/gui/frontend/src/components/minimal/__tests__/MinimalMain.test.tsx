@@ -226,6 +226,8 @@ async function assertOnlyRestoreActionVisible(): Promise<void> {
     await renderMinimal();
     expect(screen.getByLabelText('Running')).toBeInTheDocument();
     expect(screen.getByText('Automatic, versioned protection')).toBeInTheDocument();
+    expect(screen.getByLabelText('1 protected item total')).toHaveTextContent('1 total');
+    expect(screen.getByLabelText('1 backup location total')).toHaveTextContent('1 total');
     expect(screen.getByLabelText('Backup interval minutes')).toHaveValue(30);
     expect(screen.getByRole('button', { name: 'Recover a previous version' })).toBeInTheDocument();
     expect(
@@ -311,6 +313,7 @@ async function assertAdditionalDestinationsVisible(): Promise<void> {
     });
     expect(screen.getByText('Main storage')).toBeInTheDocument();
     expect(screen.getByText('Secondary backup location 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('2 backup locations total')).toHaveTextContent('2 total');
     expect(screen.getByText('Complete redundant backup copy')).toBeInTheDocument();
     expect(screen.getByText('/tmp/backup-2')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Change main storage' })).toBeInTheDocument();
