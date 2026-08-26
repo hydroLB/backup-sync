@@ -3492,6 +3492,8 @@ code {
 }
 
 .folder-row__cadence {
+  position: relative;
+  top: 4px;
   color: var(--text-section-header);
   font-weight: 650;
 }
@@ -3626,7 +3628,7 @@ code {
 .icon-remove__glyph {
   display: block;
   line-height: 1;
-  transform: translateY(1px);
+  transform: translateY(-1px);
 }
 
 .icon-remove:focus-visible {
