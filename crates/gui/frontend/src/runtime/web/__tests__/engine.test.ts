@@ -41,7 +41,7 @@ describe('browser backup engine', () => {
     expect(repaired.bad).toBe(0);
   });
 
-  it('restores an earlier manifest after validating every blob', async () => {
+  it('restores an earlier manifest and removes newer history when requested', async () => {
     const catalog = await invokeWebCommand<FolderVersionsDto[]>('list_versions_cmd');
     const folder = catalog[0];
     expect(folder?.versions).toHaveLength(2);
@@ -53,6 +53,7 @@ describe('browser backup engine', () => {
         source_path: folder!.source_path,
         version_id: oldest!.id,
         mode: 'in_place',
+        keep_newer_versions: false,
       },
     });
 
@@ -61,6 +62,29 @@ describe('browser backup engine', () => {
     });
     expect(restored.text).toContain('content-addressed vault -> restore');
     expect(restored.text).not.toContain('verified restore');
+
+    const afterRestore = await invokeWebCommand<FolderVersionsDto[]>('list_versions_cmd');
+    expect(afterRestore[0]?.versions.map((version) => version.id)).toEqual([oldest!.id]);
+    const summary = await invokeWebCommand<WebWorkspaceSummary>('web_workspace_summary_cmd');
+    expect(summary.versions).toBe(1);
+  });
+
+  it('can restore an older version while keeping newer recovery points', async () => {
+    const catalog = await invokeWebCommand<FolderVersionsDto[]>('list_versions_cmd');
+    const folder = catalog[0]!;
+    const oldest = folder.versions.at(-1)!;
+
+    await invokeWebCommand('restore_version_cmd', {
+      args: {
+        source_path: folder.source_path,
+        version_id: oldest.id,
+        mode: 'in_place',
+        keep_newer_versions: true,
+      },
+    });
+
+    const afterRestore = await invokeWebCommand<FolderVersionsDto[]>('list_versions_cmd');
+    expect(afterRestore[0]?.versions).toHaveLength(2);
   });
 
   it('rejects traversal paths at the browser storage boundary', async () => {

@@ -1,9 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createSafetyBackup, listVersions, restoreVersion } from '../../../services/restore';
+import { listVersions, restoreVersion } from '../../../services/restore';
 import { RestoreModal } from '../RestoreModal';
 
 vi.mock('../../../services/restore', () => ({
-  createSafetyBackup: vi.fn(),
   listVersions: vi.fn(),
   restoreVersion: vi.fn(),
 }));
@@ -20,15 +19,15 @@ describe('RestoreModal', () => {
         ],
       },
     ]);
-    vi.mocked(createSafetyBackup).mockResolvedValue();
     vi.mocked(restoreVersion).mockResolvedValue({
       files_written: 4,
       files_removed: 1,
       dirs_created: 2,
+      newer_versions_removed: 1,
     });
   });
 
-  it('uses the protected item → version → confirmation flow and preserves current state first', async () => {
+  it('uses the protected item → version → confirmation flow and deletes newer history', async () => {
     const onClose = vi.fn();
     const onEvent = vi.fn();
     render(<RestoreModal open onClose={onClose} onEvent={onEvent} />);
@@ -40,34 +39,38 @@ describe('RestoreModal', () => {
 
     expect(screen.getByRole('heading', { name: 'Confirm recovery' })).toBeInTheDocument();
     expect(screen.getByText('This changes the live folder.')).toBeInTheDocument();
-    expect(screen.getByLabelText(/Save the current state first/i)).toBeChecked();
+    expect(screen.getByLabelText(/Keep the 1 newer saved version/i)).not.toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: 'Recall this version' }));
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    expect(createSafetyBackup).toHaveBeenCalledOnce();
+    expect(await screen.findByRole('heading', { name: 'Recovery complete' })).toBeInTheDocument();
+    expect(screen.getByText('1 newer version deleted')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
     expect(restoreVersion).toHaveBeenCalledWith({
       source_path: '/projects/portfolio',
       version_id: 'older',
       mode: 'in_place',
       target_dir: null,
+      keep_newer_versions: false,
     });
-    expect(vi.mocked(createSafetyBackup).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(restoreVersion).mock.invocationCallOrder[0]!,
-    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('lets the user skip the optional safety version', async () => {
+  it('lets the user keep newer recovery points', async () => {
     render(<RestoreModal open onClose={vi.fn()} onEvent={vi.fn()} />);
 
     fireEvent.click(
       await screen.findByRole('button', { name: /\/projects\/portfolio.*2 versions/i }),
     );
-    fireEvent.click(screen.getByRole('button', { name: /Latest saved version/i }));
-    fireEvent.click(screen.getByLabelText(/Save the current state first/i));
+    fireEvent.click(screen.getByRole('button', { name: /1 version newer/i }));
+    fireEvent.click(screen.getByLabelText(/Keep the 1 newer saved version/i));
     fireEvent.click(screen.getByRole('button', { name: 'Recall this version' }));
 
     await waitFor(() => expect(restoreVersion).toHaveBeenCalledOnce());
-    expect(createSafetyBackup).not.toHaveBeenCalled();
+    expect(restoreVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ keep_newer_versions: true }),
+    );
   });
 });

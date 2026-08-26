@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createSafetyBackup, restoreVersion } from '../../services/restore';
+import { restoreVersion } from '../../services/restore';
+import { RestoreResultDto } from '../../services/types';
 import { Button } from '../ui/Button';
 import { ModalShell } from '../ui/ModalShell';
 import { StateBlock } from '../ui/StateBlock';
@@ -11,7 +12,7 @@ type Props = {
   onEvent: (msg: string, kind?: 'ok' | 'error' | 'info') => void;
 };
 
-type RecoveryStep = 'source' | 'version' | 'confirm';
+type RecoveryStep = 'source' | 'version' | 'confirm' | 'complete';
 
 function versionDate(unix: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -24,13 +25,15 @@ function versionDate(unix: number): string {
 export function RestoreModal({ open, onClose, onEvent }: Props) {
   const catalog = useRestoreCatalog({ isOpen: open, onEvent });
   const [step, setStep] = useState<RecoveryStep>('source');
-  const [preserveCurrent, setPreserveCurrent] = useState(true);
+  const [keepNewerVersions, setKeepNewerVersions] = useState(false);
+  const [result, setResult] = useState<RestoreResultDto | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setStep('source');
-    setPreserveCurrent(true);
+    setKeepNewerVersions(false);
+    setResult(null);
   }, [open]);
 
   const selectedVersion = useMemo(
@@ -51,20 +54,19 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
     if (!catalog.sourcePath || !catalog.versionId) return;
     try {
       setBusy(true);
-      if (preserveCurrent) {
-        await createSafetyBackup();
-      }
       const result = await restoreVersion({
         source_path: catalog.sourcePath,
         version_id: catalog.versionId,
         mode: 'in_place',
         target_dir: null,
+        keep_newer_versions: keepNewerVersions,
       });
+      setResult(result);
+      setStep('complete');
       onEvent(
         `Restored ${result.files_written} files from ${versionDate(selectedVersion?.created_at_unix ?? 0)}.`,
         'ok',
       );
-      onClose();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`Recovery failed: ${reason}`, 'error');
@@ -78,7 +80,9 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
       ? 'Choose what to recover'
       : step === 'version'
         ? 'Choose a version'
-        : 'Confirm recovery';
+        : step === 'confirm'
+          ? 'Confirm recovery'
+          : 'Recovery complete';
 
   return (
     <ModalShell
@@ -104,6 +108,8 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
               Recall this version
             </Button>
           </>
+        ) : step === 'complete' ? (
+          <Button onClick={onClose}>Done</Button>
         ) : undefined
       }
     >
@@ -205,22 +211,45 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
             <p>
               Files and changes newer than this restore point will be replaced or removed.
               {newerVersionCount > 0
-                ? ` ${newerVersionCount} newer saved version${newerVersionCount === 1 ? '' : 's'} will remain in recovery history.`
+                ? ` ${newerVersionCount} newer saved version${newerVersionCount === 1 ? '' : 's'} will also be deleted unless you keep them below.`
                 : ' Your saved recovery history will remain available.'}
             </p>
           </div>
-          <label className="preserve-choice">
-            <input
-              type="checkbox"
-              checked={preserveCurrent}
-              onChange={(event) => setPreserveCurrent(event.target.checked)}
-              disabled={busy}
-            />
-            <span>
-              <strong>Save the current state first</strong>
-              <small>Creates one safety version before recovery.</small>
-            </span>
-          </label>
+          {newerVersionCount > 0 && (
+            <label className="preserve-choice">
+              <input
+                type="checkbox"
+                checked={keepNewerVersions}
+                onChange={(event) => setKeepNewerVersions(event.target.checked)}
+                disabled={busy}
+              />
+              <span>
+                <strong>
+                  Keep the {newerVersionCount} newer saved version
+                  {newerVersionCount === 1 ? '' : 's'}
+                </strong>
+                <small>They will stay available if you want to return to them later.</small>
+              </span>
+            </label>
+          )}
+        </div>
+      )}
+
+      {step === 'complete' && result && (
+        <div className="recovery-complete">
+          <StateBlock
+            tone="success"
+            title="The selected version is now live"
+            message={`${result.files_written} file${result.files_written === 1 ? '' : 's'} restored${result.files_removed ? `, ${result.files_removed} newer file${result.files_removed === 1 ? '' : 's'} removed` : ''}.`}
+          />
+          <div className="recovery-complete__history">
+            <span>Recovery history</span>
+            <strong>
+              {keepNewerVersions
+                ? `${newerVersionCount} newer version${newerVersionCount === 1 ? '' : 's'} kept`
+                : `${result.newer_versions_removed ?? newerVersionCount} newer version${(result.newer_versions_removed ?? newerVersionCount) === 1 ? '' : 's'} deleted`}
+            </strong>
+          </div>
         </div>
       )}
     </ModalShell>

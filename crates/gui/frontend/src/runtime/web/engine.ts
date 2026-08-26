@@ -218,6 +218,29 @@ function latestManifest(vault: Vault, sourcePath: string): Manifest | null {
   );
 }
 
+function removeNewerManifests(state: WebState, sourcePath: string, selected: Manifest): number {
+  let removedFromPrimary = 0;
+  const primaryId = state.config.destinations[0]?.id ?? 'primary';
+
+  for (const [vaultId, vault] of Object.entries(state.vaults)) {
+    const before = vault.manifests.length;
+    vault.manifests = vault.manifests.filter(
+      (manifest) =>
+        manifest.sourcePath !== sourcePath || manifest.createdAtUnix <= selected.createdAtUnix,
+    );
+    if (vaultId === primaryId) removedFromPrimary = before - vault.manifests.length;
+
+    const referenced = new Set(
+      vault.manifests.flatMap((manifest) => manifest.entries.map((entry) => entry.sha256)),
+    );
+    for (const hash of Object.keys(vault.blobs)) {
+      if (!referenced.has(hash)) delete vault.blobs[hash];
+    }
+  }
+
+  return removedFromPrimary;
+}
+
 async function planEntries(state: WebState): Promise<ManifestEntry[]> {
   const entries = await Promise.all(
     state.files.map(async (file) => ({
@@ -446,6 +469,8 @@ async function persistState(state: WebState): Promise<void> {
 let statePromise: Promise<WebState> | null = null;
 let operationQueue: Promise<void> = Promise.resolve();
 let schedulerStarted = false;
+let schedulerTimer: number | null = null;
+let schedulerGeneration = 0;
 
 async function loadState(): Promise<WebState> {
   if (!statePromise) {
@@ -488,6 +513,26 @@ async function mutate<T>(operation: (state: WebState) => Promise<T> | T): Promis
   return result;
 }
 
+function scheduleWebBackup(intervalSeconds: number): void {
+  if (!schedulerStarted || typeof window === 'undefined') return;
+  if (schedulerTimer !== null) window.clearTimeout(schedulerTimer);
+  const generation = ++schedulerGeneration;
+  const delay = Math.max(1, Number.isFinite(intervalSeconds) ? intervalSeconds : 30 * 60) * 1000;
+  schedulerTimer = window.setTimeout(() => {
+    schedulerTimer = null;
+    void mutate(async (state) => {
+      if (!state.config.safe_mode) await runBackup(state);
+    })
+      .catch((error) => {
+        console.warn('[web-engine] Foreground backup cycle failed.', error);
+      })
+      .finally(() => {
+        if (generation !== schedulerGeneration) return;
+        void loadState().then((state) => scheduleWebBackup(state.config.interval_seconds));
+      });
+  }, delay);
+}
+
 function ensureWebScheduler(): void {
   if (
     schedulerStarted ||
@@ -498,16 +543,7 @@ function ensureWebScheduler(): void {
   }
   schedulerStarted = true;
   void navigator.storage?.persist?.().catch(() => false);
-  window.setInterval(
-    () => {
-      void mutate(async (state) => {
-        if (!state.config.safe_mode) await runBackup(state);
-      }).catch((error) => {
-        console.warn('[web-engine] Foreground backup cycle failed.', error);
-      });
-    },
-    30 * 60 * 1000,
-  );
+  void loadState().then((state) => scheduleWebBackup(state.config.interval_seconds));
 }
 
 function primaryVault(state: WebState): Vault {
@@ -630,6 +666,7 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
         state.status.safe_mode = config.safe_mode;
         log(state, 'configuration saved in browser storage');
         if (!config.safe_mode) await runBackup(state);
+        scheduleWebBackup(config.interval_seconds);
         return { daemon_restarted: false, daemon_restart_warning: null };
       })) as T;
     case 'relocate_destination_cmd':
@@ -780,13 +817,22 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
         const files = await restoredFiles(state, manifest);
         const before = state.files.length;
         state.files = files;
-        log(state, `restored ${files.length} files from ${manifest.id} into the browser workspace`);
+        const newerVersionsRemoved =
+          request.keep_newer_versions === false
+            ? removeNewerManifests(state, request.source_path, manifest)
+            : 0;
+        state.integrity = 'healthy';
+        log(
+          state,
+          `restored ${files.length} files from ${manifest.id} into the browser workspace; ${newerVersionsRemoved} newer versions removed`,
+        );
         const result: RestoreResultDto = {
           files_written: files.length,
           files_removed: Math.max(0, before - files.length),
           dirs_created: new Set(
             files.map((file) => file.relPath.split('/').slice(0, -1).join('/')).filter(Boolean),
           ).size,
+          newer_versions_removed: newerVersionsRemoved,
         };
         return result;
       })) as T;

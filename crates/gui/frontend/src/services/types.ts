@@ -91,12 +91,15 @@ export type RestoreArgs = {
   version_id: string;
   mode: RestoreModeDto;
   target_dir?: string | null;
+  /** Web showcase only: retain manifests newer than the selected recovery point. */
+  keep_newer_versions?: boolean;
 };
 
 export type RestoreResultDto = {
   files_written: number;
   files_removed: number;
   dirs_created: number;
+  newer_versions_removed?: number;
 };
 
 export type VersionFileInfoDto = {

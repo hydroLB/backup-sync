@@ -4078,6 +4078,27 @@ code {
   font-size: clamp(10px, 0.72vw, 14px);
 }
 
+.recovery-complete {
+  display: grid;
+  gap: clamp(12px, 1vw, 18px);
+}
+
+.recovery-complete__history {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: clamp(12px, 1.15vw, 20px);
+  border: 1px solid rgba(125, 139, 163, 0.22);
+  border-radius: clamp(12px, 0.9vw, 16px);
+  color: var(--text-hint);
+  font-size: clamp(11px, 0.78vw, 15px);
+}
+
+.recovery-complete__history strong {
+  color: var(--text-section-header);
+}
+
 @media (max-width: 760px) {
   .app {
     padding: 14px;
