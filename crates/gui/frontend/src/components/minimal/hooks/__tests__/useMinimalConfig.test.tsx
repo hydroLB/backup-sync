@@ -104,25 +104,19 @@ describe('useMinimalConfig', () => {
     vi.mocked(saveConfig).mockReset();
   });
 
-  it('surfaces daemon restart warnings after enforcing the fixed schedule', async () => {
+  it('loads the configured schedule without rewriting it', async () => {
     vi.mocked(loadConfig).mockResolvedValue(buildConfig());
-    vi.mocked(saveConfig).mockResolvedValue({
-      daemon_restarted: false,
-      daemon_restart_warning: 'Configuration saved, but restart is still required.',
-    });
+    vi.mocked(saveConfig).mockResolvedValue(SAVE_OK);
     const onEvent = vi.fn();
+    const controller = { current: null as Controller | null };
 
-    render(<Harness onEvent={onEvent} />);
+    render(<Harness onEvent={onEvent} controller={controller} />);
 
     await waitFor(() => {
-      expect(saveConfig).toHaveBeenCalled();
+      expect(controller.current?.cfg?.interval_seconds).toBe(60);
     });
-    await waitFor(() => {
-      expect(onEvent).toHaveBeenCalledWith(
-        'Configuration saved, but restart is still required.',
-        'error',
-      );
-    });
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(onEvent).not.toHaveBeenCalledWith(expect.stringContaining('schedule'), 'error');
   });
 
   it('exposes a load error and recovers when retried', async () => {
@@ -152,7 +146,7 @@ describe('useMinimalConfig', () => {
     expect(loadConfig).toHaveBeenCalledTimes(2);
   });
 
-  it('does not save on load when the fixed schedule is already present', async () => {
+  it('does not save configuration during a normal load', async () => {
     vi.mocked(loadConfig).mockResolvedValue({
       ...buildConfig(),
       interval_seconds: 1800,

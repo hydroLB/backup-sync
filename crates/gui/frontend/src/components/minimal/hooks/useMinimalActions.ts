@@ -40,6 +40,7 @@ type MinimalActions = {
     sourceDestinationId: string,
     keep: number,
   ) => Promise<void>;
+  updateIntervalMinutes: (minutes: number) => Promise<void>;
   updateDestination: (
     path: string,
     kind: 'File' | 'Directory',
@@ -346,6 +347,19 @@ export function useMinimalActions({
     [cfg, persist, primaryId],
   );
 
+  const updateIntervalMinutes = useCallback(
+    async (minutes: number) => {
+      if (!cfg) return;
+      const nextMinutes = Math.max(1, Math.min(43_200, Math.round(minutes)));
+      await persist(
+        { ...cfg, interval_seconds: nextMinutes * 60 },
+        `Backup checks updated to every ${nextMinutes} minute${nextMinutes === 1 ? '' : 's'}.`,
+        { globalBusy: false },
+      );
+    },
+    [cfg, persist],
+  );
+
   const updateDestination = useCallback(
     async (
       path: string,
@@ -419,6 +433,7 @@ export function useMinimalActions({
     changePath,
     removePath,
     updateKeep,
+    updateIntervalMinutes,
     updateDestination,
   };
 }

@@ -90,6 +90,7 @@ describe('useMinimalActions', () => {
       await actions.changePath('/tmp/a', 'Directory');
       await actions.removePath('/tmp/a', 'Directory', 'primary');
       await actions.updateKeep('/tmp/a', 'Directory', 'primary', 4);
+      await actions.updateIntervalMinutes(45);
       await actions.updateDestination('/tmp/a', 'Directory', 'primary', 'other');
     });
 
@@ -319,6 +320,12 @@ describe('useMinimalActions', () => {
       )?.max_backups_per_file,
     ).toBe(1000);
     expect(persist.mock.calls[1]?.[2]).toEqual({ globalBusy: false });
+    await act(async () => actions.updateIntervalMinutes(90));
+    expect(persist).toHaveBeenLastCalledWith(
+      expect.objectContaining({ interval_seconds: 90 * 60 }),
+      'Backup checks updated to every 90 minutes.',
+      { globalBusy: false },
+    );
     expect(onEvent).toHaveBeenCalledWith(
       'Destination no longer exists. Reload and try again.',
       'error',

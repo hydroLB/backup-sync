@@ -14,6 +14,7 @@ type Props = {
   busy: boolean;
   destinationWarning: string | null;
   replicationWarning: string | null;
+  updated: boolean;
   onChoose: () => Promise<void>;
   onChangeDestination: (destinationId: string) => Promise<void>;
   onAddDestination: () => Promise<void>;
@@ -26,6 +27,7 @@ export function DestinationCard({
   busy,
   destinationWarning,
   replicationWarning,
+  updated,
   onChoose,
   onChangeDestination,
   onAddDestination,
@@ -36,6 +38,11 @@ export function DestinationCard({
 
   return (
     <section className="card destination-card" aria-labelledby="destination-card-title">
+      {updated && (
+        <span className="section-update-indicator" role="status">
+          <span aria-hidden="true">✓</span> Updated
+        </span>
+      )}
       <div className="section-title">
         <div className="section-identity">
           <span className="section-step-badge" aria-hidden="true">
@@ -108,15 +115,13 @@ export function DestinationCard({
                     onClick={() => void onChangeDestination(destination.id)}
                     disabled={busy}
                     aria-label={
-                      index === 0 ? 'Change main storage' : 'Change secondary backup location'
+                      index === 0
+                        ? 'Change main storage'
+                        : `Change secondary backup location ${index}`
                     }
                   >
                     <span className="destination-item__label">
-                      {index === 0
-                        ? 'Main storage'
-                        : index === 1
-                          ? 'Secondary backup location'
-                          : `Secondary backup location ${index}`}
+                      {index === 0 ? 'Main storage' : `Secondary backup location ${index}`}
                     </span>
                     <span className="destination-item__path truncate" title={destination.path}>
                       {destination.path}

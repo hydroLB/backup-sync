@@ -226,7 +226,7 @@ async function assertOnlyRestoreActionVisible(): Promise<void> {
     await renderMinimal();
     expect(screen.getByLabelText('Running')).toBeInTheDocument();
     expect(screen.getByText('Automatic, versioned protection')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Backup interval minutes')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Backup interval minutes')).toHaveValue(30);
     expect(screen.getByRole('button', { name: 'Recover a previous version' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Safety checks required' }),
@@ -310,12 +310,12 @@ async function assertAdditionalDestinationsVisible(): Promise<void> {
       ],
     });
     expect(screen.getByText('Main storage')).toBeInTheDocument();
-    expect(screen.getByText('Secondary backup location')).toBeInTheDocument();
+    expect(screen.getByText('Secondary backup location 1')).toBeInTheDocument();
     expect(screen.getByText('Complete redundant backup copy')).toBeInTheDocument();
     expect(screen.getByText('/tmp/backup-2')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Change main storage' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Change secondary backup location' }),
+      screen.getByRole('button', { name: 'Change secondary backup location 1' }),
     ).toBeInTheDocument();
     const removeCopy = screen.getByRole('button', {
       name: 'Remove secondary backup location /tmp/backup-2',
@@ -375,7 +375,7 @@ describe('MinimalMain', () => {
       expect(saveConfig).toHaveBeenCalled();
       expect(screen.getByText(/Keeps 6 previous versions for recovery/)).toBeInTheDocument();
     });
-    expect(screen.getByText('Checks every 30 min')).toBeInTheDocument();
+    expect(screen.getByLabelText('Backup interval minutes')).toHaveValue(30);
     expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Add backup location' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Change main storage' })).toBeEnabled();
@@ -447,6 +447,23 @@ describe('MinimalMain', () => {
     });
     expect(await screen.findByText('/tmp/new-backups')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Move backup storage?' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Updated');
+  });
+
+  it('edits the backup check cadence in minutes', async () => {
+    await renderMinimal();
+    const interval = screen.getByLabelText('Backup interval minutes');
+
+    fireEvent.change(interval, { target: { value: '45' } });
+    fireEvent.blur(interval);
+
+    await waitFor(() => {
+      expect(saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ interval_seconds: 45 * 60 }),
+      );
+    });
+    expect(interval).toHaveValue(45);
+    expect(screen.getByRole('status')).toHaveTextContent('Updated');
   });
 
   it('shows a retryable configuration error and recovers', async () => {

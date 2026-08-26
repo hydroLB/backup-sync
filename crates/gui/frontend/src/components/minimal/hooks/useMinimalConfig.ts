@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfigSaveResult, loadConfig, saveConfig } from '../../../services/config';
 import { Config, Destination, WatchedPath } from '../../../domain/config';
-import {
-  enforceFixedAutomaticInterval,
-  ensurePrimaryDestination,
-  normalizeWatched,
-} from '../helpers/config';
+import { ensurePrimaryDestination, normalizeWatched } from '../helpers/config';
 
 type EventKind = 'ok' | 'error' | 'info';
 
@@ -57,16 +53,7 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
       .then(async (loaded) => {
         if (cancelled) return;
         const { cfg: withPrimary } = ensurePrimaryDestination(loaded);
-        const next = enforceFixedAutomaticInterval(withPrimary);
-        setCfg(next);
-        if (next.interval_seconds === loaded.interval_seconds) return;
-        try {
-          const result = await saveConfig(next);
-          reportSaveOutcome(result);
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          onEvent(`[useMinimalConfig] Failed to enforce automatic schedule: ${reason}`, 'error');
-        }
+        setCfg(withPrimary);
       })
       .catch((error) => {
         const reason = error instanceof Error ? error.message : String(error);
@@ -88,8 +75,7 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
   useEffect(() => {
     if (!cfg) return;
     const { cfg: normalizedPrimary } = ensurePrimaryDestination(cfg);
-    const normalized = enforceFixedAutomaticInterval(normalizedPrimary);
-    if (normalized !== cfg) setCfg(normalized);
+    if (normalizedPrimary !== cfg) setCfg(normalizedPrimary);
   }, [cfg]);
 
   const primary = useMemo(() => {
@@ -119,7 +105,7 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
     const globalBusy = options.globalBusy ?? true;
     try {
       if (globalBusy) setBusy(true);
-      const normalized = enforceFixedAutomaticInterval(next);
+      const { cfg: normalized } = ensurePrimaryDestination(next);
       const result = await saveConfig(normalized);
       setCfg(normalized);
       onEvent(successMessage, 'ok');

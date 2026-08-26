@@ -82,7 +82,7 @@ describe('useMinimalFeedback', () => {
     expect(second).not.toBe(first);
   });
 
-  it('shows inline success for scoped success messages', async () => {
+  it('keeps scoped success out of document flow while showing Saved', async () => {
     const controllerRef = { current: null as Controller | null };
     render(<Harness onEvent={() => undefined} controllerRef={controllerRef} />);
 
@@ -91,6 +91,7 @@ describe('useMinimalFeedback', () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     });
 
-    expect(screen.getByText('Primary destination set to /tmp/backups.')).toBeInTheDocument();
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(screen.queryByText('Primary destination set to /tmp/backups.')).not.toBeInTheDocument();
   });
 });

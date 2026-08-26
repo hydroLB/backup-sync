@@ -16,6 +16,7 @@ type Props = {
   items: Item[];
   defaultKeep: number;
   intervalSeconds: number;
+  updated: boolean;
   watchedWarning: string | null;
   onAddFolder: () => Promise<void>;
   onChangePath: (path: string, kind: 'File' | 'Directory') => Promise<void>;
@@ -30,6 +31,7 @@ type Props = {
     sourceDestinationId: string,
     keep: number,
   ) => Promise<void>;
+  onUpdateInterval: (minutes: number) => Promise<void>;
 };
 
 /** Put the user's protected content first and show each source only once. */
@@ -38,14 +40,21 @@ export function FoldersCard({
   items,
   defaultKeep,
   intervalSeconds,
+  updated,
   watchedWarning,
   onAddFolder,
   onChangePath,
   onRemovePath,
   onUpdateKeep,
+  onUpdateInterval,
 }: Props) {
   return (
     <section className="card folders-card" aria-labelledby="folders-card-title">
+      {updated && (
+        <span className="section-update-indicator" role="status">
+          <span aria-hidden="true">✓</span> Updated
+        </span>
+      )}
       <div className="section-title paths-head">
         <div className="section-identity">
           <span className="section-step-badge" aria-hidden="true">
@@ -101,6 +110,7 @@ export function FoldersCard({
               onChange={() => onChangePath(item.path, item.kind)}
               onRemove={() => onRemovePath(item.path, item.kind, item.destination_id)}
               onUpdateKeep={(keep) => onUpdateKeep(item.path, item.kind, item.destination_id, keep)}
+              onUpdateInterval={onUpdateInterval}
             />
           ))}
         </div>
@@ -118,19 +128,8 @@ type RowProps = {
   onChange: () => Promise<void>;
   onRemove: () => Promise<void>;
   onUpdateKeep: (keep: number) => Promise<void>;
+  onUpdateInterval: (minutes: number) => Promise<void>;
 };
-
-function formatCheckCadence(seconds: number, abbreviated = false): string {
-  if (seconds % 3600 === 0) {
-    const hours = seconds / 3600;
-    return `${hours} ${abbreviated ? 'hr' : `hour${hours === 1 ? '' : 's'}`}`;
-  }
-  if (seconds % 60 === 0) {
-    const minutes = seconds / 60;
-    return `${minutes} ${abbreviated ? 'min' : `minute${minutes === 1 ? '' : 's'}`}`;
-  }
-  return `${seconds} ${abbreviated ? 'sec' : `second${seconds === 1 ? '' : 's'}`}`;
-}
 
 function FolderRow({
   busy,
@@ -141,14 +140,22 @@ function FolderRow({
   onChange,
   onRemove,
   onUpdateKeep,
+  onUpdateInterval,
 }: RowProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [keepBusy, setKeepBusy] = useState(false);
+  const [intervalBusy, setIntervalBusy] = useState(false);
   const [displayKeep, setDisplayKeep] = useState(keep);
+  const intervalMinutes = Math.max(1, Math.round(intervalSeconds / 60));
+  const [intervalDraft, setIntervalDraft] = useState(String(intervalMinutes));
 
   useEffect(() => {
     setDisplayKeep(keep);
   }, [keep]);
+
+  useEffect(() => {
+    setIntervalDraft(String(intervalMinutes));
+  }, [intervalMinutes]);
 
   const saveKeep = async (nextKeep: number) => {
     if (keepBusy || nextKeep === displayKeep) return;
@@ -158,6 +165,23 @@ function FolderRow({
       await onUpdateKeep(nextKeep);
     } finally {
       setKeepBusy(false);
+    }
+  };
+
+  const saveInterval = async () => {
+    const parsed = Number(intervalDraft);
+    if (!Number.isFinite(parsed)) {
+      setIntervalDraft(String(intervalMinutes));
+      return;
+    }
+    const nextMinutes = Math.max(1, Math.min(43_200, Math.round(parsed)));
+    setIntervalDraft(String(nextMinutes));
+    if (intervalBusy || nextMinutes === intervalMinutes) return;
+    setIntervalBusy(true);
+    try {
+      await onUpdateInterval(nextMinutes);
+    } finally {
+      setIntervalBusy(false);
     }
   };
 
@@ -200,7 +224,30 @@ function FolderRow({
               <span className="folder-row__keep-detail">
                 Keeps {displayKeep} previous version{displayKeep === 1 ? '' : 's'} for recovery
                 <span aria-hidden="true"> · </span>
-                <span>Checks every {formatCheckCadence(intervalSeconds, true)}</span>
+                <span className="folder-row__cadence">
+                  Checks every
+                  <input
+                    className="interval-minute-input"
+                    type="number"
+                    min={1}
+                    max={43_200}
+                    inputMode="numeric"
+                    value={intervalDraft}
+                    aria-label="Backup interval minutes"
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => setIntervalDraft(event.target.value)}
+                    onBlur={() => void saveInterval()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') event.currentTarget.blur();
+                      if (event.key === 'Escape') {
+                        setIntervalDraft(String(intervalMinutes));
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    disabled={busy || intervalBusy}
+                  />
+                  min
+                </span>
               </span>
             </div>
             <div className="stepper" aria-label={`Versions to keep for ${path}`}>

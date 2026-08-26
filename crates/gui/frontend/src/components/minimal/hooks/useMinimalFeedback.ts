@@ -85,7 +85,6 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
       const isPauseEvent = kind === 'ok' && /\bpaused\b/i.test(msg);
       const isSuccessEvent = kind === 'ok';
       const isSavedEvent = isSuccessEvent && /^saved\.$/i.test(msg.trim());
-      const isRunningEvent = kind === 'ok' && /\brunning\b/i.test(msg);
       const shouldShowSavedBadge = isPauseEvent || pulseScope !== 'none' || isSavedEvent;
       if (isPauseEvent) {
         setToast(null);
@@ -100,9 +99,8 @@ export function useMinimalFeedback({ onEvent }: Params): MinimalFeedbackState {
         setPausePulseActive(false);
         setSavePulseScope(pulseScope);
         setSavePulseActive(pulseScope !== 'none');
-        if (!isSavedEvent && !isRunningEvent && pulseScope !== 'none') {
-          setInline({ msg, kind: 'success' });
-        }
+        // Scoped success is confirmed in-place by the affected card and fixed Saved badge.
+        // Keeping it out of the document flow prevents the whole interface from shifting.
         // Only show Saved for user-driven operations. Background "ok" transitions
         // (for example, destination health recovered) should not surface as "Saved".
         if (shouldShowSavedBadge) {

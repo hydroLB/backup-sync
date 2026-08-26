@@ -137,6 +137,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     changePath,
     removePath,
     updateKeep,
+    updateIntervalMinutes,
   } = useMinimalActions({
     cfg,
     primaryId: primary?.id ?? null,
@@ -443,25 +444,31 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           items={folderItems}
           defaultKeep={cfg.max_backups_per_file}
           intervalSeconds={cfg.interval_seconds}
+          updated={savePulseActive && savePulseScope === 'folders'}
           watchedWarning={watchedHealthWarning}
           onAddFolder={() =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('folders', async () => {
               await addFolder();
             })
           }
           onChangePath={(path, kind) =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('folders', async () => {
               await changePath(path, kind);
             })
           }
           onRemovePath={(path, kind, sourceDestinationId) =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('folders', async () => {
               await removePath(path, kind, sourceDestinationId);
             })
           }
           onUpdateKeep={(path, kind, sourceDestinationId, keep) =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('folders', async () => {
               await updateKeep(path, kind, sourceDestinationId, keep);
+            })
+          }
+          onUpdateInterval={(minutes) =>
+            runWithSaveScope('folders', async () => {
+              await updateIntervalMinutes(minutes);
             })
           }
         />
@@ -471,8 +478,9 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           busy={busy || pickerBusyScope === 'destination'}
           destinationWarning={destinationWarning ?? destinationHealthWarning}
           replicationWarning={replicationWarning}
+          updated={savePulseActive && savePulseScope === 'destination'}
           onChoose={() =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('destination', async () => {
               await chooseDestination();
             })
           }
@@ -482,12 +490,12 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
             })
           }
           onAddDestination={() =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('destination', async () => {
               await addDestination();
             })
           }
           onRemoveDestination={(destinationId) =>
-            runWithSaveScope('none', async () => {
+            runWithSaveScope('destination', async () => {
               await removeDestination(destinationId);
             })
           }
@@ -520,7 +528,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         move={pendingStorageMove}
         busy={storageMoveBusy}
         onCancel={() => setPendingStorageMove(null)}
-        onConfirm={confirmStorageMove}
+        onConfirm={() => runWithSaveScope('destination', confirmStorageMove)}
       />
       <ToastMessage toast={toast} onDismiss={clearToast} />
       {showSavedBadge && (

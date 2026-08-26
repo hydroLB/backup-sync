@@ -105,7 +105,7 @@ describe('config service', () => {
     expect(safeInvokeMock).toHaveBeenCalledWith('load_config_cmd');
   });
 
-  it('pins interval_seconds and returns daemon restart warnings from save', async () => {
+  it('preserves interval_seconds and returns daemon restart warnings from save', async () => {
     const cfg = buildConfig();
     safeInvokeWithTimeoutMock.mockResolvedValue({
       daemon_restarted: false,
@@ -120,7 +120,7 @@ describe('config service', () => {
       'save_config_cmd',
       {
         cfg: expect.objectContaining({
-          interval_seconds: 1800,
+          interval_seconds: 60,
         }),
         correlationId: 'save-cid-1',
       },

@@ -1,5 +1,4 @@
 import { Config, Destination, WatchedPath } from '../../../domain/config';
-import { DEFAULT_AUTOMATIC_INTERVAL_MINUTES } from './interval';
 
 /** Minimal mode assumes a single destination for scheduling and watch defaults. */
 export function ensurePrimaryDestination(cfg: Config): { cfg: Config; dest: Destination } {
@@ -20,11 +19,4 @@ export function normalizeWatched(w: WatchedPath, destId: string, keepDefault: nu
     destination_id: w.destination_id ?? destId,
     max_backups_per_file: w.max_backups_per_file ?? keepDefault,
   };
-}
-
-/** The minimal UI intentionally removes schedule tuning, so the cadence must be enforced centrally. */
-export function enforceFixedAutomaticInterval(cfg: Config): Config {
-  const nextSeconds = DEFAULT_AUTOMATIC_INTERVAL_MINUTES * 60;
-  if (cfg.interval_seconds === nextSeconds) return cfg;
-  return { ...cfg, interval_seconds: nextSeconds };
 }
