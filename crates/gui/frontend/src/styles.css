@@ -138,7 +138,10 @@ html,
 }
 
 #root {
+  width: 80%;
+  min-height: 80vh;
   background-color: transparent;
+  zoom: 1.25;
 }
 
 body {
