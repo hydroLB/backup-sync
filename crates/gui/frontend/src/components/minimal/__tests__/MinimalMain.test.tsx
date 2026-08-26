@@ -359,6 +359,17 @@ describe('MinimalMain', () => {
   it('makes configured paths directly clickable', assertPathRowsAreClickable);
   it('shows additional destinations with remove controls', assertAdditionalDestinationsVisible);
 
+  it('warns that removing protection permanently deletes saved versions', async () => {
+    await renderMinimal();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove protected path /tmp/project' }));
+
+    expect(screen.getByText('Remove this folder from Backup Sync?')).toBeInTheDocument();
+    expect(
+      screen.getByText(/All of its saved versions will be deleted\. This cannot be undone\./),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Your original files will not be deleted\./)).toBeInTheDocument();
+  });
+
   it('saves retention within its row without disabling the rest of the screen', async () => {
     await renderMinimal();
     let finishSave!: (result: { daemon_restarted: boolean; daemon_restart_warning: null }) => void;

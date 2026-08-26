@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { Config } from '../../../domain/config';
 import { invokeWebCommand, WebWorkspaceFile, WebWorkspaceSummary } from '../engine';
 import { FolderVersionsDto, VerifyResult } from '../../../services/types';
 
@@ -85,6 +86,21 @@ describe('browser backup engine', () => {
 
     const afterRestore = await invokeWebCommand<FolderVersionsDto[]>('list_versions_cmd');
     expect(afterRestore[0]?.versions).toHaveLength(2);
+  });
+
+  it('deletes backup history but preserves source files when protection is removed', async () => {
+    const config = await invokeWebCommand<Config>('load_config_cmd');
+    await invokeWebCommand('save_config_cmd', { cfg: { ...config, watched: [] } });
+
+    const catalog = await invokeWebCommand<FolderVersionsDto[]>('list_versions_cmd');
+    expect(catalog).toEqual([]);
+    const summary = await invokeWebCommand<WebWorkspaceSummary>('web_workspace_summary_cmd');
+    expect(summary.versions).toBe(0);
+
+    const original = await invokeWebCommand<WebWorkspaceFile>('web_read_file_cmd', {
+      path: 'README.md',
+    });
+    expect(original.text).toContain('Atlas Portfolio');
   });
 
   it('rejects traversal paths at the browser storage boundary', async () => {

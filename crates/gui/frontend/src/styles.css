@@ -3637,6 +3637,23 @@ code {
   font-size: clamp(11px, 0.8vw, 15px);
 }
 
+.inline-confirm__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.inline-confirm__copy strong {
+  color: var(--text-section-header);
+  font-size: clamp(11px, 0.82vw, 15px);
+}
+
+.inline-confirm__copy span {
+  color: var(--text-hint);
+  font-size: clamp(10px, 0.72vw, 13px);
+  line-height: 1.4;
+}
+
 .inline-confirm > div {
   display: flex;
   gap: 6px;

@@ -241,6 +241,23 @@ function removeNewerManifests(state: WebState, sourcePath: string, selected: Man
   return removedFromPrimary;
 }
 
+function removeSourceHistory(state: WebState, sourcePaths: Set<string>): number {
+  let removed = 0;
+  for (const vault of Object.values(state.vaults)) {
+    const before = vault.manifests.length;
+    vault.manifests = vault.manifests.filter((manifest) => !sourcePaths.has(manifest.sourcePath));
+    removed += before - vault.manifests.length;
+
+    const referenced = new Set(
+      vault.manifests.flatMap((manifest) => manifest.entries.map((entry) => entry.sha256)),
+    );
+    for (const hash of Object.keys(vault.blobs)) {
+      if (!referenced.has(hash)) delete vault.blobs[hash];
+    }
+  }
+  return removed;
+}
+
 async function planEntries(state: WebState): Promise<ManifestEntry[]> {
   const entries = await Promise.all(
     state.files.map(async (file) => ({
@@ -277,6 +294,10 @@ async function previewState(state: WebState): Promise<SimulationResult> {
 }
 
 async function runBackup(state: WebState): Promise<SimulationResult> {
+  if (!state.config.watched.some((watched) => watched.enabled !== false)) {
+    log(state, 'backup skipped: no protected items configured');
+    return { items: 0, bytes: 0, sample: [], message: 'No protected items are configured.' };
+  }
   const preview = await previewState(state);
   if (preview.items === 0) {
     log(state, 'backup complete: no content changes');
@@ -662,10 +683,23 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
       return (await mutate(async (state) => {
         const config = args?.cfg as Config | undefined;
         if (!config) throw new Error('Configuration payload is required.');
+        const previousSources = new Set(state.config.watched.map((watched) => watched.path));
+        const nextSources = new Set(config.watched.map((watched) => watched.path));
+        const removedSources = new Set(
+          [...previousSources].filter((sourcePath) => !nextSources.has(sourcePath)),
+        );
+        const removedManifests = removeSourceHistory(state, removedSources);
         state.config = structuredClone(config);
         state.status.safe_mode = config.safe_mode;
-        log(state, 'configuration saved in browser storage');
-        if (!config.safe_mode) await runBackup(state);
+        const nextSourcePath = config.watched[0]?.path;
+        if (nextSourcePath) state.sourcePath = nextSourcePath;
+        log(
+          state,
+          removedManifests > 0
+            ? `configuration saved; ${removedManifests} removed source manifests deleted`
+            : 'configuration saved in browser storage',
+        );
+        if (!config.safe_mode && nextSourcePath) await runBackup(state);
         scheduleWebBackup(config.interval_seconds);
         return { daemon_restarted: false, daemon_restart_warning: null };
       })) as T;

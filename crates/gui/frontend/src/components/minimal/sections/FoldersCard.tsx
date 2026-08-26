@@ -189,7 +189,15 @@ function FolderRow({
     <div className="folder-row">
       {confirmRemove ? (
         <div className="inline-confirm" role="alert">
-          <span>Stop protecting this {kind.toLowerCase()}?</span>
+          <div className="inline-confirm__copy">
+            <strong>
+              Remove this {kind === 'Directory' ? 'folder' : 'file'} from Backup Sync?
+            </strong>
+            <span>
+              All of its saved versions will be deleted. This cannot be undone. Your original files
+              will not be deleted.
+            </span>
+          </div>
           <div>
             <Button
               tone="secondary"
