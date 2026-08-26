@@ -120,16 +120,16 @@ type RowProps = {
   onUpdateKeep: (keep: number) => Promise<void>;
 };
 
-function formatCheckCadence(seconds: number): string {
+function formatCheckCadence(seconds: number, abbreviated = false): string {
   if (seconds % 3600 === 0) {
     const hours = seconds / 3600;
-    return `${hours} hour${hours === 1 ? '' : 's'}`;
+    return `${hours} ${abbreviated ? 'hr' : `hour${hours === 1 ? '' : 's'}`}`;
   }
   if (seconds % 60 === 0) {
     const minutes = seconds / 60;
-    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+    return `${minutes} ${abbreviated ? 'min' : `minute${minutes === 1 ? '' : 's'}`}`;
   }
-  return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  return `${seconds} ${abbreviated ? 'sec' : `second${seconds === 1 ? '' : 's'}`}`;
 }
 
 function FolderRow({
@@ -194,14 +194,15 @@ function FolderRow({
               {path}
             </span>
           </button>
-          <div className="folder-row__retention-note" aria-live="polite">
-            <strong>
-              Keeps {displayKeep} previous version{displayKeep === 1 ? '' : 's'} for recovery
-            </strong>
-            <span>Checks for new changes every {formatCheckCadence(intervalSeconds)}</span>
-          </div>
           <div className="folder-row__keep">
-            <span className="folder-row__keep-label">Versions kept</span>
+            <div className="folder-row__keep-copy" aria-live="polite">
+              <span className="folder-row__keep-label">Versions kept</span>
+              <span className="folder-row__keep-detail">
+                Keeps {displayKeep} previous version{displayKeep === 1 ? '' : 's'} for recovery
+                <span aria-hidden="true"> · </span>
+                <span>Checks every {formatCheckCadence(intervalSeconds, true)}</span>
+              </span>
+            </div>
             <div className="stepper" aria-label={`Versions to keep for ${path}`}>
               <button
                 className="btn secondary btn-sm stepper-btn"

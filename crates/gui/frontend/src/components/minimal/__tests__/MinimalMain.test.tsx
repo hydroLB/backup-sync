@@ -373,9 +373,9 @@ describe('MinimalMain', () => {
 
     await waitFor(() => {
       expect(saveConfig).toHaveBeenCalled();
-      expect(screen.getByText('Keeps 6 previous versions for recovery')).toBeInTheDocument();
+      expect(screen.getByText(/Keeps 6 previous versions for recovery/)).toBeInTheDocument();
     });
-    expect(screen.getByText('Checks for new changes every 30 minutes')).toBeInTheDocument();
+    expect(screen.getByText('Checks every 30 min')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Add backup location' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Change main storage' })).toBeEnabled();
