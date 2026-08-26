@@ -3441,21 +3441,14 @@ code {
 }
 
 .folder-row__keep {
-  display: flex;
+  display: grid;
   align-items: center;
-  flex: 0 1 clamp(390px, 36vw, 570px);
-  min-width: 350px;
-  justify-content: space-between;
-  gap: clamp(14px, 1.2vw, 22px);
+  flex: 0 1 clamp(470px, 42vw, 650px);
+  min-width: 410px;
+  gap: clamp(7px, 0.55vw, 10px);
   color: var(--text-hint);
   padding-left: clamp(12px, 1vw, 18px);
   border-left: 1px solid rgba(125, 148, 184, 0.18);
-}
-
-.folder-row__keep-copy {
-  display: grid;
-  min-width: 0;
-  gap: clamp(4px, 0.3vw, 6px);
 }
 
 .folder-row__keep-label {
@@ -3468,22 +3461,34 @@ code {
 }
 
 .folder-row__keep-detail {
+  display: flex;
+  align-items: center;
+  gap: clamp(9px, 0.75vw, 14px);
+  min-width: 0;
   color: var(--text-section-header);
   font-size: clamp(11px, 0.8vw, 15px);
   font-weight: 650;
   line-height: 1.35;
 }
 
-.folder-row__keep-detail > span:last-child {
-  color: var(--text-hint);
-  font-weight: 560;
+.folder-row__retention,
+.folder-row__cadence {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(6px, 0.45vw, 9px);
   white-space: nowrap;
 }
 
+.folder-row__settings-divider {
+  width: 1px;
+  height: clamp(25px, 1.8vw, 32px);
+  flex: 0 0 1px;
+  background: rgba(125, 148, 184, 0.2);
+}
+
 .folder-row__cadence {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  color: var(--text-hint);
+  font-weight: 560;
 }
 
 .interval-minute-input {
@@ -3545,6 +3550,7 @@ code {
 }
 
 .folder-row__keep .stepper {
+  flex: 0 0 auto;
   gap: 2px;
   padding: 2px;
   border: 1px solid rgba(125, 139, 163, 0.18);
@@ -4120,10 +4126,13 @@ code {
     order: 4;
     flex: 1 0 100%;
     min-width: 0;
-    justify-content: space-between;
     padding: 10px 0 0;
     border-top: 1px solid rgba(125, 148, 184, 0.18);
     border-left: 0;
+  }
+
+  .folder-row__keep-detail {
+    flex-wrap: wrap;
   }
 
   .recovery-button {
@@ -4172,5 +4181,14 @@ code {
 
   .recovery-button__hint {
     display: none;
+  }
+
+  .folder-row__settings-divider {
+    display: none;
+  }
+
+  .folder-row__retention,
+  .folder-row__cadence {
+    width: 100%;
   }
 }

@@ -373,7 +373,9 @@ describe('MinimalMain', () => {
 
     await waitFor(() => {
       expect(saveConfig).toHaveBeenCalled();
-      expect(screen.getByText(/Keeps 6 previous versions for recovery/)).toBeInTheDocument();
+      expect(
+        screen.getByRole('spinbutton', { name: 'Versions to keep for /tmp/project' }),
+      ).toHaveValue(6);
     });
     expect(screen.getByLabelText('Backup interval minutes')).toHaveValue(30);
     expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();

@@ -219,70 +219,75 @@ function FolderRow({
             </span>
           </button>
           <div className="folder-row__keep">
-            <div className="folder-row__keep-copy" aria-live="polite">
-              <span className="folder-row__keep-label">Versions kept</span>
-              <span className="folder-row__keep-detail">
-                Keeps {displayKeep} previous version{displayKeep === 1 ? '' : 's'} for recovery
-                <span aria-hidden="true"> · </span>
-                <span className="folder-row__cadence">
-                  Checks every
+            <span className="folder-row__keep-label">Backup settings</span>
+            <div className="folder-row__keep-detail">
+              <div className="folder-row__retention">
+                <span>Keep</span>
+                <div
+                  className="stepper"
+                  role="group"
+                  aria-label={`Version retention controls for ${path}`}
+                >
+                  <button
+                    className="btn secondary btn-sm stepper-btn"
+                    type="button"
+                    onClick={() => void saveKeep(Math.max(1, displayKeep - 1))}
+                    disabled={busy || keepBusy || displayKeep <= 1}
+                    aria-label={`Keep fewer versions for ${path}`}
+                  >
+                    −
+                  </button>
                   <input
-                    className="interval-minute-input"
+                    className="stepper-input"
                     type="number"
                     min={1}
-                    max={43_200}
-                    inputMode="numeric"
-                    value={intervalDraft}
-                    aria-label="Backup interval minutes"
-                    onFocus={(event) => event.currentTarget.select()}
-                    onChange={(event) => setIntervalDraft(event.target.value)}
-                    onBlur={() => void saveInterval()}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') event.currentTarget.blur();
-                      if (event.key === 'Escape') {
-                        setIntervalDraft(String(intervalMinutes));
-                        event.currentTarget.blur();
-                      }
+                    max={1000}
+                    value={displayKeep}
+                    aria-label={`Versions to keep for ${path}`}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (!Number.isFinite(value)) return;
+                      void saveKeep(Math.max(1, Math.min(1000, Math.round(value))));
                     }}
-                    disabled={busy || intervalBusy}
+                    disabled={busy || keepBusy}
                   />
-                  min
-                </span>
-              </span>
-            </div>
-            <div className="stepper" aria-label={`Versions to keep for ${path}`}>
-              <button
-                className="btn secondary btn-sm stepper-btn"
-                type="button"
-                onClick={() => void saveKeep(Math.max(1, displayKeep - 1))}
-                disabled={busy || keepBusy || displayKeep <= 1}
-                aria-label={`Keep fewer versions for ${path}`}
-              >
-                −
-              </button>
-              <input
-                className="stepper-input"
-                type="number"
-                min={1}
-                max={1000}
-                value={displayKeep}
-                aria-label={`Versions to keep for ${path}`}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  if (!Number.isFinite(value)) return;
-                  void saveKeep(Math.max(1, Math.min(1000, Math.round(value))));
-                }}
-                disabled={busy || keepBusy}
-              />
-              <button
-                className="btn secondary btn-sm stepper-btn"
-                type="button"
-                onClick={() => void saveKeep(Math.min(1000, displayKeep + 1))}
-                disabled={busy || keepBusy}
-                aria-label={`Keep more versions for ${path}`}
-              >
-                +
-              </button>
+                  <button
+                    className="btn secondary btn-sm stepper-btn"
+                    type="button"
+                    onClick={() => void saveKeep(Math.min(1000, displayKeep + 1))}
+                    disabled={busy || keepBusy}
+                    aria-label={`Keep more versions for ${path}`}
+                  >
+                    +
+                  </button>
+                </div>
+                <span>previous version{displayKeep === 1 ? '' : 's'}</span>
+              </div>
+              <span className="folder-row__settings-divider" aria-hidden="true" />
+              <label className="folder-row__cadence">
+                <span>Check every</span>
+                <input
+                  className="interval-minute-input"
+                  type="number"
+                  min={1}
+                  max={43_200}
+                  inputMode="numeric"
+                  value={intervalDraft}
+                  aria-label="Backup interval minutes"
+                  onFocus={(event) => event.currentTarget.select()}
+                  onChange={(event) => setIntervalDraft(event.target.value)}
+                  onBlur={() => void saveInterval()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                    if (event.key === 'Escape') {
+                      setIntervalDraft(String(intervalMinutes));
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  disabled={busy || intervalBusy}
+                />
+                <span>min</span>
+              </label>
             </div>
           </div>
           <button
