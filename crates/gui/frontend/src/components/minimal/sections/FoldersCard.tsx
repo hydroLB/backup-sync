@@ -306,7 +306,9 @@ function FolderRow({
             aria-label={`Remove protected path ${path}`}
             title="Remove from protection"
           >
-            ×
+            <span className="icon-remove__glyph" aria-hidden="true">
+              ×
+            </span>
           </button>
         </div>
       )}

@@ -139,7 +139,9 @@ export function DestinationCard({
                       aria-label={`Remove secondary backup location ${destination.path}`}
                       title="Remove secondary backup location"
                     >
-                      ×
+                      <span className="icon-remove__glyph" aria-hidden="true">
+                        ×
+                      </span>
                     </button>
                   )}
                 </>
