@@ -8,7 +8,7 @@ import { useMinimalRunning } from './hooks/useMinimalRunning';
 import { SavePulseScope, useMinimalFeedback } from './hooks/useMinimalFeedback';
 import { useMinimalStatus } from './hooks/useMinimalStatus';
 import { useMinimalLiveHealth } from './hooks/useMinimalLiveHealth';
-import { useMinimalPickers } from './hooks/useMinimalPickers';
+import { type PickerBusyScope, useMinimalPickers } from './hooks/useMinimalPickers';
 import { removeKeptExtraVersion } from '../../services/safety';
 import { MinimalHeader } from './sections/MinimalHeader';
 import { DestinationCard } from './sections/DestinationCard';
@@ -20,13 +20,16 @@ import { Button } from '../ui/Button';
 import { StateBlock } from '../ui/StateBlock';
 import { PendingStorageMove, StorageMoveModal } from './StorageMoveModal';
 import { relocateDestination } from '../../services/storage';
+import { IS_WEB_RUNTIME } from '../../runtime/mode';
+import { StorageLocationPickerModal } from './StorageLocationPickerModal';
 
 type EventKind = 'ok' | 'error' | 'info';
 
 /** Keep the primary UX compact while preserving operational controls. */
 export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKind) => void }) {
   const [restoreOpen, setRestoreOpen] = useState(false);
-  const [pickerBusy, setPickerBusy] = useState(false);
+  const [pickerBusyScope, setPickerBusyScope] = useState<PickerBusyScope>(null);
+  const [storagePickerOpen, setStoragePickerOpen] = useState(false);
   const [hardeningBusy, setHardeningBusy] = useState(false);
   const [hardeningOk, setHardeningOk] = useState<boolean | null>(null);
   const [hardeningIssue, setHardeningIssue] = useState<string | null>(null);
@@ -37,6 +40,30 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   const [storageMoveBusy, setStorageMoveBusy] = useState(false);
   const lastHardeningKeyRef = useRef<string | null>(null);
   const hardeningRunIdRef = useRef(0);
+  const storagePickerResolverRef = useRef<((path: string | null) => void) | null>(null);
+
+  const requestWebStoragePath = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        storagePickerResolverRef.current?.(null);
+        storagePickerResolverRef.current = resolve;
+        setStoragePickerOpen(true);
+      }),
+    [],
+  );
+  const finishWebStoragePicker = useCallback((path: string | null) => {
+    setStoragePickerOpen(false);
+    const resolve = storagePickerResolverRef.current;
+    storagePickerResolverRef.current = null;
+    resolve?.(path);
+  }, []);
+  useEffect(
+    () => () => {
+      storagePickerResolverRef.current?.(null);
+      storagePickerResolverRef.current = null;
+    },
+    [],
+  );
 
   const {
     toast,
@@ -85,7 +112,8 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   );
   const pickers = useMinimalPickers({
     onEvent: (msg) => emitEvent(msg, 'info'),
-    onPickerBusyChange: (next) => setPickerBusy(next),
+    onPickerBusyChange: setPickerBusyScope,
+    ...(IS_WEB_RUNTIME ? { pickWebStoragePath: requestWebStoragePath } : {}),
   });
 
   const {
@@ -127,7 +155,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   const { destinationHealthWarning, watchedHealthWarning } = useMinimalLiveHealth({
     cfg,
     onEvent: emitEvent,
-    suspend: pickerBusy,
+    suspend: pickerBusyScope !== null,
   });
 
   const requestStorageMove = useCallback(
@@ -411,7 +439,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
 
       <div className="grid minimal-grid">
         <FoldersCard
-          busy={busy}
+          busy={busy || pickerBusyScope === 'source'}
           items={folderItems}
           defaultKeep={cfg.max_backups_per_file}
           watchedWarning={watchedHealthWarning}
@@ -439,7 +467,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
 
         <DestinationCard
           destinations={destinations}
-          busy={busy || pickerBusy}
+          busy={busy || pickerBusyScope === 'destination'}
           destinationWarning={destinationWarning ?? destinationHealthWarning}
           replicationWarning={replicationWarning}
           onChoose={() =>
@@ -480,6 +508,12 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
           }
           emitEvent(msg, kind);
         }}
+      />
+      <StorageLocationPickerModal
+        open={storagePickerOpen}
+        usedPaths={destinations.map((destination) => destination.path)}
+        onCancel={() => finishWebStoragePicker(null)}
+        onChoose={(path) => finishWebStoragePicker(path)}
       />
       <StorageMoveModal
         move={pendingStorageMove}

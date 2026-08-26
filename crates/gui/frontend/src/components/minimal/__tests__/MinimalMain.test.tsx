@@ -359,6 +359,29 @@ describe('MinimalMain', () => {
   it('makes configured paths directly clickable', assertPathRowsAreClickable);
   it('shows additional destinations with remove controls', assertAdditionalDestinationsVisible);
 
+  it('keeps storage controls available while the source picker is open', async () => {
+    let finishPicker: ((value: null) => void) | undefined;
+    vi.mocked(openDialog).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPicker = resolve;
+        }),
+    );
+    await renderMinimal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add protected path' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Add protected path' })).toBeDisabled();
+    });
+    expect(screen.getByRole('button', { name: 'Add backup location' })).toBeEnabled();
+
+    finishPicker?.(null);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Add protected path' })).toBeEnabled();
+    });
+  });
+
   it('confirms and safely migrates main storage before changing its path', async () => {
     const nextConfig = makeConfig({
       backup_root: '/tmp/new-backups',
