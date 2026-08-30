@@ -11,6 +11,8 @@ import sys
 
 root = pathlib.Path(sys.argv[1])
 canonical = root / "crates/gui/tauri.conf.json"
+bundle_config_path = root / "crates/gui/tauri.bundle.conf.json"
+local_macos_config_path = root / "crates/gui/tauri.local-macos.conf.json"
 frontend_link = root / "crates/gui/frontend/tauri.conf.json"
 obsolete = root / "crates/gui/src-tauri/tauri.conf.json"
 
@@ -21,6 +23,23 @@ assert build["frontendDist"] == "frontend/dist"
 assert build["beforeDevCommand"] == "npm run dev"
 assert build["beforeBuildCommand"] == "npm run build"
 assert config["identifier"] == "com.hydrolb.backupsync"
+assert "externalBin" not in config["bundle"]
+assert "macOS" not in config["bundle"]
+
+bundle_config = json.loads(bundle_config_path.read_text(encoding="utf-8"))
+assert bundle_config["bundle"]["externalBin"] == ["binaries/daemon"]
+assert bundle_config["build"]["beforeBuildCommand"] == "node ../../../scripts/build-desktop-assets.mjs"
+
+local_macos_config = json.loads(local_macos_config_path.read_text(encoding="utf-8"))
+assert local_macos_config["bundle"]["macOS"]["signingIdentity"] == "-"
+
+main_window = config["app"]["windows"][0]
+assert main_window["width"] == 1087
+assert main_window["height"] == 924
+assert main_window["minWidth"] == 760
+assert main_window["minHeight"] == 560
+assert main_window["center"] is True
+assert main_window["resizable"] is True
 
 security = config["app"]["security"]
 production_csp = security["csp"]

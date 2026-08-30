@@ -23,15 +23,30 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
   const [status, setStatus] = useState<StatusDto | null>(null);
   const [liveSafeMode, setLiveSafeMode] = useState<boolean | null>(null);
   const prevRef = useRef<{ destinationPaused: boolean; replicationFailed: boolean } | null>(null);
+  const renderKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     const refresh = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       getStatus()
         .then((nextStatus) => {
           if (cancelled) return;
-          setStatus(nextStatus);
+          const renderKey = JSON.stringify({
+            lastRunTs: nextStatus.last_run_ts,
+            lastError: nextStatus.last_error,
+            safeMode: nextStatus.safe_mode ?? null,
+            destinationPaused: nextStatus.destination_paused ?? false,
+            destinationReason: nextStatus.destination_pause_reason ?? null,
+            replicationFailed: nextStatus.replication_last_pairs_failed ?? 0,
+            replicationError: nextStatus.replication_last_error ?? null,
+            safetyWarning: nextStatus.last_safety_warning ?? null,
+          });
+          if (renderKeyRef.current !== renderKey) {
+            renderKeyRef.current = renderKey;
+            setStatus(nextStatus);
+          }
           setLiveSafeMode(nextStatus.safe_mode ?? null);
 
           const previous = prevRef.current;
@@ -65,7 +80,10 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
         })
         .catch((error) => {
           if (cancelled) return;
-          setStatus(null);
+          if (renderKeyRef.current !== null) {
+            renderKeyRef.current = null;
+            setStatus(null);
+          }
           setLiveSafeMode(null);
           prevRef.current = null;
           const reason = error instanceof Error ? error.message : String(error);
@@ -75,9 +93,14 @@ export function useMinimalStatus({ onEvent }: Params): MinimalStatusState {
 
     refresh();
     const id = setInterval(refresh, UI_TUNING.statusRefreshMs);
+    const onVisibilityChange = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       cancelled = true;
       clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [onEvent]);
 

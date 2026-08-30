@@ -1,3 +1,4 @@
+use super::browse::sync_source_readable_view;
 use super::model::{Manifest, ManifestEntryKind, VersionIndex};
 use super::operation_lock::acquire_store_leases;
 use super::store::{blob_path, blobs_root, sources_root, store_root};
@@ -347,6 +348,19 @@ fn replicate_one_pair(cfg: &Config, src: &Destination, dst: &Destination) -> Res
                         &dst_manifests_root,
                     )?);
         }
+    }
+
+    for watched in cfg
+        .watched
+        .iter()
+        .filter(|watched| watched.enabled && watched.destination_id == src.id)
+    {
+        sync_source_readable_view(cfg, watched, &dst.path).with_context(|| {
+            format!(
+                "versioned::replicate_one_pair failed to synchronize readable view for replica {}",
+                dst.id
+            )
+        })?;
     }
 
     Ok(pair)

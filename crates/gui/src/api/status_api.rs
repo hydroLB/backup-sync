@@ -177,10 +177,22 @@ where
 
     // Signal EOF on the write half so the server can close the request stream promptly on all
     // platforms and the client can move to response reads without lingering writes.
-    timeout(op_timeout, stream.shutdown())
-        .await
-        .context("status_api::fetch_status_over_stream timed out shutting down write half")?
-        .context("status_api::fetch_status_over_stream failed shutting down write half")?;
+    match timeout(op_timeout, stream.shutdown()).await {
+        Err(_) => {
+            return Err(anyhow!(
+                "status_api::fetch_status_over_stream timed out shutting down write half"
+            ));
+        }
+        Ok(Ok(())) => {}
+        // The daemon parses a complete JSON request without waiting for EOF and can finish its
+        // response before this shutdown call runs. macOS reports that normal race as ENOTCONN;
+        // the response remains readable, so treating it as fatal creates false offline loops.
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotConnected => {}
+        Ok(Err(error)) => {
+            return Err(anyhow!(error)
+                .context("status_api::fetch_status_over_stream failed shutting down write half"));
+        }
+    }
 
     let buf = read_bounded_to_end(
         &mut stream,
@@ -652,6 +664,12 @@ mod tests {
     fn request_id_sanitizes_untrusted_input() {
         let cid = request_id(Some(" gui\tcid\n "));
         assert_eq!(cid, "gui_cid");
+    }
+
+    #[test]
+    fn peer_closed_write_shutdown_is_a_known_nonfatal_socket_state() {
+        let error = std::io::Error::from(std::io::ErrorKind::NotConnected);
+        assert_eq!(error.kind(), std::io::ErrorKind::NotConnected);
     }
 
     #[tokio::test]

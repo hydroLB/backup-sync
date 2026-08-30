@@ -1,8 +1,8 @@
 # Release Process
 
-Last updated: 2026-08-23
+Last updated: 2026-08-27
 
-No Backup Sync release tags exist yet. The current workflow validates version metadata and publishes GitHub release notes; it does not build, sign, notarize, checksum, or attach application binaries.
+No Backup Sync release tags exist yet. A local Tauri build now produces a self-contained macOS app/DMG with the background daemon included, but it is only ad-hoc signed. The current hosted workflow validates version metadata and publishes GitHub release notes; it does not create, Developer ID sign, notarize, checksum, or attach application binaries.
 
 ## Policy
 
@@ -23,6 +23,10 @@ No Backup Sync release tags exist yet. The current workflow validates version me
 
 ```bash
 make check
+cd crates/gui && frontend/node_modules/.bin/tauri build \
+  --config tauri.bundle.conf.json \
+  --config tauri.local-macos.conf.json \
+  --bundles app,dmg
 ./scripts/release/validate_release_ref.sh HEAD origin/main
 ./scripts/release/validate_changelog_for_release.sh X.Y.Z CHANGELOG.md
 ./scripts/release/validate_semver_tag.sh vX.Y.Z
@@ -42,7 +46,7 @@ Do not imply that a `0.1.0` changelog baseline is released until the correspondi
 
 ## Before binary distribution
 
-The release contract must expand to include reproducible Tauri/CLI/daemon artifacts, checksums/provenance, platform signing/notarization, and clean-machine install → backup → verify → restore → uninstall tests. Those items remain roadmap work.
+The release contract must expand to include reproducible Tauri/CLI artifacts, checksums/provenance, platform signing/notarization, and clean-machine install → backup → verify → restore → uninstall tests. The local macOS bundle proves packaging and bundled-daemon startup, but it is not a substitute for those public-distribution gates. Public macOS builds must use `tauri.bundle.conf.json` without `tauri.local-macos.conf.json`; the latter deliberately selects an ad-hoc identity for local verification only.
 
 ## Corrections
 

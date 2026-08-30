@@ -119,6 +119,10 @@ fn encrypted_blobs_restore_and_scrub() {
     let cfg = build_cfg(&source, &dest, &key_path, &key_info.key_id);
     validate(&cfg).expect("encryption_blobs::encrypted_blobs_restore_and_scrub validate");
     run_backup_cycle(&cfg).expect("encryption_blobs::encrypted_blobs_restore_and_scrub backup");
+    assert!(
+        !dest.join("source").exists(),
+        "encrypted backups must not publish a decoded plaintext browse tree"
+    );
 
     let blob = locate_one_blob(&dest);
     let mut prefix = [0u8; 8];

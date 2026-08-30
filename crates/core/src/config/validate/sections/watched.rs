@@ -36,7 +36,8 @@ pub(crate) fn validate_paths(
         );
     }
 
-    // prevent recursive/overlapping paths and duplicates
+    // The same source may intentionally be protected to multiple destinations. Only the
+    // source/destination pair must be unique; rejecting the path globally breaks redundancy.
     let mut seen = HashSet::new();
     for w in &cfg.watched {
         if w.path.parent().is_none() {
@@ -45,9 +46,13 @@ pub(crate) fn validate_paths(
                 w.path
             );
         }
-        let key = w.path.to_string_lossy().to_string();
+        let key = (w.path.clone(), w.destination_id.clone());
         if !seen.insert(key) {
-            bail!("{label} duplicate watched path: {:?}", w.path);
+            bail!(
+                "{label} duplicate watched path/destination pair: {:?} -> {}",
+                w.path,
+                w.destination_id
+            );
         }
         let dest_path = destinations.get(w.destination_id.as_str()).ok_or_else(|| {
             anyhow::anyhow!(

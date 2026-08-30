@@ -5,6 +5,7 @@ import { safeInvoke, safeInvokeWithTimeout, wrapError } from './ipc';
 
 export type ConfigSaveResult = {
   daemon_restarted: boolean;
+  daemon_restart_scheduled?: boolean;
   daemon_restart_warning: string | null;
 };
 
@@ -27,5 +28,22 @@ export async function saveConfig(cfg: Config): Promise<ConfigSaveResult> {
     );
   } catch (error) {
     throw wrapError('[saveConfig] Failed to save configuration', error);
+  }
+}
+
+/** Persist removal only after the native store deletes that source's saved history. */
+export async function saveConfigRemovingSource(
+  cfg: Config,
+  sourcePath: string,
+  kind: 'File' | 'Directory',
+): Promise<ConfigSaveResult> {
+  try {
+    return await safeInvokeWithTimeout<ConfigSaveResult>(
+      'remove_protected_path_cmd',
+      { cfg, sourcePath, kind, correlationId: correlationId('remove-protected-path') },
+      UI_TUNING.system.configSaveTimeoutMs,
+    );
+  } catch (error) {
+    throw wrapError('[saveConfigRemovingSource] Failed to remove protected path', error);
   }
 }

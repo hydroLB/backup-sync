@@ -4,17 +4,21 @@ import App from './App';
 import './styles.css';
 import { resolveColorMode, systemPrefersDark } from './theme/colorMode';
 import { applyThemeTokens } from './theme/tokens';
+import { startGoldenViewportScaling } from './runtime/viewportScale';
+import { IS_WEB_RUNTIME } from './runtime/mode';
 
 /** Keeps startup wiring in one function for safer initialization and error context. */
 function mountApp(): void {
   try {
     const initialMode = resolveColorMode('auto', systemPrefersDark());
     applyThemeTokens(initialMode);
+    document.documentElement.dataset.runtime = IS_WEB_RUNTIME ? 'web' : 'native';
 
     const root = document.getElementById('root');
     if (!root) {
       throw new Error('Root element #root was not found');
     }
+    startGoldenViewportScaling(root);
     ReactDOM.createRoot(root as HTMLElement).render(
       <React.StrictMode>
         <App />

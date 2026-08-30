@@ -2,13 +2,14 @@ import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../../../../domain/config';
 import { useMinimalConfig } from '../useMinimalConfig';
-import { loadConfig, saveConfig } from '../../../../services/config';
+import { loadConfig, saveConfig, saveConfigRemovingSource } from '../../../../services/config';
 import type { ConfigSaveResult } from '../../../../services/config';
 import type { PersistOptions } from '../useMinimalConfig';
 
 vi.mock('../../../../services/config', () => ({
   loadConfig: vi.fn(),
   saveConfig: vi.fn(),
+  saveConfigRemovingSource: vi.fn(),
 }));
 
 function buildConfig(): Config {
@@ -102,6 +103,7 @@ describe('useMinimalConfig', () => {
   beforeEach(() => {
     vi.mocked(loadConfig).mockReset();
     vi.mocked(saveConfig).mockReset();
+    vi.mocked(saveConfigRemovingSource).mockReset();
   });
 
   it('loads the configured schedule without rewriting it', async () => {
@@ -183,6 +185,30 @@ describe('useMinimalConfig', () => {
 
     expect(onEvent).toHaveBeenCalledWith('Persisted.', 'ok');
     expect(onEvent).not.toHaveBeenCalledWith(expect.stringContaining('daemon'), 'error');
+  });
+
+  it('routes protected-path removal through the native history deletion command', async () => {
+    const controller = { current: null as Controller | null };
+    const cfg = buildConfig();
+    const next = { ...cfg, watched: [] };
+    vi.mocked(loadConfig).mockResolvedValue(cfg);
+    vi.mocked(saveConfigRemovingSource).mockResolvedValue(SAVE_OK);
+
+    render(<Harness onEvent={vi.fn()} controller={controller} />);
+    await waitFor(() => expect(controller.current?.cfg).not.toBeNull());
+
+    await act(async () => {
+      await controller.current?.persist(next, 'Removed.', {
+        removeSource: { path: '/tmp/project', kind: 'Directory' },
+      });
+    });
+
+    expect(saveConfigRemovingSource).toHaveBeenCalledWith(
+      expect.objectContaining({ watched: [] }),
+      '/tmp/project',
+      'Directory',
+    );
+    expect(saveConfig).not.toHaveBeenCalled();
   });
 
   it('emits success and daemon warning when manual persist saves but restart fails', async () => {

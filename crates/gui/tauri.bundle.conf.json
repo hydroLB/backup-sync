@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/daemon"]
+  },
+  "build": {
+    "beforeBuildCommand": "node ../../../scripts/build-desktop-assets.mjs"
+  }
+}

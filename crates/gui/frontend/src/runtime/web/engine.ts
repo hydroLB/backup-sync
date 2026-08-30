@@ -14,7 +14,7 @@ import {
 const DATABASE_NAME = 'backup-sync-web';
 const DATABASE_VERSION = 1;
 const STATE_KEY = 'workspace';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 type WebFile = {
   relPath: string;
@@ -84,8 +84,8 @@ function defaultConfig(): Config {
   const sourcePath = '/Browser Workspace/Portfolio';
   return {
     backup_root: 'browser-vault://primary',
-    interval_seconds: 30 * 60,
-    max_backups_per_file: 8,
+    interval_seconds: 60 * 60,
+    max_backups_per_file: 4,
     skip_hidden: true,
     ignore_patterns: [],
     max_parallel_copies: 4,
@@ -133,14 +133,14 @@ function defaultConfig(): Config {
         kind: 'Directory',
         enabled: true,
         destination_id: 'primary',
-        max_backups_per_file: 8,
+        max_backups_per_file: 4,
       },
       {
         path: sourcePath,
         kind: 'Directory',
         enabled: true,
         destination_id: 'mirror',
-        max_backups_per_file: 8,
+        max_backups_per_file: 4,
       },
     ],
     destinations: [
@@ -499,6 +499,18 @@ async function loadState(): Promise<WebState> {
       try {
         const persisted = await readPersistedState();
         if (persisted?.schemaVersion === SCHEMA_VERSION) return persisted;
+        if (persisted?.schemaVersion === 1) {
+          const migrated = structuredClone(persisted);
+          migrated.schemaVersion = SCHEMA_VERSION;
+          migrated.config.interval_seconds = 60 * 60;
+          migrated.config.max_backups_per_file = 4;
+          migrated.config.watched = migrated.config.watched.map((watched) => ({
+            ...watched,
+            max_backups_per_file: 4,
+          }));
+          await persistState(migrated);
+          return migrated;
+        }
       } catch (error) {
         console.warn(
           '[web-engine] Browser persistence unavailable; using this session only.',
@@ -538,7 +550,7 @@ function scheduleWebBackup(intervalSeconds: number): void {
   if (!schedulerStarted || typeof window === 'undefined') return;
   if (schedulerTimer !== null) window.clearTimeout(schedulerTimer);
   const generation = ++schedulerGeneration;
-  const delay = Math.max(1, Number.isFinite(intervalSeconds) ? intervalSeconds : 30 * 60) * 1000;
+  const delay = Math.max(1, Number.isFinite(intervalSeconds) ? intervalSeconds : 60 * 60) * 1000;
   schedulerTimer = window.setTimeout(() => {
     schedulerTimer = null;
     void mutate(async (state) => {
@@ -703,6 +715,35 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
         scheduleWebBackup(config.interval_seconds);
         return { daemon_restarted: false, daemon_restart_warning: null };
       })) as T;
+    case 'remove_protected_path_cmd':
+      return (await mutate(async (state) => {
+        const config = args?.cfg as Config | undefined;
+        const sourcePath = String(args?.sourcePath ?? '');
+        if (!config || !sourcePath) {
+          throw new Error('Protected path removal payload is incomplete.');
+        }
+        if (!state.config.watched.some((watched) => watched.path === sourcePath)) {
+          throw new Error('The protected path no longer exists.');
+        }
+        if (config.watched.some((watched) => watched.path === sourcePath)) {
+          throw new Error('Every destination entry for this protected path must be removed.');
+        }
+        const removedManifests = removeSourceHistory(state, new Set([sourcePath]));
+        state.config = structuredClone(config);
+        state.status.safe_mode = config.safe_mode;
+        if (state.status.last_safety_warning?.watched_path === sourcePath) {
+          state.status.last_safety_warning = null;
+        }
+        const nextSourcePath = config.watched[0]?.path;
+        if (nextSourcePath) state.sourcePath = nextSourcePath;
+        log(state, `protection removed; ${removedManifests} saved source manifests deleted`);
+        scheduleWebBackup(config.interval_seconds);
+        return {
+          daemon_restarted: false,
+          daemon_restart_scheduled: false,
+          daemon_restart_warning: null,
+        };
+      })) as T;
     case 'relocate_destination_cmd':
       return (await mutate(async (state) => {
         const destinationId = String(args?.destinationId ?? '');
@@ -712,12 +753,42 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
         );
         if (destinationIndex < 0) throw new Error('Storage location no longer exists.');
         if (!newPath) throw new Error('Choose a new storage location.');
-        if (
-          state.config.destinations.some(
-            (destination) => destination.id !== destinationId && destination.path === newPath,
-          )
-        ) {
-          throw new Error('That storage location is already configured.');
+        const existingIndex = state.config.destinations.findIndex(
+          (destination) => destination.id !== destinationId && destination.path === newPath,
+        );
+        if (existingIndex >= 0) {
+          if (destinationIndex !== 0) {
+            throw new Error(
+              'Only Main storage can switch with an existing secondary backup location.',
+            );
+          }
+          const previousMainPath = state.config.destinations[0]!.path;
+          const secondaryId = state.config.destinations[existingIndex]!.id;
+          state.config.destinations[0] = {
+            ...state.config.destinations[0]!,
+            path: newPath,
+          };
+          state.config.destinations[existingIndex] = {
+            ...state.config.destinations[existingIndex]!,
+            path: previousMainPath,
+          };
+          const primaryVault = state.vaults[destinationId];
+          state.vaults[destinationId] = state.vaults[secondaryId] ?? {
+            blobs: {},
+            manifests: [],
+          };
+          state.vaults[secondaryId] = primaryVault ?? { blobs: {}, manifests: [] };
+          state.config.backup_root = newPath;
+          log(state, `existing secondary ${secondaryId} verified and promoted to Main storage`);
+          return {
+            config: structuredClone(state.config),
+            operation: 'promoted_existing_secondary',
+            files_moved: 0,
+            bytes_moved: 0,
+            old_location_removed: false,
+            warning:
+              'The selected secondary copy is now Main storage; the previous Main storage remains intact as a secondary backup.',
+          };
         }
         const vault = state.vaults[destinationId] ?? { blobs: {}, manifests: [] };
         const filesMoved = Object.keys(vault.blobs).length + vault.manifests.length;
@@ -733,6 +804,7 @@ export async function invokeWebCommand<T>(command: string, args?: UnknownArgs): 
         log(state, `storage ${destinationId} moved and verified at ${newPath}`);
         return {
           config: structuredClone(state.config),
+          operation: 'moved_to_new_location',
           files_moved: filesMoved,
           bytes_moved: bytesMoved,
           old_location_removed: true,

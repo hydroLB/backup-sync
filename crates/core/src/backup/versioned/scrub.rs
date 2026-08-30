@@ -1,6 +1,7 @@
 use super::model::{Manifest, ManifestEntryKind, VersionIndex};
 use super::operation_lock::acquire_store_leases;
 use super::store::{blob_path, blobs_root, sources_root, store_root};
+use super::validation::validate_version_index;
 use crate::config::model::{Config, Destination, HashingTuning};
 use crate::encryption::blobs::BlobCodec;
 use crate::hashing;
@@ -93,6 +94,12 @@ pub fn scrub_versioned_store(
         let index: VersionIndex = serde_json::from_str(&raw).with_context(|| {
             format!(
                 "versioned::scrub_versioned_store failed to parse {:?}",
+                index_path
+            )
+        })?;
+        validate_version_index(&index).with_context(|| {
+            format!(
+                "versioned::scrub_versioned_store rejected unsafe index {:?}",
                 index_path
             )
         })?;

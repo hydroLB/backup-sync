@@ -317,7 +317,9 @@ export function useMinimalActions({
           (watched) => watched.path !== path || (watched.kind ?? 'Directory') !== kind,
         ),
       };
-      await persist(next, `Removed ${path} from protection.`);
+      await persist(next, `Removed ${path} and all of its saved versions.`, {
+        removeSource: { path, kind },
+      });
     },
     [cfg, persist, primaryId],
   );
@@ -340,7 +342,7 @@ export function useMinimalActions({
           max_backups_per_file: nextKeep,
         };
       });
-      await persist({ ...cfg, watched: nextWatched }, `Versions to keep updated for ${path}.`, {
+      await persist({ ...cfg, watched: nextWatched }, `Restore points updated for ${path}.`, {
         globalBusy: false,
       });
     },

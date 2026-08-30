@@ -1,6 +1,6 @@
 # Risk Register
 
-Last updated: 2026-08-23
+Last updated: 2026-08-27
 
 Priority: `P0` can cause unrecoverable loss or invalidate a release; `P1` is a significant pre-1.0 reliability/security risk; `P2` is bounded maturation work.
 
@@ -9,7 +9,7 @@ Priority: `P0` can cause unrecoverable loss or invalidate a release; `P1` is a s
 | ID | Pri | Residual risk | Current control | Next mitigation |
 |---|---|---|---|---|
 | R-01 | P0 | Losing an encryption key makes encrypted blobs unrecoverable. | Explicit key generation, restrictive key-file permissions, key-ID validation, and documented warnings. | Require a verified recovery copy before GUI enablement. |
-| R-02 | P0 | No packaged, signed, notarized, or clean-machine-tested artifacts exist. | Source builds, tag/changelog validation, and Linux full-gate CI. | Add reproducible artifacts, provenance, platform signing, and install/restore/uninstall tests. |
+| R-02 | P0 | The local macOS app/DMG is ad-hoc signed; no Developer ID notarized or clean-machine-tested public artifact exists. | The bundle includes its daemon, passes local package integrity checks, and is covered by tag/changelog validation plus Linux full-gate CI. | Add reproducible release jobs, provenance, Developer ID signing/notarization, and clean-machine install/restore/uninstall tests. |
 | R-03 | P1 | Windows named-pipe ACL policy and runtime singleton behavior are not verified. | Pipe connection ordering is correct and Windows all-target/all-feature compilation runs in CI. | Define explicit per-user ACLs and test on clean Windows hosts. |
 | R-04 | P1 | Atomic state replacement does not make cross-process read-modify-write updates transactional. | Same-directory temp, fsync, atomic replace, and daemon-local commit serialization/owned-field merges. | Add a state lease or transactional compare-and-swap protocol shared by every process. |
 | R-05 | P1 | In-flight blocking filesystem work is not cooperatively cancellable. | Work leaves the async runtime and shutdown joins are bounded. | Add cancellation checkpoints to scan, restore, scrub, and replication primitives. |
@@ -33,6 +33,7 @@ Priority: `P0` can cause unrecoverable loss or invalidate a release; `P1` is a s
 - The canonical quality gate includes tests, builds, coverage, performance, secret scans, and supply-chain audits.
 - macOS and Windows compilation jobs cover conditional workspace code; CodeQL covers Rust and frontend code.
 - npm/Rust vulnerability scans currently report zero vulnerabilities; stale Rust advisory suppressions were removed.
+- Existing-secondary promotion pauses writes, validates freshness, performs a full scrub, preserves both stores, and rolls configuration back when service activation fails.
 
 ## Review triggers
 

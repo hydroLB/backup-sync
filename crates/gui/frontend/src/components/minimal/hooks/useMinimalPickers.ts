@@ -18,7 +18,7 @@ type AddWatched = (
 ) => void | Promise<void>;
 
 type MinimalPickers = {
-  pickDestinationPath: () => Promise<string | null>;
+  pickDestinationPath: (initialPath?: string) => Promise<string | null>;
   pickPathForDest: (
     destinationId: string,
     kind: 'File' | 'Directory',
@@ -39,24 +39,28 @@ export function useMinimalPickers({
   onPickerBusyChange,
   pickWebStoragePath,
 }: Params): MinimalPickers {
-  const pickDestinationPath = useCallback(async () => {
-    onPickerBusyChange('destination');
-    try {
-      if (pickWebStoragePath) return await pickWebStoragePath();
-      const selection = await openDialog({
-        directory: true,
-        multiple: false,
-        title: 'Choose destination',
-      });
-      return firstPath(selection);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      onEvent(`[useMinimalPickers] Failed to choose destination: ${reason}`, 'error');
-      return null;
-    } finally {
-      onPickerBusyChange(null);
-    }
-  }, [onEvent, onPickerBusyChange, pickWebStoragePath]);
+  const pickDestinationPath = useCallback(
+    async (initialPath?: string) => {
+      onPickerBusyChange('destination');
+      try {
+        if (pickWebStoragePath) return await pickWebStoragePath();
+        const selection = await openDialog({
+          directory: true,
+          multiple: false,
+          title: 'Choose destination',
+          ...(initialPath?.trim() ? { defaultPath: initialPath } : {}),
+        });
+        return firstPath(selection);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        onEvent(`[useMinimalPickers] Failed to choose destination: ${reason}`, 'error');
+        return null;
+      } finally {
+        onPickerBusyChange(null);
+      }
+    },
+    [onEvent, onPickerBusyChange, pickWebStoragePath],
+  );
 
   const pickPathForDest = useCallback(
     async (

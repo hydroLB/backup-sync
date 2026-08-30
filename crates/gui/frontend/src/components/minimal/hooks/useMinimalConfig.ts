@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ConfigSaveResult, loadConfig, saveConfig } from '../../../services/config';
+import {
+  ConfigSaveResult,
+  loadConfig,
+  saveConfig,
+  saveConfigRemovingSource,
+} from '../../../services/config';
 import { Config, Destination, WatchedPath } from '../../../domain/config';
 import { ensurePrimaryDestination, normalizeWatched } from '../helpers/config';
 
@@ -11,6 +16,7 @@ type Events = {
 
 export type PersistOptions = {
   globalBusy?: boolean;
+  removeSource?: { path: string; kind: 'File' | 'Directory' };
 };
 
 type MinimalConfigState = {
@@ -103,14 +109,24 @@ export function useMinimalConfig({ onEvent }: Events): MinimalConfigState {
   /** Save small inline controls without making unrelated sections look unavailable. */
   const persist = async (next: Config, successMessage = 'Saved.', options: PersistOptions = {}) => {
     const globalBusy = options.globalBusy ?? true;
+    const previous = cfg;
+    const { cfg: normalized } = ensurePrimaryDestination(next);
     try {
       if (globalBusy) setBusy(true);
-      const { cfg: normalized } = ensurePrimaryDestination(next);
-      const result = await saveConfig(normalized);
+      // Keep direct manipulation feeling immediate while the daemon safely refreshes in the
+      // background. A failed save rolls the optimistic state back below.
       setCfg(normalized);
+      const result = options.removeSource
+        ? await saveConfigRemovingSource(
+            normalized,
+            options.removeSource.path,
+            options.removeSource.kind,
+          )
+        : await saveConfig(normalized);
       onEvent(successMessage, 'ok');
       reportSaveOutcome(result);
     } catch (error) {
+      setCfg(previous);
       const reason = error instanceof Error ? error.message : String(error);
       onEvent(`Save failed: ${reason}`, 'error');
     } finally {

@@ -63,6 +63,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
 
+            // A packaged desktop app must be functional without a separate CLI install step.
+            // The bundled daemon is adjacent to the GUI executable and remains managed by the
+            // existing restart path (launchd when installed, direct child process otherwise).
+            async_runtime::spawn_blocking(|| {
+                if let Err(error) = crate::commands::service::restart_daemon_cmd(None) {
+                    warn!(
+                        error = %error.message,
+                        "app::run could not start the bundled background service"
+                    );
+                }
+            });
+
             if runtime.gui_start_hidden {
                 // Hide on launch for users that want tray-first behavior.
                 if let Some(window) = app.get_webview_window("main") {
@@ -95,6 +107,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::commands::status::get_status,
             crate::commands::config::load_config_cmd,
             crate::commands::config::save_config_cmd,
+            crate::commands::config::remove_protected_path_cmd,
             crate::commands::backup::run::run_now_cmd,
             crate::commands::backup::run::run_simulate_cmd,
             crate::commands::backup::restore::list_versions_cmd,
@@ -110,6 +123,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::commands::backup::verify::export_health_report_cmd,
             crate::commands::service::restart_daemon_cmd,
             crate::commands::destination::check_destination_cmd,
+            crate::commands::destination::open_destination_cmd,
+            crate::commands::destination::relocate_destination_cmd,
             crate::commands::access::test_access_cmd,
             crate::commands::support::diagnostics::doctor_report_cmd,
             crate::commands::support::diagnostics::export_diagnostic_bundle_cmd,

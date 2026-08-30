@@ -73,8 +73,10 @@ flowchart LR
 2. New plaintext content is encoded once under `.backup_sync/v1/blobs/sha256/<prefix>/<hash>`.
 3. Blob bytes are persisted and verified before the immutable version manifest is committed.
 4. The source index is updated last; retention removes old manifests before garbage collection.
-5. Replication validates the source, repairs destination content, and publishes its index last.
-6. Restore validates metadata and decoded content before replacing the requested target.
+5. Unencrypted destinations expose verified `Latest` and `Previous Versions` file trees while the
+   recovery database stays hidden and authoritative.
+6. Replication validates the source, repairs destination content, and publishes its index last.
+7. Restore validates metadata and decoded content before replacing the requested target.
 
 Optional zstd compression and chunked XChaCha20-Poly1305 encryption affect blob bytes, not manifest paths or metadata. Losing the encryption key makes encrypted blobs unrecoverable. See the [storage contract](docs/storage.md) and [threat model](docs/threat-model.md).
 
@@ -104,6 +106,18 @@ make build
 ```
 
 The build produces debug Rust binaries under `target/debug` and the frontend bundle under `crates/gui/frontend/dist`; it does not create an installer. See [Getting started](docs/getting-started.md) for platform prerequisites and first-run steps.
+
+For the local macOS app and DMG (including the bundled daemon):
+
+```bash
+cd crates/gui
+frontend/node_modules/.bin/tauri build \
+  --config tauri.bundle.conf.json \
+  --config tauri.local-macos.conf.json \
+  --bundles app,dmg
+```
+
+That local artifact is ad-hoc signed and is not a public Developer ID notarized release. A public build uses `tauri.bundle.conf.json` without the local signing override and requires the Apple signing and notarization credentials described in [the release guide](docs/release.md).
 
 ## CLI essentials
 
@@ -137,6 +151,7 @@ The desktop UI keeps the common schedule at 30 minutes and normalizes that value
 
 - Closing the window hides it; it does not trigger a backup or mutate configuration.
 - Quitting the GUI closes only the GUI. An installed background service continues running.
+- The packaged app includes and starts its daemon automatically; installing start-on-login remains an optional service action.
 - The Running toggle maps to safe mode and pauses or resumes background writes.
 - Restore searches are explicit and stale requests cannot replace newer folder/version selections.
 
@@ -155,7 +170,7 @@ make security-check
 make docs-check
 ```
 
-The current local coverage measurement is **63.23% Rust lines, 60.70% functions, and 62.97% regions**. The frontend suite currently reports **67 tests**. These are measurements, not claims of exhaustive coverage; enforced thresholds are defined by the build scripts.
+The current local coverage measurement is **63.23% Rust lines, 60.70% functions, and 62.97% regions**. The frontend suite currently reports **89 tests**. These are measurements, not claims of exhaustive coverage; enforced thresholds are defined by the build scripts.
 
 Hosted CI runs Linux quality gates plus macOS and Windows workspace compilation. Those jobs prove conditional compilation, not packaging, native service runtime behavior, or clean-machine recovery.
 
@@ -175,7 +190,7 @@ Dependency policy currently reports zero known vulnerabilities. `cargo deny` als
 - The state file is atomically replaced, but cross-process read-modify-write updates are not transactional.
 - Blocking filesystem tasks leave the async runtime, but in-flight `spawn_blocking` work is not cooperatively cancellable.
 - Windows named-pipe ACLs and platform runtime behavior still need clean-machine verification.
-- Packaged and signed artifacts, native installers, and full platform recovery tests are not available yet.
+- Public Developer ID signed/notarized artifacts and full clean-machine platform recovery tests are not available yet.
 - The legacy engine remains until consumers migrate under the documented deprecation policy.
 
 See the [roadmap](docs/roadmap.md), [risk register](docs/risk-register.md), and [release process](docs/release.md) for the honest pre-1.0 boundary.

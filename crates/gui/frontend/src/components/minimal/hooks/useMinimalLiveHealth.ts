@@ -66,6 +66,7 @@ export function useMinimalLiveHealth({ cfg, onEvent, suspend = false }: Params):
 
     const refresh = async () => {
       if (suspend) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (inFlightRef.current) return;
       inFlightRef.current = true;
       try {
@@ -82,19 +83,15 @@ export function useMinimalLiveHealth({ cfg, onEvent, suspend = false }: Params):
         );
         if (cancelled) return;
         const nextDestinationIssues = destinationChecks.filter((entry): entry is string => !!entry);
-        setDestinationIssues(nextDestinationIssues);
-
         const access = await testAccess();
         if (cancelled) return;
         const nextMissing = access.watched_missing ?? [];
         const nextInaccessible = access.watched_unwritable ?? [];
-        setWatchedMissing(nextMissing);
-        setWatchedInaccessible(nextInaccessible);
-
         const nextDestinationKey = issueKey(nextDestinationIssues);
         const nextWatchedKey = issueKey([...nextMissing, ...nextInaccessible]);
 
         if (prevDestinationKeyRef.current !== nextDestinationKey) {
+          setDestinationIssues(nextDestinationIssues);
           if (prevDestinationKeyRef.current.length === 0 && nextDestinationIssues.length > 0) {
             onEvent(
               destinationWarningFromIssues(nextDestinationIssues) ?? 'Destination issue detected.',
@@ -115,6 +112,8 @@ export function useMinimalLiveHealth({ cfg, onEvent, suspend = false }: Params):
         }
 
         if (prevWatchedKeyRef.current !== nextWatchedKey) {
+          setWatchedMissing(nextMissing);
+          setWatchedInaccessible(nextInaccessible);
           if (prevWatchedKeyRef.current.length === 0 && nextWatchedKey.length > 0) {
             onEvent(
               watchedWarningFromIssues(nextMissing, nextInaccessible) ??
@@ -149,10 +148,15 @@ export function useMinimalLiveHealth({ cfg, onEvent, suspend = false }: Params):
     const id = setInterval(() => {
       void refresh();
     }, UI_TUNING.liveHealthRefreshMs);
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       cancelled = true;
       clearTimeout(kickoff);
       clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [cfg, onEvent, suspend]);
 

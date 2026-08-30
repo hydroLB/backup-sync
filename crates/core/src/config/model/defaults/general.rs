@@ -5,12 +5,12 @@ pub(crate) fn default_destination_id() -> String {
 
 /// Keep top-level scheduling defaults centralized.
 pub(crate) fn default_interval_seconds() -> u64 {
-    1800
+    3600
 }
 
 /// Keep top-level retention defaults centralized.
 pub(crate) fn default_max_backups_per_file() -> usize {
-    5
+    4
 }
 
 /// Reduce surprise by skipping dotfiles unless explicitly enabled.

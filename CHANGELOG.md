@@ -15,6 +15,8 @@ No release tags exist yet. Version `0.1.0` remains the planned source-distribute
 - Frontend error boundary, recoverable config-load errors, stale-request protection in restore search, and accessibility/reduced-motion improvements.
 - Cross-platform service-manifest escaping tests and macOS/Windows workspace compilation jobs.
 - Repository-local documentation, release-permission, launcher-consistency, architecture, operability, hygiene, lockfile, and CI-contract checks.
+- A self-contained macOS desktop bundle that includes and starts the background daemon without a separate CLI installation step.
+- Verified Main-storage promotion for an existing secondary copy, with full scrub, freshness checks, activation rollback, and no file deletion.
 
 ### Changed
 
@@ -28,6 +30,8 @@ No release tags exist yet. Version `0.1.0` remains the planned source-distribute
 - Updated frontend dependencies so the full npm audit reports zero vulnerabilities.
 - Removed the stale Rust advisory ignore inventory; current `cargo deny` output contains informational transitive warnings rather than ignored vulnerabilities.
 - Clarified source-only distribution and separated platform compilation from packaging/runtime claims.
+- Unified the browser and native desktop layout, added responsive reference-viewport scaling, and kept the download action exclusive to the website build.
+- Allowed one protected source to target multiple distinct destinations while continuing to reject duplicate source/destination pairs.
 
 ### Security
 

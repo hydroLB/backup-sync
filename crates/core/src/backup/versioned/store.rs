@@ -1,3 +1,5 @@
+use super::browse::remove_generated_plaintext_view;
+use super::browse::sync_source_readable_view;
 use super::model::{
     Manifest, ManifestEntry, ManifestEntryKind, ReadFailure, ReadFailurePhase, VersionIndex,
     VersionInfo,
@@ -255,6 +257,12 @@ pub fn run_backup_cycle(cfg: &Config) -> Result<BackupCycleResult> {
             keep_versions,
         };
         let result = backup_one_folder(cfg, watched, &descriptor, &blob_codec)?;
+        sync_source_readable_view(cfg, watched, &dest.path).with_context(|| {
+            format!(
+                "versioned::run_backup_cycle failed to synchronize the readable backup view for {}",
+                redact_path(&watched.path)
+            )
+        })?;
         cycle.folders_scanned += 1;
         if result.changed {
             cycle.versions_created += 1;
@@ -346,6 +354,77 @@ pub fn remove_kept_safety_version(
     gc_unreferenced_blobs(&store_root, &blobs_root)?;
 
     Ok(Some(kept))
+}
+
+/// Delete every committed version for one source from all configured destinations.
+///
+/// The destination leases remain held while `commit` runs. Callers use that boundary to persist
+/// the configuration change and refresh the daemon before another backup cycle can recreate the
+/// source history. Original source files are never inspected or modified here.
+pub fn remove_source_history_with_commit<T, F>(
+    cfg: &Config,
+    source_path: &Path,
+    commit: F,
+) -> Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    let enabled_destinations: Vec<&Path> = cfg
+        .destinations
+        .iter()
+        .map(|destination| destination.path.as_path())
+        .collect();
+    let lock_policy = BlockingIoPolicy::from_config(cfg);
+    let _operation_leases =
+        acquire_store_leases(enabled_destinations.iter().copied(), &lock_policy).context(
+            "versioned::remove_source_history_with_commit could not serialize destination stores",
+        )?;
+
+    let source_id = hashing::sha256_hex(source_path.to_string_lossy().as_bytes());
+    let mut visited = HashSet::<PathBuf>::new();
+    for destination_root in enabled_destinations {
+        let destination_root = fs::canonicalize(destination_root).with_context(|| {
+            "versioned::remove_source_history_with_commit could not resolve a destination"
+        })?;
+        if !visited.insert(destination_root.clone()) {
+            continue;
+        }
+
+        remove_generated_plaintext_view(&destination_root, source_path).with_context(|| {
+            "versioned::remove_source_history_with_commit could not remove the readable backup view"
+        })?;
+
+        let store_root = store_root(&destination_root);
+        let sources_root = sources_root(&store_root);
+        let source_root = sources_root.join(&source_id);
+        if source_root.exists() {
+            let metadata = fs::symlink_metadata(&source_root).with_context(|| {
+                "versioned::remove_source_history_with_commit could not inspect source history"
+            })?;
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                anyhow::bail!(
+                    "versioned::remove_source_history_with_commit refused an unsafe source history path"
+                );
+            }
+            fs::remove_dir_all(&source_root).with_context(|| {
+                "versioned::remove_source_history_with_commit could not delete source history"
+            })?;
+            if let Err(error) = sync_dir(&sources_root) {
+                tracing::warn!(
+                    path = %redact_path(&sources_root),
+                    error = %error,
+                    "versioned::remove_source_history_with_commit failed syncing sources directory"
+                );
+            }
+        }
+        gc_unreferenced_blobs(&store_root, &blobs_root(&store_root)).with_context(|| {
+            "versioned::remove_source_history_with_commit could not clean unreferenced backup data"
+        })?;
+    }
+
+    commit().context(
+        "versioned::remove_source_history_with_commit could not commit the protection change",
+    )
 }
 
 /** Provide a deterministic, cheap metric to detect suspicious mass deletions. */

@@ -1,3 +1,4 @@
+mod browse;
 pub mod model;
 pub(crate) mod operation_lock;
 pub mod replication;
@@ -14,12 +15,23 @@ pub use restore::{
 };
 pub use scrub::{scrub_versioned_store, ScrubMode, ScrubResult};
 pub use store::{
-    remove_kept_safety_version, run_backup_cycle, simulate_backup_cycle,
-    simulate_backup_cycle_with_sample_limit, BackupCycleResult, FolderBackupResult,
-    FolderDescriptor, SimulationSummary,
+    remove_kept_safety_version, remove_source_history_with_commit, run_backup_cycle,
+    simulate_backup_cycle, simulate_backup_cycle_with_sample_limit, BackupCycleResult,
+    FolderBackupResult, FolderDescriptor, SimulationSummary,
 };
 
 /// Callers outside the core store implementation should not re-encode store layout rules.
 pub fn store_root_path(destination_root: &std::path::Path) -> std::path::PathBuf {
     store::store_root(destination_root)
+}
+
+/// Resolve a source's committed version index without making callers duplicate store layout rules.
+pub fn version_index_path(
+    destination_root: &std::path::Path,
+    source_path: &std::path::Path,
+) -> std::path::PathBuf {
+    let source_id = crate::hashing::sha256_hex(source_path.to_string_lossy().as_bytes());
+    store::sources_root(&store::store_root(destination_root))
+        .join(source_id)
+        .join("index.json")
 }

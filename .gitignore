@@ -106,6 +106,7 @@ projects/
 *.pid
 
 # Tauri build artifacts
+crates/gui/binaries/daemon-*
 crates/gui/src-tauri/target/
 crates/gui/src-tauri/gen/
 crates/gui/gen/

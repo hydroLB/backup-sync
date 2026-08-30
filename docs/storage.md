@@ -1,13 +1,30 @@
 # Storage Model
 
-Last updated: 2026-08-23
+Last updated: 2026-08-27
 
 This project stores backups as versioned manifests that reference immutable file blobs by SHA-256.
 
 ## Layout
 
-Destination root:
+Opening a normal, unencrypted destination shows a human-readable view:
+
+- `<dest>/<source folder>/Latest/`
+  - The newest committed version as ordinary files and folders.
+- `<dest>/<source folder>/Previous Versions/<local timestamp>/`
+  - Each retained older version as its own ordinary file tree.
+
+These folders are app-managed, derived views. They are built in a staging directory, hash-verified,
+and renamed into place only when complete. They never hard-link to the authoritative blobs, so an
+edit to a readable copy cannot corrupt recovery data. Retention removes only directories carrying
+Backup Sync's hidden ownership marker; unrelated folders are left alone.
+
+The authoritative recovery store remains hidden at:
+
 - `<dest>/.backup_sync/v1/`
+
+When at-rest encryption is enabled, Backup Sync does **not** publish the decoded readable view,
+because doing so would leave a second plaintext copy beside the encrypted store. Encrypted versions
+remain browsable and restorable through the app.
 
 Within the store:
 - `operation.lock`

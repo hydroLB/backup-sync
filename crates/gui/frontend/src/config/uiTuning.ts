@@ -1,8 +1,8 @@
 /** Make UI behavior adjustments simple and consistent. */
 export const UI_TUNING = {
   planTooLargeCode: 'PLAN_TOO_LARGE',
-  statusRefreshMs: 10_000,
-  liveHealthRefreshMs: 20_000,
+  statusRefreshMs: 30_000,
+  liveHealthRefreshMs: 60_000,
   toastDismissMs: 4_000,
   lowSpaceThresholdBytes: 2 * 1024 * 1024 * 1024,
   resumeOnSpaceStorageKey: 'resume_on_space',

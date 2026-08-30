@@ -19,11 +19,16 @@ import { InlineAlert } from '../ui/InlineAlert';
 import { Button } from '../ui/Button';
 import { StateBlock } from '../ui/StateBlock';
 import { PendingStorageMove, StorageMoveModal } from './StorageMoveModal';
-import { relocateDestination } from '../../services/storage';
+import { openDestinationFolder, relocateDestination } from '../../services/storage';
 import { IS_WEB_RUNTIME } from '../../runtime/mode';
 import { StorageLocationPickerModal } from './StorageLocationPickerModal';
+import { listVersionFiles, listVersions } from '../../services/restore';
 
 type EventKind = 'ok' | 'error' | 'info';
+
+const DESKTOP_DOWNLOAD_URL =
+  import.meta.env.VITE_DESKTOP_DOWNLOAD_URL?.trim() ||
+  'https://github.com/hydroLB/backup-sync/releases/latest';
 
 /** Keep the primary UX compact while preserving operational controls. */
 export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKind) => void }) {
@@ -38,6 +43,9 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   const [safetyRemoveBusy, setSafetyRemoveBusy] = useState(false);
   const [pendingStorageMove, setPendingStorageMove] = useState<PendingStorageMove | null>(null);
   const [storageMoveBusy, setStorageMoveBusy] = useState(false);
+  const [backupInventory, setBackupInventory] = useState<
+    Record<string, { fileCount: number; versionCount: number }>
+  >({});
   const lastHardeningKeyRef = useRef<string | null>(null);
   const hardeningRunIdRef = useRef(0);
   const storagePickerResolverRef = useRef<((path: string | null) => void) | null>(null);
@@ -145,8 +153,14 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
     pickers,
     onEvent: emitEvent,
   });
-  const { liveSafeMode, setLiveSafeMode, destinationWarning, replicationWarning, safetyWarning } =
-    useMinimalStatus({ onEvent: emitEvent });
+  const {
+    status,
+    liveSafeMode,
+    setLiveSafeMode,
+    destinationWarning,
+    replicationWarning,
+    safetyWarning,
+  } = useMinimalStatus({ onEvent: emitEvent });
   const { runningBusy, setRunning: applyRunningState } = useMinimalRunning({
     cfg,
     setCfg,
@@ -156,7 +170,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
   const { destinationHealthWarning, watchedHealthWarning } = useMinimalLiveHealth({
     cfg,
     onEvent: emitEvent,
-    suspend: pickerBusyScope !== null,
+    suspend: pickerBusyScope !== null || hardeningBusy,
   });
 
   const requestStorageMove = useCallback(
@@ -166,25 +180,43 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         emitEvent('That storage location no longer exists.', 'error');
         return;
       }
-      const picked = await pickers.pickDestinationPath();
+      const picked = await pickers.pickDestinationPath(destination.path);
       if (!picked || picked === destination.path) return;
-      if (
-        destinations.some(
-          (candidate) => candidate.id !== destinationId && candidate.path === picked,
-        )
-      ) {
-        emitEvent('That storage location is already configured.', 'info');
+      const index = destinations.findIndex((candidate) => candidate.id === destinationId);
+      const existingIndex = destinations.findIndex(
+        (candidate) => candidate.id !== destinationId && candidate.path === picked,
+      );
+      if (existingIndex >= 0 && index !== 0) {
+        emitEvent('Only Main storage can switch with an existing secondary backup.', 'info');
         return;
       }
-      const index = destinations.findIndex((candidate) => candidate.id === destinationId);
       setPendingStorageMove({
         destinationId,
         label: index === 0 ? 'Main storage' : 'Secondary backup location',
         oldPath: destination.path,
         newPath: picked,
+        mode: existingIndex >= 0 ? 'promote' : 'move',
+        ...(existingIndex >= 0
+          ? { existingLabel: `Secondary backup location ${existingIndex}` }
+          : {}),
       });
     },
     [destinations, emitEvent, pickers],
+  );
+
+  const openStorageFolder = useCallback(
+    async (destinationId: string) => {
+      try {
+        const opened = await openDestinationFolder(destinationId);
+        if (!opened) {
+          emitEvent('The downloadable app opens this storage folder in Finder.', 'info');
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        emitEvent(`Could not open this storage folder: ${reason}`, 'error');
+      }
+    },
+    [emitEvent],
   );
 
   const confirmStorageMove = useCallback(async () => {
@@ -199,11 +231,16 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
       setCfg(result.config);
       setPendingStorageMove(null);
       if (result.warning) emitEvent(result.warning, 'info');
-      emitEvent(`${pendingStorageMove.label} moved safely to ${pendingStorageMove.newPath}.`, 'ok');
+      emitEvent(
+        pendingStorageMove.mode === 'promote'
+          ? `Main storage switched safely to ${pendingStorageMove.newPath}. The previous Main storage is still protected as a secondary backup.`
+          : `${pendingStorageMove.label} moved safely to ${pendingStorageMove.newPath}.`,
+        'ok',
+      );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       emitEvent(
-        `Storage move failed. The old backup location was kept unchanged: ${reason}`,
+        `Storage change failed. The previous storage configuration was kept unchanged: ${reason}`,
         'error',
       );
     } finally {
@@ -211,6 +248,62 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
       setBusy(false);
     }
   }, [emitEvent, pendingStorageMove, setBusy, setCfg]);
+
+  const backupInventoryConfigKey =
+    cfg === null
+      ? null
+      : JSON.stringify(
+          cfg.watched
+            .map((watched) => [watched.path, watched.kind ?? 'Directory'])
+            .sort(([left], [right]) => left!.localeCompare(right!)),
+        );
+
+  useEffect(() => {
+    if (backupInventoryConfigKey === null) {
+      setBackupInventory({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const catalog = await listVersions();
+        const uniqueFolders = new Map<string, (typeof catalog)[number]>();
+        for (const folder of catalog) {
+          const current = uniqueFolders.get(folder.source_path);
+          if (!current || folder.versions.length > current.versions.length) {
+            uniqueFolders.set(folder.source_path, folder);
+          }
+        }
+        const entries = await Promise.all(
+          [...uniqueFolders.values()].map(async (folder) => {
+            const latest = [...folder.versions].sort(
+              (left, right) => right.created_at_unix - left.created_at_unix,
+            )[0];
+            if (!latest) {
+              return [folder.source_path, { fileCount: 0, versionCount: 0 }] as const;
+            }
+            const files = await listVersionFiles({
+              source_path: folder.source_path,
+              version_id: latest.id,
+              limit: 1,
+            });
+            return [
+              folder.source_path,
+              { fileCount: files.total_files, versionCount: folder.versions.length },
+            ] as const;
+          }),
+        );
+        if (!cancelled) setBackupInventory(Object.fromEntries(entries));
+      } catch (error) {
+        if (cancelled) return;
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[MinimalMain::backupInventory] Could not read backup inventory: ${reason}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backupInventoryConfigKey, status?.last_run_ts]);
 
   const folderItems = useMemo(() => {
     const unique = new Map<
@@ -220,6 +313,8 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         kind: 'File' | 'Directory';
         destination_id: string;
         max_backups_per_file: number | null;
+        saved_file_count?: number;
+        saved_version_count?: number;
       }
     >();
     for (const watched of watchedItems) {
@@ -231,10 +326,58 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         kind,
         destination_id: watched.destination_id ?? primary?.id ?? 'default',
         max_backups_per_file: watched.max_backups_per_file ?? null,
+        ...(backupInventory[watched.path]
+          ? {
+              saved_file_count: backupInventory[watched.path]!.fileCount,
+              saved_version_count: backupInventory[watched.path]!.versionCount,
+            }
+          : {}),
       });
     }
     return [...unique.values()];
-  }, [primary?.id, watchedItems]);
+  }, [backupInventory, primary?.id, watchedItems]);
+  const sectionBalance = useMemo(() => {
+    const configuredDestinationCount = destinations.filter(
+      (destination) => destination.path.trim().length > 0,
+    ).length;
+    const foldersNeedScroll = folderItems.length > 2;
+    const destinationsNeedScroll = Math.ceil(configuredDestinationCount / 2) > 2;
+
+    if (foldersNeedScroll === destinationsNeedScroll) return 'balanced';
+    return foldersNeedScroll ? 'folders' : 'destinations';
+  }, [destinations, folderItems.length]);
+  const operationalWarnings = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            hardeningIssue,
+            watchedHealthWarning,
+            destinationWarning ?? destinationHealthWarning,
+            replicationWarning,
+          ].filter((message): message is string => !!message),
+        ),
+      ),
+    [
+      destinationHealthWarning,
+      destinationWarning,
+      hardeningIssue,
+      replicationWarning,
+      watchedHealthWarning,
+    ],
+  );
+  const warningStillApplies =
+    !safetyWarning?.watched_path ||
+    cfg?.watched.some((watched) => watched.path === safetyWarning.watched_path);
+  const visibleSafetyWarning =
+    safetyWarning &&
+    warningStillApplies &&
+    (dismissedSafetyWarningTs === null || safetyWarning.ts > dismissedSafetyWarningTs)
+      ? safetyWarning
+      : null;
+  const visibleInline = inline && !operationalWarnings.includes(inline.msg) ? inline : null;
+  const showFeedbackOverlay =
+    visibleInline !== null || operationalWarnings.length > 0 || visibleSafetyWarning !== null;
   useEffect(() => {
     if (!cfg) return;
     const fingerprint = hardeningFingerprint(cfg);
@@ -249,8 +392,13 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
 
     void (async () => {
       try {
-        // Full startup check: include snapshot capability probing so failures surface immediately.
-        const report = await hardeningCheck({ check_snapshots: true });
+        // Snapshot probing can create and mount a real filesystem snapshot. Only pay that cost
+        // when snapshot-backed scans are enabled; ordinary startup stays lightweight.
+        const snapshotsEnabled = cfg.runtime.source_snapshots_enabled === true;
+        const report = await hardeningCheck({
+          check_snapshots: snapshotsEnabled,
+          require_snapshots: snapshotsEnabled,
+        });
         if (hardeningRunIdRef.current !== runId) return;
         setHardeningOk(report.ok);
         if (report.ok) {
@@ -374,78 +522,96 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         onRunningChange={(running) => {
           void setRunning(running);
         }}
+        {...(IS_WEB_RUNTIME ? { downloadUrl: DESKTOP_DOWNLOAD_URL } : {})}
       />
 
-      {inline && (
-        <InlineAlert kind={inline.kind} className="feedback-banner">
-          <span>{inline.msg}</span>
-          <Button
-            type="button"
-            tone="secondary"
-            size="sm"
-            className="feedback-dismiss"
-            onClick={clearInline}
-          >
-            Dismiss
-          </Button>
-        </InlineAlert>
-      )}
-
-      {safetyWarning &&
-        (dismissedSafetyWarningTs === null || safetyWarning.ts > dismissedSafetyWarningTs) && (
-          <InlineAlert kind="warn" className="feedback-banner">
-            <span>{safetyWarning.message}</span>
-            <div className="feedback-actions">
-              <Button
-                type="button"
-                size="sm"
-                className="feedback-dismiss"
-                loading={safetyRemoveBusy}
-                loadingLabel="Removing…"
-                onClick={() => {
-                  const watchedPath = safetyWarning.watched_path;
-                  if (!watchedPath) {
-                    emitEvent('Safety warning missing path context.', 'error');
-                    return;
-                  }
-                  void runWithSaveScope('folders', async () => {
-                    try {
-                      setSafetyRemoveBusy(true);
-                      await removeKeptExtraVersion(watchedPath);
-                      setDismissedSafetyWarningTs(safetyWarning.ts);
-                      emitEvent('Saved.', 'ok');
-                    } catch (error) {
-                      const reason = error instanceof Error ? error.message : String(error);
-                      emitEvent(`Could not remove extra version: ${reason}`, 'error');
-                    } finally {
-                      setSafetyRemoveBusy(false);
-                    }
-                  });
-                }}
-              >
-                Remove extra version
-              </Button>
+      {showFeedbackOverlay && (
+        <div
+          className="feedback-overlay"
+          aria-label="Backup Sync notifications"
+          data-tauri-drag-region
+        >
+          {visibleInline && (
+            <InlineAlert kind={visibleInline.kind} className="feedback-banner" dragRegion>
+              <span data-tauri-drag-region>{visibleInline.msg}</span>
               <Button
                 type="button"
                 tone="secondary"
                 size="sm"
                 className="feedback-dismiss"
-                onClick={() => setDismissedSafetyWarningTs(safetyWarning.ts)}
+                onClick={clearInline}
               >
                 Dismiss
               </Button>
-            </div>
-          </InlineAlert>
-        )}
+            </InlineAlert>
+          )}
 
-      <div className="grid minimal-grid">
+          {operationalWarnings.map((message) => (
+            <InlineAlert
+              key={message}
+              kind="error"
+              className="feedback-banner feedback-banner--persistent"
+              dragRegion
+            >
+              <span data-tauri-drag-region>{message}</span>
+            </InlineAlert>
+          ))}
+
+          {visibleSafetyWarning && (
+            <InlineAlert kind="warn" className="feedback-banner" dragRegion>
+              <span data-tauri-drag-region>{visibleSafetyWarning.message}</span>
+              <div className="feedback-actions" data-tauri-drag-region>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="feedback-dismiss"
+                  loading={safetyRemoveBusy}
+                  loadingLabel="Removing…"
+                  onClick={() => {
+                    const watchedPath = visibleSafetyWarning.watched_path;
+                    if (!watchedPath) {
+                      emitEvent('Safety warning missing path context.', 'error');
+                      return;
+                    }
+                    void runWithSaveScope('folders', async () => {
+                      try {
+                        setSafetyRemoveBusy(true);
+                        await removeKeptExtraVersion(watchedPath);
+                        setDismissedSafetyWarningTs(visibleSafetyWarning.ts);
+                        emitEvent('Saved.', 'ok');
+                      } catch (error) {
+                        const reason = error instanceof Error ? error.message : String(error);
+                        emitEvent(`Could not remove extra version: ${reason}`, 'error');
+                      } finally {
+                        setSafetyRemoveBusy(false);
+                      }
+                    });
+                  }}
+                >
+                  Remove extra version
+                </Button>
+                <Button
+                  type="button"
+                  tone="secondary"
+                  size="sm"
+                  className="feedback-dismiss"
+                  onClick={() => setDismissedSafetyWarningTs(visibleSafetyWarning.ts)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </InlineAlert>
+          )}
+        </div>
+      )}
+
+      <div className="grid minimal-grid" data-section-balance={sectionBalance}>
         <FoldersCard
           busy={busy || pickerBusyScope === 'source'}
           items={folderItems}
           defaultKeep={cfg.max_backups_per_file}
           intervalSeconds={cfg.interval_seconds}
           updated={savePulseActive && savePulseScope === 'folders'}
-          watchedWarning={watchedHealthWarning}
           onAddFolder={() =>
             runWithSaveScope('folders', async () => {
               await addFolder();
@@ -476,14 +642,13 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         <DestinationCard
           destinations={destinations}
           busy={busy || pickerBusyScope === 'destination'}
-          destinationWarning={destinationWarning ?? destinationHealthWarning}
-          replicationWarning={replicationWarning}
           updated={savePulseActive && savePulseScope === 'destination'}
           onChoose={() =>
             runWithSaveScope('destination', async () => {
               await chooseDestination();
             })
           }
+          onOpenDestination={openStorageFolder}
           onChangeDestination={(destinationId) =>
             runWithSaveScope('none', async () => {
               await requestStorageMove(destinationId);

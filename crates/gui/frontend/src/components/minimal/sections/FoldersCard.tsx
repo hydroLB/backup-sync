@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { WatchedPath } from '../../../domain/config';
 import { Button } from '../../ui/Button';
-import { InlineAlert } from '../../ui/InlineAlert';
 import { StateBlock } from '../../ui/StateBlock';
+import { compactFilesystemPath } from '../../../utils/pathDisplay';
 
 type Item = {
   path: string;
   kind: 'File' | 'Directory';
   destination_id: string;
   max_backups_per_file: number | null;
+  saved_file_count?: number;
+  saved_version_count?: number;
 };
 
 type Props = {
@@ -17,7 +19,6 @@ type Props = {
   defaultKeep: number;
   intervalSeconds: number;
   updated: boolean;
-  watchedWarning: string | null;
   onAddFolder: () => Promise<void>;
   onChangePath: (path: string, kind: 'File' | 'Directory') => Promise<void>;
   onRemovePath: (
@@ -41,7 +42,6 @@ export function FoldersCard({
   defaultKeep,
   intervalSeconds,
   updated,
-  watchedWarning,
   onAddFolder,
   onChangePath,
   onRemovePath,
@@ -87,12 +87,6 @@ export function FoldersCard({
         </Button>
       </div>
 
-      {watchedWarning && (
-        <InlineAlert kind="error" className="mt-3">
-          {watchedWarning}
-        </InlineAlert>
-      )}
-
       {items.length === 0 ? (
         <StateBlock
           tone="empty"
@@ -115,6 +109,8 @@ export function FoldersCard({
               kind={item.kind}
               keep={item.max_backups_per_file ?? defaultKeep}
               intervalSeconds={intervalSeconds}
+              savedFileCount={item.saved_file_count}
+              savedVersionCount={item.saved_version_count}
               onChange={() => onChangePath(item.path, item.kind)}
               onRemove={() => onRemovePath(item.path, item.kind, item.destination_id)}
               onUpdateKeep={(keep) => onUpdateKeep(item.path, item.kind, item.destination_id, keep)}
@@ -133,6 +129,8 @@ type RowProps = {
   kind: 'File' | 'Directory';
   keep: number;
   intervalSeconds: number;
+  savedFileCount: number | undefined;
+  savedVersionCount: number | undefined;
   onChange: () => Promise<void>;
   onRemove: () => Promise<void>;
   onUpdateKeep: (keep: number) => Promise<void>;
@@ -145,6 +143,8 @@ function FolderRow({
   kind,
   keep,
   intervalSeconds,
+  savedFileCount,
+  savedVersionCount,
   onChange,
   onRemove,
   onUpdateKeep,
@@ -231,8 +231,18 @@ function FolderRow({
           >
             <span className="folder-kind">{kind === 'Directory' ? 'Folder' : 'File'}</span>
             <span className="folder-path truncate" title={path}>
-              {path}
+              {compactFilesystemPath(path, 1)}
             </span>
+            {savedFileCount !== undefined && (
+              <span
+                className={`folder-backup-state ${savedFileCount === 0 ? 'is-empty' : 'is-protected'}`}
+              >
+                <span className="folder-backup-state__dot" aria-hidden="true" />
+                {savedFileCount === 0
+                  ? 'No files backed up yet'
+                  : `${savedFileCount} ${savedFileCount === 1 ? 'file' : 'files'} · ${savedVersionCount ?? 0} saved ${(savedVersionCount ?? 0) === 1 ? 'version' : 'versions'}`}
+              </span>
+            )}
           </button>
           <div className="folder-row__keep">
             <span className="folder-row__keep-label">Backup settings</span>
@@ -242,14 +252,14 @@ function FolderRow({
                 <div
                   className="stepper"
                   role="group"
-                  aria-label={`Version retention controls for ${path}`}
+                  aria-label={`Restore point controls for ${path}`}
                 >
                   <button
                     className="btn secondary btn-sm stepper-btn"
                     type="button"
                     onClick={() => void saveKeep(Math.max(1, displayKeep - 1))}
                     disabled={busy || keepBusy || displayKeep <= 1}
-                    aria-label={`Keep fewer versions for ${path}`}
+                    aria-label={`Keep fewer restore points for ${path}`}
                   >
                     −
                   </button>
@@ -259,7 +269,7 @@ function FolderRow({
                     min={1}
                     max={1000}
                     value={displayKeep}
-                    aria-label={`Versions to keep for ${path}`}
+                    aria-label={`Restore points to keep for ${path}`}
                     onChange={(event) => {
                       const value = Number(event.target.value);
                       if (!Number.isFinite(value)) return;
@@ -272,12 +282,12 @@ function FolderRow({
                     type="button"
                     onClick={() => void saveKeep(Math.min(1000, displayKeep + 1))}
                     disabled={busy || keepBusy}
-                    aria-label={`Keep more versions for ${path}`}
+                    aria-label={`Keep more restore points for ${path}`}
                   >
                     +
                   </button>
                 </div>
-                <span>previous version{displayKeep === 1 ? '' : 's'}</span>
+                <span>restore point{displayKeep === 1 ? '' : 's'}</span>
               </div>
               <span className="folder-row__settings-divider" aria-hidden="true" />
               <label className="folder-row__cadence">
@@ -305,6 +315,9 @@ function FolderRow({
                 <span>min</span>
               </label>
             </div>
+            <span className="folder-row__retention-note">
+              One complete backup. New restore points save only changes—not full copies.
+            </span>
           </div>
           <button
             className="icon-remove"

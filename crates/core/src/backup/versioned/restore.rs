@@ -115,7 +115,7 @@ fn validate_content_hash(hash: &str, rel_path: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_manifest(manifest: &Manifest) -> Result<()> {
+pub(crate) fn validate_manifest(manifest: &Manifest) -> Result<()> {
     for (key, entry) in &manifest.entries {
         validate_relative_path(key)?;
         validate_relative_path(&entry.rel_path)?;
@@ -232,6 +232,75 @@ fn load_manifest_for_request(cfg: &Config, req: &RestoreRequest) -> Result<(Mani
     })?;
     validate_manifest(&manifest)?;
     Ok((manifest, store_root))
+}
+
+/// Build one committed version into an empty staging directory without taking a store lease.
+///
+/// This is intentionally crate-private: callers such as the human-readable backup view already
+/// hold the destination lease and must not deadlock by entering the public restore path again.
+/// The caller owns the final atomic rename of `stage_root`.
+pub(crate) fn build_version_tree_from_store(
+    cfg: &Config,
+    destination_root: &Path,
+    source_path: &Path,
+    version_id: &str,
+    stage_root: &Path,
+) -> Result<RestoreResult> {
+    validate_version_id(version_id)?;
+    if stage_root.exists() {
+        anyhow::bail!(
+            "versioned::build_version_tree_from_store staging directory already exists: {:?}",
+            stage_root
+        );
+    }
+
+    let managed_store = store_root(destination_root);
+    let source_id = hashing::sha256_hex(source_path.to_string_lossy().as_bytes());
+    let manifest_path = sources_root(&managed_store)
+        .join(source_id)
+        .join("manifests")
+        .join(format!("{version_id}.json"));
+    let raw = fs::read_to_string(&manifest_path).with_context(|| {
+        format!(
+            "versioned::build_version_tree_from_store failed to read manifest {:?}",
+            manifest_path
+        )
+    })?;
+    let manifest: Manifest = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "versioned::build_version_tree_from_store failed to parse manifest {:?}",
+            manifest_path
+        )
+    })?;
+    validate_manifest(&manifest)?;
+    if manifest.source_path != source_path.to_string_lossy() {
+        anyhow::bail!(
+            "versioned::build_version_tree_from_store manifest source does not match requested source"
+        );
+    }
+
+    let parent = stage_root
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "versioned::build_version_tree_from_store failed to create staging parent {:?}",
+            parent
+        )
+    })?;
+    let managed_blobs = blobs_root(&managed_store);
+    let (planned_files, _bytes) = preflight_restore(cfg, &manifest, &managed_blobs, parent)?;
+    let blob_codec = BlobCodec::from_config(cfg)
+        .context("versioned::build_version_tree_from_store failed to initialize blob codec")?;
+
+    build_restore_tree(
+        stage_root,
+        &manifest,
+        &planned_files,
+        &blob_codec,
+        cfg.hashing.timeout_seconds,
+    )
 }
 
 /// Preflight a restore by checking blob availability and free-space requirements.

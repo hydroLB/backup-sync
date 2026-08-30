@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { Config } from '../../domain/config';
-import { loadConfig, saveConfig } from '../config';
+import { loadConfig, saveConfig, saveConfigRemovingSource } from '../config';
 import { IpcError } from '../ipc';
 
 const { safeInvokeMock, safeInvokeWithTimeoutMock, wrapErrorMock, correlationIdMock } = vi.hoisted(
@@ -136,5 +136,28 @@ describe('config service', () => {
       '[saveConfig] Failed to save configuration: backend exploded',
     );
     expect(wrapErrorMock).toHaveBeenCalled();
+  });
+
+  it('uses the destructive native command when removing a protected source', async () => {
+    const cfg = buildConfig();
+    safeInvokeWithTimeoutMock.mockResolvedValue({
+      daemon_restarted: true,
+      daemon_restart_scheduled: false,
+      daemon_restart_warning: null,
+    });
+
+    await saveConfigRemovingSource(cfg, '/tmp/project', 'Directory');
+
+    expect(safeInvokeWithTimeoutMock).toHaveBeenCalledWith(
+      'remove_protected_path_cmd',
+      {
+        cfg,
+        sourcePath: '/tmp/project',
+        kind: 'Directory',
+        correlationId: 'save-cid-1',
+      },
+      30_000,
+    );
+    expect(correlationIdMock).toHaveBeenCalledWith('remove-protected-path');
   });
 });
