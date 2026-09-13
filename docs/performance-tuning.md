@@ -1,6 +1,6 @@
 # Performance and Resource Tuning
 
-Last updated: 2026-02-20
+Last updated: 2026-09-13
 
 This guide defines the performance guardrails and resource knobs used to keep backup cycles predictable.
 
@@ -13,6 +13,12 @@ This guide defines the performance guardrails and resource knobs used to keep ba
    - `make perf-check`
 
 `make perf-check` is wired into `make check` and CI.
+
+## Incremental workload baseline
+
+The incremental check includes the complete default backup cycle for 200 files of 4 KiB each, after one file changes. This includes publishing the readable `Latest` recovery folder introduced with the current backup experience. The previous 38 ms baseline predates that output and does not represent the same work.
+
+The updated incremental baseline is 121 ms, the median of three consecutive unoptimized Apple silicon/macOS measurements (121, 126, and 121 ms). The existing 1.5× regression limit, retry count, hashing baselines, and simulation baselines remain unchanged. Filesystem and host load affect these measurements; collect comparable runs and investigate workload changes before updating a baseline.
 
 ## Microbenchmark coverage
 The core benchmark suite (`crates/core/benches/core_hot_paths.rs`) currently tracks:

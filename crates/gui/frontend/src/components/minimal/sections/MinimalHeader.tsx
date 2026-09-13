@@ -18,14 +18,21 @@ export function MinimalHeader({
   const status = liveSafeMode === null ? 'Unavailable' : isOn ? 'On' : 'Off';
 
   return (
-    <header className="compact-header">
+    <header className={`compact-header${downloadUrl ? ' compact-header--browser' : ''}`}>
       <div className="compact-brand">
         <span className="compact-brand__mark" aria-hidden="true">
           <span />
         </span>
         <div>
           <h1>Backup Sync</h1>
-          <p>Automatic, versioned protection</p>
+          <p>
+            {downloadUrl ? 'Browser edition · sample workspace' : 'Automatic, versioned protection'}
+          </p>
+          {downloadUrl && (
+            <p>
+              Browser files and vaults stay here. Use the desktop app for background folder backups.
+            </p>
+          )}
         </div>
       </div>
       <div className="compact-header__actions">

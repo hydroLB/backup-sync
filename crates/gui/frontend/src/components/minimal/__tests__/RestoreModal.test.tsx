@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { listVersions, restoreVersion } from '../../../services/restore';
 import { RestoreModal } from '../RestoreModal';
 
@@ -58,8 +58,8 @@ describe('RestoreModal', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('lets the user keep newer recovery points', async () => {
-    render(<RestoreModal open onClose={vi.fn()} onEvent={vi.fn()} />);
+  it('keeps the completed recovery count when a parent refresh reloads the catalog', async () => {
+    const { rerender } = render(<RestoreModal open onClose={vi.fn()} onEvent={vi.fn()} />);
 
     fireEvent.click(
       await screen.findByRole('button', { name: /\/projects\/portfolio.*2 versions/i }),
@@ -72,5 +72,11 @@ describe('RestoreModal', () => {
     expect(restoreVersion).toHaveBeenCalledWith(
       expect.objectContaining({ keep_newer_versions: true }),
     );
+    expect(await screen.findByText('1 newer version kept')).toBeInTheDocument();
+    await act(async () => {
+      rerender(<RestoreModal open onClose={vi.fn()} onEvent={vi.fn()} />);
+    });
+    expect(listVersions).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('1 newer version kept')).toBeInTheDocument();
   });
 });

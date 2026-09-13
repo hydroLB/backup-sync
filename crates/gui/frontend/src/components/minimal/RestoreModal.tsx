@@ -28,12 +28,14 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
   const [keepNewerVersions, setKeepNewerVersions] = useState(false);
   const [result, setResult] = useState<RestoreResultDto | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recalledNewerVersionCount, setRecalledNewerVersionCount] = useState(0);
 
   useEffect(() => {
     if (!open) return;
     setStep('source');
     setKeepNewerVersions(false);
     setResult(null);
+    setRecalledNewerVersionCount(0);
   }, [open]);
 
   const selectedVersion = useMemo(
@@ -61,6 +63,7 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
         target_dir: null,
         keep_newer_versions: keepNewerVersions,
       });
+      setRecalledNewerVersionCount(newerVersionCount);
       setResult(result);
       setStep('complete');
       onEvent(
@@ -246,8 +249,8 @@ export function RestoreModal({ open, onClose, onEvent }: Props) {
             <span>Recovery history</span>
             <strong>
               {keepNewerVersions
-                ? `${newerVersionCount} newer version${newerVersionCount === 1 ? '' : 's'} kept`
-                : `${result.newer_versions_removed ?? newerVersionCount} newer version${(result.newer_versions_removed ?? newerVersionCount) === 1 ? '' : 's'} deleted`}
+                ? `${recalledNewerVersionCount} newer version${recalledNewerVersionCount === 1 ? '' : 's'} kept`
+                : `${result.newer_versions_removed ?? recalledNewerVersionCount} newer version${(result.newer_versions_removed ?? recalledNewerVersionCount) === 1 ? '' : 's'} deleted`}
             </strong>
           </div>
         </div>
