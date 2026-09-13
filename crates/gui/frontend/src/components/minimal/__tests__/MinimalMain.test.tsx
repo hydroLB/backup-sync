@@ -262,7 +262,7 @@ async function assertOnlyRestoreActionVisible(): Promise<void> {
     expect(screen.queryByText('How Backup Sync works')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Theme control/i)).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('link', { name: 'Download the full Backup Sync desktop app' }),
+      screen.queryByRole('link', { name: 'View Backup Sync desktop setup instructions' }),
     ).not.toBeInTheDocument();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

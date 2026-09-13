@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { MinimalHeader } from '../MinimalHeader';
 
 describe('MinimalHeader', () => {
-  it('renders the full-app download only when the website supplies a release URL', () => {
+  it('renders desktop setup only when the website supplies a project URL', () => {
     const { rerender } = render(
       <MinimalHeader
         liveSafeMode={false}
@@ -12,7 +12,7 @@ describe('MinimalHeader', () => {
       />,
     );
     expect(
-      screen.queryByRole('link', { name: 'Download the full Backup Sync desktop app' }),
+      screen.queryByRole('link', { name: 'View Backup Sync desktop setup instructions' }),
     ).not.toBeInTheDocument();
 
     rerender(
@@ -21,11 +21,11 @@ describe('MinimalHeader', () => {
         busy={false}
         runningBusy={false}
         onRunningChange={vi.fn()}
-        downloadUrl="https://example.test/Backup-Sync.dmg"
+        desktopUrl="https://example.test/backup-sync#quick-start"
       />,
     );
     expect(
-      screen.getByRole('link', { name: 'Download the full Backup Sync desktop app' }),
-    ).toHaveAttribute('href', 'https://example.test/Backup-Sync.dmg');
+      screen.getByRole('link', { name: 'View Backup Sync desktop setup instructions' }),
+    ).toHaveAttribute('href', 'https://example.test/backup-sync#quick-start');
   });
 });

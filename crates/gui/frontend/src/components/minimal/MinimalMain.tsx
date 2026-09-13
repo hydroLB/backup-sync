@@ -26,9 +26,9 @@ import { listVersionFiles, listVersions } from '../../services/restore';
 
 type EventKind = 'ok' | 'error' | 'info';
 
-const DESKTOP_DOWNLOAD_URL =
-  import.meta.env.VITE_DESKTOP_DOWNLOAD_URL?.trim() ||
-  'https://github.com/hydroLB/backup-sync/releases/latest';
+const DESKTOP_PROJECT_URL =
+  import.meta.env.VITE_DESKTOP_PROJECT_URL?.trim() ||
+  'https://github.com/hydroLB/backup-sync#quick-start';
 
 /** Keep the primary UX compact while preserving operational controls. */
 export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKind) => void }) {
@@ -522,7 +522,7 @@ export function MinimalMain({ onEvent }: { onEvent: (msg: string, kind?: EventKi
         onRunningChange={(running) => {
           void setRunning(running);
         }}
-        {...(IS_WEB_RUNTIME ? { downloadUrl: DESKTOP_DOWNLOAD_URL } : {})}
+        {...(IS_WEB_RUNTIME ? { desktopUrl: DESKTOP_PROJECT_URL } : {})}
       />
 
       {showFeedbackOverlay && (

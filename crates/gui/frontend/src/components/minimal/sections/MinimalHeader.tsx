@@ -3,7 +3,7 @@ type Props = {
   busy: boolean;
   runningBusy: boolean;
   onRunningChange: (running: boolean) => void;
-  downloadUrl?: string;
+  desktopUrl?: string;
 };
 
 /** Keep the only global control obvious: Backup Sync is either on or off. */
@@ -12,13 +12,13 @@ export function MinimalHeader({
   busy,
   runningBusy,
   onRunningChange,
-  downloadUrl,
+  desktopUrl,
 }: Props) {
   const isOn = liveSafeMode === false;
   const status = liveSafeMode === null ? 'Unavailable' : isOn ? 'On' : 'Off';
 
   return (
-    <header className={`compact-header${downloadUrl ? ' compact-header--browser' : ''}`}>
+    <header className={`compact-header${desktopUrl ? ' compact-header--browser' : ''}`}>
       <div className="compact-brand">
         <span className="compact-brand__mark" aria-hidden="true">
           <span />
@@ -26,9 +26,9 @@ export function MinimalHeader({
         <div>
           <h1>Backup Sync</h1>
           <p>
-            {downloadUrl ? 'Browser edition · sample workspace' : 'Automatic, versioned protection'}
+            {desktopUrl ? 'Browser edition · sample workspace' : 'Automatic, versioned protection'}
           </p>
-          {downloadUrl && (
+          {desktopUrl && (
             <p>
               Browser files and vaults stay here. Use the desktop app for background folder backups.
             </p>
@@ -36,16 +36,16 @@ export function MinimalHeader({
         </div>
       </div>
       <div className="compact-header__actions">
-        {downloadUrl && (
+        {desktopUrl && (
           <a
             className="website-download-button"
-            href={downloadUrl}
+            href={desktopUrl}
             target="_blank"
             rel="noreferrer"
-            aria-label="Download the full Backup Sync desktop app"
+            aria-label="View Backup Sync desktop setup instructions"
           >
-            <span aria-hidden="true">↓</span>
-            Download now
+            <span aria-hidden="true">↗</span>
+            Desktop setup
           </a>
         )}
         <div className="compact-power">
